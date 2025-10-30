@@ -1,0 +1,17 @@
+[package]
+name = "ucfp"
+version = "0.1.0"
+edition = "2024"
+description = "Universal Content Fingerprinting (UCFP) core library "
+license = "Apache-2.0"
+
+[dependencies]
+
+
+[dev-dependencies]
+
+
+[workspace]
+members = ["crates/ufp_canonical",
+    "crates/ufp_ingest"
+]
