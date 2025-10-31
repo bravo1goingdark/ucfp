@@ -1,5 +1,7 @@
 use chrono::Utc;
-use ufp_ingest::{CanonicalIngestRecord, IngestMetadata, IngestRequest, IngestSource, ingest};
+use ufp_ingest::{
+    CanonicalIngestRecord, IngestMetadata, IngestPayload, IngestRequest, IngestSource, ingest,
+};
 
 fn main() {
     let req = IngestRequest {
@@ -11,9 +13,11 @@ fn main() {
             original_source: None,
             attributes: None,
         }),
-        payload: Some("  Hello   world\nThis  is\tUC-FP  ".into()),
+        payload: Some(IngestPayload::Text(
+            "  Hello   world\nThis  is\tUC-FP  ".into(),
+        )),
     };
 
     let rec: CanonicalIngestRecord = ingest(req).unwrap();
-    println!("{:#?}", rec);
+    println!("{rec:#?}");
 }

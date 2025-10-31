@@ -1,7 +1,6 @@
-/// Ingest layer for text-based UCFP.
-/// Provides public API for receiving inputs, normalizing metadata, basic validation,
-/// and producing a canonical ingest record ready for canonicalizer.
-
+//! Ingest layer for text-based UCFP.
+//! Provides public API for receiving inputs, normalizing metadata, basic validation,
+//! and producing a canonical ingest record ready for canonicalizer.
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -12,7 +11,10 @@ use uuid::Uuid;
 pub enum IngestSource {
     RawText,
     Url(String),
-    File { filename: String, content_type: Option<String> },
+    File {
+        filename: String,
+        content_type: Option<String>,
+    },
     Api,
 }
 
@@ -33,9 +35,17 @@ pub struct IngestMetadata {
 pub struct IngestRequest {
     pub source: IngestSource,
     pub metadata: Option<IngestMetadata>,
-    /// The raw payload when available (for RawText/File). For Url, content may be fetched
-    /// by a higher-layer fetcher or pipeline.
-    pub payload: Option<String>,
+    /// Raw payload when available. Text and binary variants are supported to enable multi-modal handling.
+    pub payload: Option<IngestPayload>,
+}
+
+/// Raw payload content provided during ingest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum IngestPayload {
+    /// UTF-8 text payload for canonicalization.
+    Text(String),
+    /// Arbitrary binary payload (e.g., images, audio, PDFs) that will bypass text canonicalization.
+    Binary(Vec<u8>),
 }
 
 /// Normalized record produced by ingest. This is what the canonicalizer will accept.
@@ -47,10 +57,19 @@ pub struct CanonicalIngestRecord {
     pub received_at: DateTime<Utc>,
     pub original_source: Option<String>,
     pub source: IngestSource,
-    /// Normalized payload - trimmed and with normalized whitespace. Not yet canonicalized.
-    pub normalized_payload: Option<String>,
+    /// Normalized payload. Text inputs have whitespace collapsed; binary inputs pass through unchanged.
+    pub normalized_payload: Option<CanonicalPayload>,
     /// raw attributes JSON preserved
     pub attributes: Option<serde_json::Value>,
+}
+
+/// Normalized payload ready for downstream stages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CanonicalPayload {
+    /// Normalized UTF-8 text payload.
+    Text(String),
+    /// Binary payload preserved for downstream perceptual/semantic stages.
+    Binary(Vec<u8>),
 }
 
 #[derive(Error, Debug)]
@@ -65,7 +84,7 @@ pub enum IngestError {
 
 impl From<chrono::ParseError> for IngestError {
     fn from(e: chrono::ParseError) -> Self {
-        IngestError::Internal(format!("chrono error: {}", e))
+        IngestError::Internal(format!("chrono error: {e}"))
     }
 }
 
@@ -81,8 +100,17 @@ pub fn ingest(req: IngestRequest) -> Result<CanonicalIngestRecord, IngestError> 
 
     // Check payload requirements
     match &req.source {
-        IngestSource::RawText | IngestSource::File { .. } => {
-            if req.payload.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
+        IngestSource::RawText => match &req.payload {
+            Some(IngestPayload::Text(text)) if !text.trim().is_empty() => {}
+            _ => return Err(IngestError::MissingPayload),
+        },
+        IngestSource::File { .. } => {
+            let has_payload = match &req.payload {
+                Some(IngestPayload::Text(text)) => !text.trim().is_empty(),
+                Some(IngestPayload::Binary(bytes)) => !bytes.is_empty(),
+                None => false,
+            };
+            if !has_payload {
                 return Err(IngestError::MissingPayload);
             }
         }
@@ -95,7 +123,10 @@ pub fn ingest(req: IngestRequest) -> Result<CanonicalIngestRecord, IngestError> 
     }
 
     // Normalize payload if present.
-    let normalized_payload = req.payload.map(|p| normalize_whitespace(&p));
+    let normalized_payload = req.payload.map(|payload| match payload {
+        IngestPayload::Text(text) => CanonicalPayload::Text(normalize_whitespace(&text)),
+        IngestPayload::Binary(bytes) => CanonicalPayload::Binary(bytes),
+    });
 
     // Create UUID for this ingest run
     let id = Uuid::new_v4().to_string();
@@ -141,7 +172,14 @@ fn default_metadata() -> IngestMetadata {
 /// Keeps content deterministic across runs.
 fn normalize_whitespace(s: &str) -> String {
     // Simple, deterministic algorithm: split on Unicode whitespace and join with single space.
-    s.split_whitespace().collect::<Vec<&str>>().join(" ")
+    let mut normalized = String::with_capacity(s.len());
+    for segment in s.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(segment);
+    }
+    normalized
 }
 
 // -----------------------------
@@ -170,13 +208,16 @@ mod tests {
                 original_source: None,
                 attributes: None,
             }),
-            payload: Some(" Hello   world \n ".into()),
+            payload: Some(IngestPayload::Text(" Hello   world \n ".into())),
         };
 
         let rec = ingest(req).expect("ingest should succeed");
         assert_eq!(rec.tenant_id, "tenant1");
         assert_eq!(rec.doc_id, "doc-123");
-        assert_eq!(rec.normalized_payload.unwrap(), "Hello world");
+        match rec.normalized_payload {
+            Some(CanonicalPayload::Text(text)) => assert_eq!(text, "Hello world"),
+            _ => panic!("expected text payload"),
+        }
     }
 
     #[test]
@@ -190,11 +231,28 @@ mod tests {
                 original_source: None,
                 attributes: None,
             }),
-            payload: Some("   ".into()),
+            payload: Some(IngestPayload::Text("   ".into())),
         };
 
         let res = ingest(req);
         assert!(matches!(res, Err(IngestError::MissingPayload)));
     }
-}
 
+    #[test]
+    fn test_ingest_file_binary_payload() {
+        let req = IngestRequest {
+            source: IngestSource::File {
+                filename: "image.png".into(),
+                content_type: Some("image/png".into()),
+            },
+            metadata: None,
+            payload: Some(IngestPayload::Binary(vec![1, 2, 3, 4])),
+        };
+
+        let rec = ingest(req).expect("ingest should succeed");
+        match rec.normalized_payload {
+            Some(CanonicalPayload::Binary(bytes)) => assert_eq!(bytes, vec![1, 2, 3, 4]),
+            _ => panic!("expected binary payload"),
+        }
+    }
+}

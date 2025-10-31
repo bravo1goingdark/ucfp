@@ -1,5 +1,5 @@
 use std::fs;
-use ufp_canonical::{CanonicalizeConfig, canonicalize, CanonicalizedDocument};
+use ufp_canonical::{CanonicalizeConfig, CanonicalizedDocument, canonicalize};
 
 fn main() {
     let file_path = "crates/ufp_canonical/examples/big_text.txt";
@@ -9,7 +9,7 @@ fn main() {
         strip_punctuation: true,
         lowercase: true,
     };
-    let doc : CanonicalizedDocument = canonicalize(&content, &cfg);
+    let doc: CanonicalizedDocument = canonicalize(&content, &cfg);
     println!("canonical: {}", doc.canonical_text);
     println!();
     println!("tokens: {:?}", doc.tokens);

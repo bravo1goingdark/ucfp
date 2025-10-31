@@ -6,10 +6,13 @@ description = "Universal Content Fingerprinting (UCFP) core library "
 license = "Apache-2.0"
 
 [dependencies]
-
+ufp_canonical = { path = "crates/ufp_canonical" }
+ufp_ingest = { path = "crates/ufp_ingest" }
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
-
+chrono = { version = "0.4", features = ["serde"] }
 
 [workspace]
 members = ["crates/ufp_canonical",
