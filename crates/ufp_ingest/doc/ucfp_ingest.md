@@ -90,6 +90,13 @@ assert_eq!(
 );
 ```
 
+### Examples
+
+Run the binaries shipped with the crate for hands-on usage:
+
+- `cargo run --package ufp_ingest --example ingest_demo` - ingests a single text payload with deterministic metadata.
+- `cargo run --package ufp_ingest --example batch_ingest` - processes a mix of raw-text, URL, and binary fixtures to illustrate whitespace collapsing and binary passthrough.
+
 ## Testing
 
 Run unit tests with:

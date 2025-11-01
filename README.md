@@ -47,7 +47,9 @@ Run the examples:
 
 ```bash
 cargo run --package ufp_ingest --example ingest_demo
+cargo run --package ufp_ingest --example batch_ingest
 cargo run --package ufp_canonical --example demo
+cargo run --package ufp_canonical --example helpers
 ```
 
 ## API Highlights

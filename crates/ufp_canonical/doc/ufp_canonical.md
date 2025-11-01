@@ -57,6 +57,11 @@ assert_eq!(
 );
 ```
 
+### Examples
+
+- `cargo run --package ufp_canonical --example demo` - canonicalizes a larger document sourced from disk.
+- `cargo run --package ufp_canonical --example helpers` - demonstrates helper utilities (`collapse_whitespace`, `tokenize`, `hash_text`) alongside custom configuration.
+
 ## Testing
 
 Run unit tests with:
