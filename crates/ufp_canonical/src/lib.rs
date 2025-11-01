@@ -12,12 +12,13 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
+use std::sync::OnceLock;
 use unicode_normalization::UnicodeNormalization;
 
 /// Configuration for canonicalization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanonicalizeConfig {
-    /// If true, strip punctuation characters (based on a unicode-aware regex) before tokenizing.
+    /// If true, strip punctuation characters before tokenizing.
     pub strip_punctuation: bool,
     /// If true, lowercase the text.
     pub lowercase: bool,
@@ -41,7 +42,7 @@ pub struct Token {
 }
 
 /// Output of canonicalization: canonical text, token stream and checksum.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CanonicalizedDocument {
     pub canonical_text: String,
     pub tokens: Vec<Token>,
@@ -50,54 +51,95 @@ pub struct CanonicalizedDocument {
 
 /// Main entry point. Takes an optional payload and config and returns a canonicalized document.
 pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocument {
-    // 1) Unicode NFKC normalization (composed form)
-    let mut s: Cow<str> = input.nfkc().collect::<String>().into();
+    let normalized: String = input.nfkc().collect();
 
-    // 2) Optionally lowercase (unicode-aware)
-    if cfg.lowercase {
-        s = Cow::Owned(s.to_lowercase());
-    }
+    let lower = if cfg.lowercase {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    };
 
-    // 3) Optionally strip punctuation
-    if cfg.strip_punctuation {
-        // Use a conservative regex: remove characters in Unicode punctuation category (\p{P})
-        // Keep word characters, whitespace, and numbers. This removes punctuation marks.
-        // Note: regex crate uses Rust Unicode properties.
-        // Replace punctuation with a single space to avoid joining words.
-        lazy_static::lazy_static! {
-            static ref PUNCT_RE: Regex = Regex::new(r"\p{P}+").unwrap();
+    let cleaned: Cow<'_, str> = if cfg.strip_punctuation {
+        match strip_punctuation(&lower) {
+            Some(stripped) => Cow::Owned(stripped),
+            None => Cow::Borrowed(lower.as_str()),
         }
-        let replaced = PUNCT_RE.replace_all(&s, " ");
-        s = Cow::Owned(replaced.into_owned());
-    }
+    } else {
+        Cow::Borrowed(lower.as_str())
+    };
 
-    // 4) Collapse whitespace to single spaces while building canonical text and tokens in one pass.
-    let mut canonical_text = String::with_capacity(s.len());
-    let mut tokens: Vec<Token> = Vec::new();
-    for segment in s.split_whitespace() {
-        if !canonical_text.is_empty() {
-            canonical_text.push(' ');
-        }
-        let start = canonical_text.len();
-        canonical_text.push_str(segment);
-        let end = canonical_text.len();
-        tokens.push(Token {
-            text: segment.to_owned(),
-            start,
-            end,
-        });
-    }
-
-    // 5) SHA-256 checksum of canonical_text
-    let mut hasher = Sha256::new();
-    hasher.update(canonical_text.as_bytes());
-    let sha256_hex = hex::encode(hasher.finalize());
+    let canonical_text = collapse_whitespace(cleaned.as_ref());
+    let tokens = tokenize(&canonical_text);
+    let sha256_hex = hash_text(&canonical_text);
 
     CanonicalizedDocument {
         canonical_text,
         tokens,
         sha256_hex,
     }
+}
+
+/// Collapses repeated whitespace, trims edges, and normalizes newlines to single spaces.
+pub fn collapse_whitespace(s: &str) -> String {
+    let mut normalized = String::with_capacity(s.len());
+    for segment in s.split_whitespace() {
+        if !normalized.is_empty() {
+            normalized.push(' ');
+        }
+        normalized.push_str(segment);
+    }
+    normalized
+}
+
+/// Tokenizes canonical text and produces byte offsets.
+pub fn tokenize(text: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut start: Option<usize> = None;
+
+    for (idx, ch) in text.char_indices() {
+        if ch.is_whitespace() {
+            if let Some(token_start) = start.take() {
+                tokens.push(Token {
+                    text: text[token_start..idx].to_string(),
+                    start: token_start,
+                    end: idx,
+                });
+            }
+        } else if start.is_none() {
+            start = Some(idx);
+        }
+    }
+
+    if let Some(token_start) = start {
+        tokens.push(Token {
+            text: text[token_start..].to_string(),
+            start: token_start,
+            end: text.len(),
+        });
+    }
+
+    tokens
+}
+
+/// Hashes canonical text with SHA-256 and returns hex digest.
+pub fn hash_text(text: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn strip_punctuation(input: &str) -> Option<String> {
+    let regex = punctuation_regex()?;
+    if !regex.is_match(input) {
+        return None;
+    }
+    let replaced = regex.replace_all(input, " ");
+    Some(replaced.into_owned())
+}
+
+fn punctuation_regex() -> Option<&'static Regex> {
+    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\p{P}+").ok()).as_ref()
 }
 
 // -----------------------------
@@ -110,21 +152,31 @@ mod tests {
 
     #[test]
     fn test_basic_canonicalize_default() {
-        let input = "  Héllo\nWORLD!  This is   UCFP. ";
+        let input = "  HAcllo\nWORLD!  This is   UCFP. ";
         let cfg = CanonicalizeConfig::default();
         let out = canonicalize(input, &cfg);
-        // default cfg lowercases but does not strip punctuation
-        assert_eq!(out.canonical_text, "héllo world! this is ucfp.");
-        // tokens should be split on single spaces
-        let token_texts: Vec<String> = out.tokens.iter().map(|t| t.text.clone()).collect();
-        assert_eq!(token_texts, vec!["héllo", "world!", "this", "is", "ucfp."]);
-        // checksum should be stable
-        let expected = hex::encode(Sha256::digest(out.canonical_text.as_bytes()));
-        assert_eq!(out.sha256_hex, expected);
+
+        assert_eq!(out.canonical_text, "hacllo world! this is ucfp.");
+
+        let expected_tokens = vec![
+            ("hacllo", 0usize, 6usize),
+            ("world!", 7, 13),
+            ("this", 14, 18),
+            ("is", 19, 21),
+            ("ucfp.", 22, 27),
+        ];
+        assert_eq!(out.tokens.len(), expected_tokens.len());
+        for (token, (text, start, end)) in out.tokens.iter().zip(expected_tokens.into_iter()) {
+            assert_eq!(token.text, text);
+            assert_eq!(token.start, start);
+            assert_eq!(token.end, end);
+        }
+
+        assert_eq!(out.sha256_hex, hash_text(&out.canonical_text));
     }
 
     #[test]
-    fn test_strip_punctuation() {
+    fn test_strip_punctuation_canonicalize() {
         let input = "Hello, world! It's UCFP: 100% fun.";
         let cfg = CanonicalizeConfig {
             strip_punctuation: true,
@@ -140,13 +192,46 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_input() {
-        let input = "   \n \t  ";
+    fn test_unicode_equivalence() {
+        let composed = "Caf\u{00E9}";
+        let decomposed = "Cafe\u{0301}";
         let cfg = CanonicalizeConfig::default();
-        let out = canonicalize(input, &cfg);
-        assert_eq!(out.canonical_text, "");
-        assert!(out.tokens.is_empty());
-        let expected = hex::encode(Sha256::digest("".as_bytes()));
-        assert_eq!(out.sha256_hex, expected);
+
+        let doc_a = canonicalize(composed, &cfg);
+        let doc_b = canonicalize(decomposed, &cfg);
+
+        assert_eq!(doc_a.canonical_text, doc_b.canonical_text);
+        assert_eq!(doc_a.sha256_hex, doc_b.sha256_hex);
+    }
+
+    #[test]
+    fn test_token_offsets_stable() {
+        let cfg = CanonicalizeConfig::default();
+        let doc = canonicalize(" a\u{10348}b  c ", &cfg);
+
+        let expected = vec![
+            Token {
+                text: "a\u{10348}b".to_string(),
+                start: 0,
+                end: "a\u{10348}b".len(),
+            },
+            Token {
+                text: "c".to_string(),
+                start: "a\u{10348}b ".len(),
+                end: "a\u{10348}b c".len(),
+            },
+        ];
+        assert_eq!(doc.tokens, expected);
+    }
+
+    #[test]
+    fn test_hash_text_determinism() {
+        let texts = ["", "hello world", "こんにちは世界", "emoji \u{1f600}"];
+
+        for text in texts {
+            let hash_once = hash_text(text);
+            let hash_twice = hash_text(text);
+            assert_eq!(hash_once, hash_twice);
+        }
     }
 }

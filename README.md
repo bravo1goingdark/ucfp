@@ -1,24 +1,84 @@
-# 🧠 Universal Content Fingerprinting (UCFP)
+# Universal Content Fingerprinting (UCFP)
 
-**UCFP** is a **high-performance, multimodal content fingerprinting framework** built in **Rust**, designed to identify, deduplicate, and semantically match **text, images, audio, video, and documents** — even after transformation, re-encoding, or paraphrasing.
+UCFP is a Rust workspace that prepares text and binary payloads for the perceptual and indexing
+pipeline. The workspace currently ships two layers:
 
-It creates **multi-layer “universal fingerprints”** that combine:
-- 🔒 **Exact hashes (SHA-256)** — byte-level deduplication  
-- 🧩 **Perceptual hashes** — robust to edits, compression, or noise  
-- 🧠 **Semantic embeddings** — deep encoders (CLIP, SBERT, OpenL3) for content-aware similarity  
-- 🧱 **Structural & metadata signatures** — document layout, ASTs, media stats  
+- **`ufp_ingest`** - validates ingest metadata, normalizes payloads, and emits deterministic
+  `CanonicalIngestRecord` values.
+- **`ufp_canonical`** - canonicalizes normalized text into lowercase NFKC strings, token streams, and
+  SHA-256 hashes.
 
----
+The root crate exports both layers and offers `process_record`, a glue function that feeds a
+`RawIngestRecord` through ingest validation and canonicalization.
 
-## ✨ Key Features
+## Workspace Layout
 
-| Layer | Purpose | Example Implementation |
-|--------|----------|------------------------|
-| **Exact** | Detect byte-identical content | SHA-256 of canonical bytes |
-| **Perceptual** | Detect near-duplicates | pHash/dHash for images, landmarks for audio, MinHash for text |
-| **Semantic** | Detect paraphrased or cross-modal content | CLIP, SBERT, or OpenL3 embeddings |
-| **Structural/Metadata** | Contextual verification | Document layout, AST, duration, dominant colors |
+```
+crates/
+  ufp_ingest/
+    src/            # ingest validation and normalization
+    examples/       # ingest_demo.rs
+    notes/          # ucfp_ingest.md design notes
+  ufp_canonical/
+    src/            # canonicalization pipeline
+    examples/       # demo.rs
+    doc/            # ufp_canonical.md usage guide
+src/lib.rs          # workspace exports + process_record glue
+proto/              # draft schemas and diagrams
+```
 
+## Getting Started
 
+Verify the entire workspace:
 
+```bash
+cargo build --workspace
+cargo test --workspace --all-features
+```
 
+Linting and formatting gates:
+
+```bash
+cargo fmt --all
+cargo clippy --workspace --all-targets -D warnings
+```
+
+Run the examples:
+
+```bash
+cargo run --package ufp_ingest --example ingest_demo
+cargo run --package ufp_canonical --example demo
+```
+
+## API Highlights
+
+```rust
+use chrono::{Duration, Utc};
+use ucfp::{process_record, CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+
+let cfg = CanonicalizeConfig::default();
+let record = RawIngestRecord {
+    id: "ingest-1".into(),
+    source: IngestSource::RawText,
+    metadata: IngestMetadata {
+        tenant_id: "tenant".into(),
+        doc_id: "doc".into(),
+        received_at: Utc::UNIX_EPOCH + Duration::seconds(1_700_000_000),
+        original_source: None,
+        attributes: None,
+    },
+    payload: Some(IngestPayload::Text("  Hello   world  ".into())),
+};
+
+let doc = process_record(record, &cfg)?;
+assert_eq!(doc.canonical_text, "hello world");
+```
+
+`process_record` returns `PipelineError::NonTextPayload` when invoked on binary payloads and
+`PipelineError::Ingest(...)` when ingest validation fails.
+
+## Next Steps
+
+- Expand the ingest layer with additional metadata validation rules.
+- Feed canonicalized text into the perceptual layer for shingling and minhash.
+- Wire CI to enforce `cargo fmt`, `cargo clippy`, and the workspace test suite.
