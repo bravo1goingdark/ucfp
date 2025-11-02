@@ -8,11 +8,9 @@
 //! - Tokenization into tokens with byte offsets (UTF-8 byte offsets)
 //! - SHA-256 checksum of canonical text
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::borrow::Cow;
-use std::sync::OnceLock;
+use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
 
 /// Configuration for canonicalization.
@@ -51,26 +49,87 @@ pub struct CanonicalizedDocument {
 
 /// Main entry point. Takes an optional payload and config and returns a canonicalized document.
 pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocument {
-    let normalized: String = input.nfkc().collect();
+    let mut canonical_text = String::with_capacity(input.len());
+    let mut hasher = Sha256::new();
+    let mut tokens: Vec<Token> = Vec::new();
+    let mut pending_space = false;
+    let mut current_token_start: Option<usize> = None;
 
-    let lower = if cfg.lowercase {
-        normalized.to_lowercase()
-    } else {
-        normalized
-    };
-
-    let cleaned: Cow<'_, str> = if cfg.strip_punctuation {
-        match strip_punctuation(&lower) {
-            Some(stripped) => Cow::Owned(stripped),
-            None => Cow::Borrowed(lower.as_str()),
+    let push_char = |ch: char,
+                     canonical_text: &mut String,
+                     hasher: &mut Sha256,
+                     current_token_start: &mut Option<usize>,
+                     pending_space: &mut bool| {
+        if *pending_space {
+            canonical_text.push(' ');
+            hasher.update(b" ");
+            *pending_space = false;
+            *current_token_start = Some(canonical_text.len());
+        } else if current_token_start.is_none() {
+            *current_token_start = Some(canonical_text.len());
         }
-    } else {
-        Cow::Borrowed(lower.as_str())
+
+        let mut buf = [0u8; 4];
+        let encoded = ch.encode_utf8(&mut buf);
+        canonical_text.push_str(encoded);
+        hasher.update(encoded.as_bytes());
     };
 
-    let canonical_text = collapse_whitespace(cleaned.as_ref());
-    let tokens = tokenize(&canonical_text);
-    let sha256_hex = hash_text(&canonical_text);
+    let finalize_token = |tokens: &mut Vec<Token>,
+                          canonical_text: &String,
+                          current_token_start: &mut Option<usize>| {
+        if let Some(start) = current_token_start.take() {
+            let end = canonical_text.len();
+            tokens.push(Token {
+                text: canonical_text[start..end].to_string(),
+                start,
+                end,
+            });
+        }
+    };
+
+    for ch in input.nfkc() {
+        if cfg.lowercase {
+            for lower in ch.to_lowercase() {
+                let is_delim = lower.is_whitespace()
+                    || (cfg.strip_punctuation && lower.is_punctuation());
+                if is_delim {
+                    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
+                    if !canonical_text.is_empty() {
+                        pending_space = true;
+                    }
+                } else {
+                    push_char(
+                        lower,
+                        &mut canonical_text,
+                        &mut hasher,
+                        &mut current_token_start,
+                        &mut pending_space,
+                    );
+                }
+            }
+        } else {
+            let is_delim = ch.is_whitespace()
+                || (cfg.strip_punctuation && ch.is_punctuation());
+            if is_delim {
+                finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
+                if !canonical_text.is_empty() {
+                    pending_space = true;
+                }
+            } else {
+                push_char(
+                    ch,
+                    &mut canonical_text,
+                    &mut hasher,
+                    &mut current_token_start,
+                    &mut pending_space,
+                );
+            }
+        }
+    }
+
+    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
+    let sha256_hex = hex::encode(hasher.finalize());
 
     CanonicalizedDocument {
         canonical_text,
@@ -126,20 +185,6 @@ pub fn hash_text(text: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
     hex::encode(hasher.finalize())
-}
-
-fn strip_punctuation(input: &str) -> Option<String> {
-    let regex = punctuation_regex()?;
-    if !regex.is_match(input) {
-        return None;
-    }
-    let replaced = regex.replace_all(input, " ");
-    Some(replaced.into_owned())
-}
-
-fn punctuation_regex() -> Option<&'static Regex> {
-    static REGEX: OnceLock<Option<Regex>> = OnceLock::new();
-    REGEX.get_or_init(|| Regex::new(r"\p{P}+").ok()).as_ref()
 }
 
 // -----------------------------

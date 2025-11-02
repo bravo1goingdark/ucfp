@@ -8,11 +8,18 @@ license = "Apache-2.0"
 [dependencies]
 ufp_canonical = { path = "crates/ufp_canonical" }
 ufp_ingest = { path = "crates/ufp_ingest" }
+ufp_perceptual = { path = "crates/ufp_perceptual" }
+chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-chrono = { version = "0.4", features = ["serde"] }
+criterion = { version = "0.5" }
+
+[[bench]]
+name = "pipeline"
+harness = false
 
 [workspace]
 members = ["crates/ufp_canonical",
-    "crates/ufp_ingest"
+    "crates/ufp_ingest",
+    "crates/ufp_perceptual"
 ]
