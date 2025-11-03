@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UCFP Documentation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/styles/atom-one-dark.min.css">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body id="top">
+    <header class="topbar">
+        <div class="topbar__inner">
+            <span class="brand">UCFP Documentation</span>
+            <nav class="topbar__nav">
+                <a href="https://github.com/ucfp-project/ucfp" target="_blank" rel="noreferrer">Repository</a>
+                <a href="../README.md">README</a>
+            </nav>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside class="sidebar">
+            <div class="sidebar__title">Contents</div>
+            <nav class="nav" id="docs-nav">
+                <div class="nav__section">
+                    <h4>Overview</h4>
+                    <a class="nav__item" href="#introduction" data-section="introduction">Introduction</a>
+                    <a class="nav__item" href="#quickstart" data-section="quickstart">Quickstart</a>
+                </div>
+                <div class="nav__section">
+                    <h4>Ingest Layer</h4>
+                    <a class="nav__item" href="#ingest-overview" data-section="ingest-overview">Overview</a>
+                    <a class="nav__item" href="#ingest-data-model" data-section="ingest-data-model">Data Model</a>
+                    <a class="nav__item" href="#ingest-validation" data-section="ingest-validation">Validation Pipeline</a>
+                    <a class="nav__item" href="#ingest-examples" data-section="ingest-examples">Examples</a>
+                </div>
+                <div class="nav__section">
+                    <h4>Canonical Layer</h4>
+                    <a class="nav__item" href="#canonical-overview" data-section="canonical-overview">Overview</a>
+                    <a class="nav__item" href="#canonical-pipeline" data-section="canonical-pipeline">Pipeline Steps</a>
+                    <a class="nav__item" href="#canonical-helpers" data-section="canonical-helpers">Helper APIs</a>
+                    <a class="nav__item" href="#canonical-examples" data-section="canonical-examples">Examples</a>
+                </div>
+                <div class="nav__section">
+                    <h4>Perceptual Layer</h4>
+                    <a class="nav__item" href="#perceptual-overview" data-section="perceptual-overview">Overview</a>
+                    <a class="nav__item" href="#perceptual-pipeline" data-section="perceptual-pipeline">Fingerprinting Steps</a>
+                    <a class="nav__item" href="#perceptual-config" data-section="perceptual-config">Configuration</a>
+                    <a class="nav__item" href="#perceptual-examples" data-section="perceptual-examples">Examples</a>
+                </div>
+                <div class="nav__section">
+                    <h4>Integration</h4>
+                    <a class="nav__item" href="#integration-process" data-section="integration-process">Pipeline APIs</a>
+                    <a class="nav__item" href="#integration-roadmap" data-section="integration-roadmap">Roadmap</a>
+                </div>
+            </nav>
+        </aside>
+
+        <main class="content">
+            <div class="content__hero">
+                <p class="eyebrow">Universal Content Fingerprinting</p>
+                <h1>Deterministic ingest, canonical &amp; perceptual pipelines in Rust.</h1>
+                <p class="lede">
+                    Ship reliable fingerprinting primitives with ergonomic APIs. Explore the ingest validation layer,
+                    canonical text pipeline, perceptual fingerprinting, and the glue that binds them together&#8212;all in one place.
+                </p>
+                <div class="hero-actions">
+                    <a class="hero-actions__link" href="#quickstart">Start with the quickstart</a>
+                    <a class="hero-actions__link" href="#integration-process">Jump to integration</a>
+                </div>
+            </div>
+
+            <section id="introduction" class="section-block section-block--neutral">
+                <h2>Universal Content Fingerprinting (UCFP)</h2>
+                <p>
+                    UCFP is a Rust workspace that turns raw ingest payloads into deterministic text fingerprints.
+                    The workspace ships three cohesive crates:
+                </p>
+                <ul class="feature-list">
+                    <li><span class="badge badge--crate">ufp_ingest</span> validates metadata, normalizes payloads, and produces <span class="badge badge--struct">CanonicalIngestRecord</span> values.</li>
+                    <li><span class="badge badge--crate">ufp_canonical</span> canonicalizes normalized text into lowercase NFKC strings, token streams, and SHA-256 hashes.</li>
+                    <li><span class="badge badge--crate">ufp_perceptual</span> converts canonical token streams into shingles, applies winnowing, and produces MinHash signatures.</li>
+                </ul>
+                <p>
+                    This documentation mirrors the rustdoc experience: topics are organized on the left, and sections
+                    on the right explain how to assemble the pipeline end to end.
+                </p>
+            </section>
+
+            <section id="quickstart" class="section-block section-block--accent">
+                <h2 class="section-heading">Quickstart</h2>
+                <p>Build, test, and explore the workspace from the repository root:</p>
+<pre class="code-block" data-lang="bash"><code class="language-bash">cargo build --workspace
+  cargo test --workspace --all-features
+
+  cargo run --package ufp_ingest --example ingest_demo
+  cargo run --package ufp_canonical --example demo
+  cargo run --package ufp_perceptual --example fingerprint_demo
+  cargo run</code></pre>
+                <p>
+                    Each crate ships additional notes:
+                    <a class="badge badge--file" href="../crates/ufp_ingest/doc/ucfp_ingest.md">ufp_ingest/doc/ucfp_ingest.md</a>,
+                    <a class="badge badge--file" href="../crates/ufp_canonical/doc/ufp_canonical.md">ufp_canonical/doc/ufp_canonical.md</a>, and
+                    <a class="badge badge--file" href="../crates/ufp_perceptual/doc/ufp_perceptual.md">ufp_perceptual/doc/ufp_perceptual.md</a>.
+                </p>
+            </section>
+
+            <section id="ingest-overview" class="section-block section-block--panel">
+                <h2 class="section-heading">Ingest Layer (<code>ufp_ingest</code>)</h2>
+                <p>
+                    The ingest crate is the front door to the pipeline. It ensures every record has the metadata and payload
+                    needed for deterministic downstream processing.
+                </p>
+                <p class="callout">
+                    Reference: <span class="badge badge--file">crates/ufp_ingest/src/lib.rs</span> &
+                    <a class="badge badge--file" href="../crates/ufp_ingest/doc/ucfp_ingest.md">ucfp_ingest.md</a>
+                </p>
+            </section>
+
+            <section id="ingest-data-model" class="section-block section-block--soft">
+                <h3 class="section-subheading">Data Model</h3>
+                <p>
+                    The ingest layer models requests with strongly typed enums and structs to avoid ad-hoc JSON parsing:
+                </p>
+                <ul class="feature-list">
+                    <li><span class="badge badge--enum">IngestSource</span> distinguishes raw text, URLs, uploaded files, and API-sourced payloads.</li>
+                    <li><span class="badge badge--struct">IngestMetadata</span> carries tenant scoped identity, ingest document id, timestamps, and optional attributes.</li>
+                    <li><span class="badge badge--struct">RawIngestRecord</span> collects the request id, source, metadata, and optional payload (<span class="badge badge--enum">IngestPayload</span> supports text or binary).</li>
+                    <li><span class="badge badge--struct">CanonicalIngestRecord</span> mirrors the inbound record but replaces payload with <span class="badge badge--enum">CanonicalPayload</span> (normalized text or untouched binary).</li>
+                </ul>
+            </section>
+
+            <section id="ingest-validation" class="section-block section-block--panel">
+                <h3 class="section-subheading">Validation Pipeline</h3>
+                <p>
+                    <code>ingest(record)</code> performs the following steps:
+                </p>
+                <ol class="pipeline-list">
+                    <li>Validates identifiers — <span class="badge badge--field">id</span>, <span class="badge badge--field">tenant_id</span>, and <span class="badge badge--field">doc_id</span> must be non-empty.</li>
+                    <li>Ensures payload presence for <span class="badge badge--enum">RawText</span> and <span class="badge badge--enum">File</span> sources via <span class="badge badge--fn">ensure_payload</span>.</li>
+                    <li>Normalizes text payloads through <span class="badge badge--fn">normalize_payload</span> (collapses whitespace, trims edges).</li>
+                    <li>Re-emits binary payloads unchanged so perceptual layers can operate later.</li>
+                    <li>Returns <span class="badge badge--struct">CanonicalIngestRecord</span> or an <span class="badge badge--enum">IngestError</span> variant (<span class="badge badge--enum">MissingPayload</span>, <span class="badge badge--enum">InvalidMetadata</span>).</li>
+                </ol>
+                <p>
+                    Tests in <span class="badge badge--file">crates/ufp_ingest/src/lib.rs</span> cover whitespace handling, empty payload rejection, metadata preservation, and mixed payload support.
+                </p>
+            </section>
+
+            <section id="ingest-examples" class="section-block section-block--code">
+                <h3 class="section-subheading">Examples</h3>
+                <p>Run the provided examples to see ingest in action:</p>
+                <ul class="terminal-list">
+                    <li><span class="terminal-command">cargo run --package ufp_ingest --example ingest_demo</span> — single record ingest flow.</li>
+                    <li><span class="terminal-command">cargo run --package ufp_ingest --example batch_ingest</span> — demonstrates mixed text, URL, and binary records.</li>
+                </ul>
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use chrono::{DateTime, NaiveDate, Utc};
+use ufp_ingest::{ingest, CanonicalPayload, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+
+fn fixed_timestamp() -> DateTime<Utc> {
+    let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
+}
+
+let record = RawIngestRecord {
+    id: "ingest-1".into(),
+    source: IngestSource::RawText,
+    metadata: IngestMetadata {
+        tenant_id: "tenant".into(),
+        doc_id: "doc".into(),
+        received_at: fixed_timestamp(),
+        original_source: None,
+        attributes: None,
+    },
+    payload: Some(IngestPayload::Text("  Hello   world  ".into())),
+};
+
+let canonical = ingest(record)?;
+assert_eq!(
+    canonical.normalized_payload,
+    Some(CanonicalPayload::Text("Hello world".into()))
+);</code></pre>
+            </section>
+
+            <section id="canonical-overview" class="section-block section-block--panel">
+                <h2 class="section-heading">Canonical Layer (<code>ufp_canonical</code>)</h2>
+                <p>
+                    The canonical crate converts normalized text into an immutable representation that downstream services can hash,
+                    tokenize, and compare.
+                </p>
+                <p class="callout">
+                    Reference: <span class="badge badge--file">crates/ufp_canonical/src/lib.rs</span> &
+                    <a class="badge badge--file" href="../crates/ufp_canonical/doc/ufp_canonical.md">ufp_canonical.md</a>
+                </p>
+            </section>
+
+            <section id="canonical-pipeline" class="section-block section-block--soft">
+                <h3 class="section-subheading">Pipeline Steps</h3>
+                <p>
+                    <span class="badge badge--fn">canonicalize(input, cfg)</span> executes the canonical pipeline:
+                </p>
+                <ol>
+                    <li>Unicode NFKC normalization to harmonize decompositions (<span class="badge badge--example">Caf&eacute;</span> = <span class="badge badge--example">Cafe\u{0301}</span>).</li>
+                    <li>Optional lowercasing and punctuation stripping via <span class="badge badge--struct">CanonicalizeConfig</span>.</li>
+                    <li>Whitespace collapsing to single spaces with <span class="badge badge--fn">collapse_whitespace</span>.</li>
+                    <li>Tokenization using <span class="badge badge--fn">tokenize</span>, preserving UTF-8 byte offsets.</li>
+                    <li>SHA-256 hashing with <span class="badge badge--fn">hash_text</span>, returning the digest as a hex string.</li>
+                </ol>
+            </section>
+
+            <section id="canonical-helpers" class="section-block section-block--panel">
+                <h3 class="section-subheading">Helper APIs</h3>
+                <p>
+                    While <code>canonicalize</code> is the main entry point, helper functions expose individual steps for custom pipelines:
+                </p>
+                <ul class="feature-list">
+                    <li><span class="badge badge--fn">collapse_whitespace(text)</span> deterministic whitespace sanitizer shared with ingest.</li>
+                    <li><span class="badge badge--fn">tokenize(text)</span> returns <span class="badge badge--struct">Token</span> structs with <span class="badge badge--field">start</span>/<span class="badge badge--field">end</span> byte offsets.</li>
+                    <li><span class="badge badge--fn">hash_text(text)</span> SHA-256 helper used by canonicalize and available for reuse.</li>
+                </ul>
+            </section>
+
+            <section id="canonical-examples" class="section-block section-block--code">
+                <h3 class="section-subheading">Examples</h3>
+                <p>Example usage with optional punctuation stripping:</p>
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use ufp_canonical::{canonicalize, CanonicalizeConfig};
+
+let cfg = CanonicalizeConfig {
+    strip_punctuation: true,
+    ..Default::default()
+};
+
+let doc = canonicalize("Hello, WORLD!  This   is a test.", &cfg);
+assert_eq!(doc.canonical_text, "hello world this is a test");
+assert_eq!(
+    doc.tokens.iter().map(|t| &t.text).collect::<Vec<_>>(),
+    vec!["hello", "world", "this", "is", "a", "test"]
+);</code></pre>
+                <p>Try <code>cargo run --package ufp_canonical --example demo</code> or <code>helpers</code> to experiment with larger inputs.</p>
+            </section>
+
+            <section id="perceptual-overview" class="section-block section-block--panel">
+                <h2 class="section-heading">Perceptual Layer (<code>ufp_perceptual</code>)</h2>
+                <p>
+                    The perceptual crate turns canonical token streams into similarity-friendly fingerprints. It
+                    performs deterministic shingling, winnowing, and MinHash generation so near-duplicates share a large
+                    portion of their signature.
+                </p>
+                <p class="callout">
+                    Reference: <span class="badge badge--file">crates/ufp_perceptual/src/lib.rs</span> &
+                    <a class="badge badge--file" href="../crates/ufp_perceptual/doc/ufp_perceptual.md">ufp_perceptual.md</a>
+                </p>
+            </section>
+
+            <section id="perceptual-pipeline" class="section-block section-block--soft">
+                <h3 class="section-subheading">Fingerprinting Steps</h3>
+                <p><span class="badge badge--fn">perceptualize_tokens(tokens, cfg)</span> executes:</p>
+                <ol class="pipeline-list">
+                    <li><strong>Rolling shingles</strong> &mdash; hash contiguous windows of <code>k</code> tokens with a seeded rolling hash.</li>
+                    <li><strong>Winnowing</strong> &mdash; slide a window of size <code>w</code> and keep the rightmost minimum hash for stability.</li>
+                    <li><strong>MinHash</strong> &mdash; deduplicate hashes, then compute a signature of <code>bands * rows</code> values (parallel when configured).</li>
+                </ol>
+                <p>
+                    The result is a <span class="badge badge--struct">PerceptualFingerprint</span> containing all intermediate hashes plus metadata for reproducibility.
+                </p>
+            </section>
+
+            <section id="perceptual-config" class="section-block section-block--accent">
+                <h3 class="section-subheading">Configuration</h3>
+                <ul class="feature-list">
+                    <li><span class="badge badge--field">k</span> &mdash; tokens per shingle. Larger values capture longer phrases; defaults to 9.</li>
+                    <li><span class="badge badge--field">w</span> &mdash; winnowing window size. Smaller windows keep more minima; defaults to 4.</li>
+                    <li><span class="badge badge--field">minhash_bands</span> &amp; <span class="badge badge--field">minhash_rows_per_band</span> &mdash; define signature length (<code>bands × rows</code>); defaults to 16 &times; 8.</li>
+                    <li><span class="badge badge--field">seed</span> &mdash; master seed for rolling hash and MinHash permutations, ensuring reproducible fingerprints.</li>
+                    <li><span class="badge badge--field">use_parallel</span> &mdash; toggles Rayon-backed MinHash computation when true.</li>
+                </ul>
+                <p>Invalid settings (for example <code>k = 0</code>) surface as <span class="badge badge--enum">PerceptualError</span> variants.</p>
+            </section>
+
+            <section id="perceptual-examples" class="section-block section-block--code">
+                <h3 class="section-subheading">Examples</h3>
+                <p>Explore perceptual fingerprints with the bundled demo:</p>
+                <ul class="terminal-list">
+                    <li><span class="terminal-command">cargo run --package ufp_perceptual --example fingerprint_demo</span> &mdash; prints shingles, winnowed minima, and the MinHash signature.</li>
+                </ul>
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{process_record_with_perceptual, CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord};
+use chrono::{DateTime, NaiveDate, Utc};
+
+fn ts() -> DateTime<Utc> {
+    let date = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
+}
+
+let canonical_cfg = CanonicalizeConfig::default();
+let mut perceptual_cfg = PerceptualConfig::default();
+perceptual_cfg.k = 5;
+
+let record = RawIngestRecord {
+    id: "perceptual-demo".into(),
+    source: IngestSource::RawText,
+    metadata: IngestMetadata {
+        tenant_id: "tenant".into(),
+        doc_id: "doc".into(),
+        received_at: ts(),
+        original_source: None,
+        attributes: None,
+    },
+    payload: Some(IngestPayload::Text("The quick brown fox jumps over the lazy dog".into())),
+};
+
+let (_doc, fp) = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
+assert_eq!(fp.meta.k, 5);</code></pre>
+            </section>
+
+            <section id="integration-process" class="section-block section-block--panel">
+                <h2 class="section-heading">Workspace Integration</h2>
+                <p>
+                    The root crate re-exports all layers and exposes <span class="badge badge--fn">process_record</span> for ingest + canonical or <span class="badge badge--fn">process_record_with_perceptual</span> for the full pipeline.
+                </p>
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{process_record_with_perceptual, CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord};
+use chrono::{DateTime, NaiveDate, Utc};
+
+fn ts() -> DateTime<Utc> {
+    let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+    DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
+}
+
+let cfg = CanonicalizeConfig::default();
+let perceptual = PerceptualConfig::default();
+let record = RawIngestRecord {
+    id: "ingest-42".into(),
+    source: IngestSource::RawText,
+    metadata: IngestMetadata {
+        tenant_id: "tenant".into(),
+        doc_id: "doc".into(),
+        received_at: ts(),
+        original_source: None,
+        attributes: None,
+    },
+    payload: Some(IngestPayload::Text("  Hello   world  ".into())),
+};
+
+let (doc, fingerprint) = process_record_with_perceptual(record, &cfg, &perceptual)?;
+assert_eq!(doc.canonical_text, "hello world");
+assert_eq!(fingerprint.meta.minhash_len, perceptual.minhash_bands * perceptual.minhash_rows_per_band);</code></pre>
+                <p>
+                    Failures map to <span class="badge badge--enum">PipelineError</span> variants: ingest validation issues bubble up, binary payloads return
+                    <span class="badge badge--enum">PipelineError::NonTextPayload</span>, missing canonical payloads are surfaced explicitly, and perceptual misconfiguration yields <span class="badge badge--enum">PipelineError::Perceptual</span>.
+                </p>
+                <p>
+                    For a full demonstration, run <span class="terminal-command">cargo run</span> to process <code>crates/ufp_canonical/examples/big_text.txt</code> and print the resulting MinHash signature.
+                </p>
+            </section>
+
+            <section id="integration-roadmap" class="section-block section-block--soft">
+                <h2 class="section-heading">Roadmap</h2>
+                <ul>
+                    <li>Extend ingest metadata validation (length limits, schema-based checks, tenant policy hooks).</li>
+                    <li>Persist perceptual fingerprints for similarity search and clustering.</li>
+                    <li>Publish gRPC/REST schemas under <code>proto/</code> once the API stabilizes.</li>
+                    <li>Wire CI to enforce <code>cargo fmt</code>, <code>cargo clippy</code>, and workspace tests.</li>
+                </ul>
+            </section>
+
+            <footer class="footer">
+                <div class="footer__inner">
+                    <span>&copy; 2025 UCFP Project</span>
+                    <a href="#top" class="back-to-top">Back to top</a>
+                </div>
+            </footer>
+        </main>
+    </div>
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/languages/rust.min.js"></script>
+    <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/languages/bash.min.js"></script>
+    <script>hljs.highlightAll();</script>
+    <script src="script.js"></script>
+</body>
+</html>
+

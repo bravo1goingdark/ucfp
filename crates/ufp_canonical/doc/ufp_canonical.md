@@ -39,6 +39,21 @@ Helper functions are exposed for composition:
 - `tokenize(text)` - convert normalized text into offset-aware tokens
 - `hash_text(text)` - SHA-256 helper used by the pipeline
 
+## Public API
+
+```rust
+pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocument;
+pub fn collapse_whitespace(text: &str) -> String;
+pub fn tokenize(text: &str) -> Vec<Token>;
+pub fn hash_text(text: &str) -> String;
+```
+
+`canonicalize` returns a `CanonicalizedDocument` that contains the normalized text, byte-aware
+tokens, and a deterministic SHA-256 digest. `collapse_whitespace` enforces the one-space rule that
+keeps token boundaries stable across ingest sources. `tokenize` exposes the offset calculation logic
+for downstream consumers that need to align canonical text with original payloads, and `hash_text`
+produces the hex-encoded checksum used for deduplication and integrity checks.
+
 ## Example
 
 ```rust
