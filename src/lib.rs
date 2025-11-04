@@ -4,12 +4,12 @@
 //! callers can operate over text payloads with a single API entry point.
 
 pub use ufp_canonical::{
-    CanonicalizeConfig, CanonicalizedDocument, Token, canonicalize, collapse_whitespace, hash_text,
-    tokenize,
+    CanonicalError, CanonicalizeConfig, CanonicalizedDocument, Token, canonicalize,
+    collapse_whitespace, hash_text, tokenize,
 };
 pub use ufp_ingest::{
-    CanonicalIngestRecord, CanonicalPayload, IngestError, IngestMetadata, IngestPayload,
-    IngestSource, RawIngestRecord, ingest, normalize_payload,
+    CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestError, IngestMetadata,
+    IngestPayload, IngestSource, RawIngestRecord, ingest, normalize_payload,
 };
 pub use ufp_perceptual::{
     PerceptualConfig, PerceptualError, PerceptualFingerprint, perceptualize_tokens,
@@ -18,11 +18,14 @@ pub use ufp_perceptual::{
 use chrono::{DateTime, NaiveDate, Utc};
 use std::error::Error;
 use std::fmt;
+use std::sync::{Arc, OnceLock, RwLock};
+use std::time::{Duration, Instant};
 
 /// Errors that can occur while processing an ingest record through the pipeline.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PipelineError {
     Ingest(IngestError),
+    Canonical(CanonicalError),
     NonTextPayload,
     MissingCanonicalPayload,
     Perceptual(PerceptualError),
@@ -32,6 +35,7 @@ impl fmt::Display for PipelineError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PipelineError::Ingest(err) => write!(f, "ingest failure: {err}"),
+            PipelineError::Canonical(err) => write!(f, "canonicalization failure: {err}"),
             PipelineError::NonTextPayload => write!(f, "payload is not text; cannot canonicalize"),
             PipelineError::MissingCanonicalPayload => {
                 write!(f, "ingest succeeded without canonical payload")
@@ -45,6 +49,7 @@ impl Error for PipelineError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             PipelineError::Ingest(err) => Some(err),
+            PipelineError::Canonical(err) => Some(err),
             PipelineError::Perceptual(err) => Some(err),
             PipelineError::NonTextPayload | PipelineError::MissingCanonicalPayload => None,
         }
@@ -57,29 +62,119 @@ impl From<IngestError> for PipelineError {
     }
 }
 
+impl From<CanonicalError> for PipelineError {
+    fn from(value: CanonicalError) -> Self {
+        PipelineError::Canonical(value)
+    }
+}
+
 impl From<PerceptualError> for PipelineError {
     fn from(value: PerceptualError) -> Self {
         PipelineError::Perceptual(value)
     }
 }
 
-/// Process a raw ingest record end-to-end, returning a canonicalized document.
+/// Metrics observer for pipeline stages.
+pub trait PipelineMetrics: Send + Sync {
+    fn record_ingest(&self, latency: Duration, result: Result<(), IngestError>);
+    fn record_canonical(&self, latency: Duration, result: Result<(), PipelineError>);
+    fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>);
+}
+
+/// Install or clear the global pipeline metrics recorder.
+pub fn set_pipeline_metrics(recorder: Option<Arc<dyn PipelineMetrics>>) {
+    let lock = metrics_lock();
+    let mut guard = lock.write().expect("pipeline metrics lock poisoned");
+    *guard = recorder;
+}
+
+fn metrics_lock() -> &'static RwLock<Option<Arc<dyn PipelineMetrics>>> {
+    static METRICS: OnceLock<RwLock<Option<Arc<dyn PipelineMetrics>>>> = OnceLock::new();
+    METRICS.get_or_init(|| RwLock::new(None))
+}
+
+fn metrics_recorder() -> Option<Arc<dyn PipelineMetrics>> {
+    let guard = metrics_lock()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clone()
+}
+
+fn record_ingest_metrics(result: Result<(), IngestError>, latency: Duration) {
+    if let Some(recorder) = metrics_recorder() {
+        recorder.record_ingest(latency, result);
+    }
+}
+
+fn record_canonical_metrics(result: Result<(), PipelineError>, latency: Duration) {
+    if let Some(recorder) = metrics_recorder() {
+        recorder.record_canonical(latency, result);
+    }
+}
+
+fn record_perceptual_metrics(result: Result<(), PerceptualError>, latency: Duration) {
+    if let Some(recorder) = metrics_recorder() {
+        recorder.record_perceptual(latency, result);
+    }
+}
+
+/// Process a raw ingest record end-to-end with explicit configuration.
 /// Binary payloads produce a `PipelineError::NonTextPayload`.
+pub fn process_record_with_configs(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+) -> Result<CanonicalizedDocument, PipelineError> {
+    let ingest_start = Instant::now();
+    let canonical_record = match ingest(raw, ingest_cfg) {
+        Ok(record) => {
+            record_ingest_metrics(Ok(()), ingest_start.elapsed());
+            record
+        }
+        Err(err) => {
+            record_ingest_metrics(Err(err.clone()), ingest_start.elapsed());
+            return Err(PipelineError::Ingest(err));
+        }
+    };
+
+    let canonical_start = Instant::now();
+    let payload = match canonical_record.normalized_payload.as_ref() {
+        Some(payload) => payload,
+        None => {
+            let err = PipelineError::MissingCanonicalPayload;
+            record_canonical_metrics(Err(err.clone()), canonical_start.elapsed());
+            return Err(err);
+        }
+    };
+
+    match payload {
+        CanonicalPayload::Text(text) => {
+            match canonicalize(canonical_record.doc_id.as_str(), text, canonical_cfg) {
+                Ok(doc) => {
+                    record_canonical_metrics(Ok(()), canonical_start.elapsed());
+                    Ok(doc)
+                }
+                Err(err) => {
+                    let pipeline_err = PipelineError::Canonical(err.clone());
+                    record_canonical_metrics(Err(pipeline_err.clone()), canonical_start.elapsed());
+                    Err(pipeline_err)
+                }
+            }
+        }
+        CanonicalPayload::Binary(_) => {
+            let err = PipelineError::NonTextPayload;
+            record_canonical_metrics(Err(err.clone()), canonical_start.elapsed());
+            Err(err)
+        }
+    }
+}
+
+/// Process a raw ingest record end-to-end using default ingest configuration.
 pub fn process_record(
     raw: RawIngestRecord,
     cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, PipelineError> {
-    let canonical_record = ingest(raw)?;
-
-    let payload = canonical_record
-        .normalized_payload
-        .as_ref()
-        .ok_or(PipelineError::MissingCanonicalPayload)?;
-
-    match payload {
-        CanonicalPayload::Text(text) => Ok(canonicalize(text, cfg)),
-        CanonicalPayload::Binary(_) => Err(PipelineError::NonTextPayload),
-    }
+    process_record_with_configs(raw, &IngestConfig::default(), cfg)
 }
 
 /// Run ingest, canonicalization, and perceptual fingerprinting in order.
@@ -89,10 +184,61 @@ pub fn process_record_with_perceptual(
     canonical_cfg: &CanonicalizeConfig,
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    let doc = process_record(raw, canonical_cfg)?;
+    process_record_with_perceptual_configs(
+        raw,
+        &IngestConfig::default(),
+        canonical_cfg,
+        perceptual_cfg,
+    )
+}
+
+/// Pipeline helper that accepts explicit configuration for all stages.
+pub fn process_record_with_perceptual_configs(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    perceptual_cfg: &PerceptualConfig,
+) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
+    let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
+    let perceptual_start = Instant::now();
     let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
-    let fingerprint = perceptualize_tokens(&token_refs, perceptual_cfg)?;
-    Ok((doc, fingerprint))
+    match perceptualize_tokens(&token_refs, perceptual_cfg) {
+        Ok(fp) => {
+            record_perceptual_metrics(Ok(()), perceptual_start.elapsed());
+            Ok((doc, fp))
+        }
+        Err(err) => {
+            record_perceptual_metrics(Err(err.clone()), perceptual_start.elapsed());
+            Err(PipelineError::Perceptual(err))
+        }
+    }
+}
+
+/// Convenience helper that returns only the fingerprint using default ingest/canonical configs.
+pub fn process_document(
+    raw: RawIngestRecord,
+    perceptual_cfg: &PerceptualConfig,
+) -> Result<PerceptualFingerprint, PipelineError> {
+    let canonical_cfg = CanonicalizeConfig::default();
+    let (_, fp) = process_record_with_perceptual_configs(
+        raw,
+        &IngestConfig::default(),
+        &canonical_cfg,
+        perceptual_cfg,
+    )?;
+    Ok(fp)
+}
+
+/// Fingerprint helper that accepts configuration for all pipeline stages.
+pub fn process_document_with_configs(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    perceptual_cfg: &PerceptualConfig,
+) -> Result<PerceptualFingerprint, PipelineError> {
+    let (_, fp) =
+        process_record_with_perceptual_configs(raw, ingest_cfg, canonical_cfg, perceptual_cfg)?;
+    Ok(fp)
 }
 
 fn demo_timestamp() -> DateTime<Utc> {
@@ -116,9 +262,9 @@ pub fn big_text_demo(
         id: "demo-big-text".into(),
         source: IngestSource::RawText,
         metadata: IngestMetadata {
-            tenant_id: "ucfp-demo".into(),
-            doc_id: "big-text".into(),
-            received_at: demo_timestamp(),
+            tenant_id: Some("ucfp-demo".into()),
+            doc_id: Some("big-text".into()),
+            received_at: Some(demo_timestamp()),
             original_source: Some("crates/ufp_canonical/examples/big_text.txt".into()),
             attributes: None,
         },
@@ -131,15 +277,17 @@ pub fn big_text_demo(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, RwLock};
+    use std::time::Duration;
 
     fn base_record(payload: IngestPayload) -> RawIngestRecord {
         RawIngestRecord {
             id: "ingest-1".into(),
             source: IngestSource::RawText,
             metadata: IngestMetadata {
-                tenant_id: "tenant".into(),
-                doc_id: "doc".into(),
-                received_at: demo_timestamp(),
+                tenant_id: Some("tenant".into()),
+                doc_id: Some("doc".into()),
+                received_at: Some(demo_timestamp()),
                 original_source: Some("origin".into()),
                 attributes: None,
             },
@@ -157,6 +305,7 @@ mod tests {
         assert_eq!(doc.tokens.len(), 2);
         assert_eq!(doc.tokens[0].text, "hello");
         assert_eq!(doc.tokens[1].text, "rust");
+        assert_eq!(doc.doc_id, "doc");
     }
 
     #[test]
@@ -169,9 +318,9 @@ mod tests {
                 content_type: None,
             },
             metadata: IngestMetadata {
-                tenant_id: "tenant".into(),
-                doc_id: "doc".into(),
-                received_at: demo_timestamp(),
+                tenant_id: Some("tenant".into()),
+                doc_id: Some("doc".into()),
+                received_at: Some(demo_timestamp()),
                 original_source: None,
                 attributes: None,
             },
@@ -189,9 +338,9 @@ mod tests {
             id: "ingest-empty".into(),
             source: IngestSource::RawText,
             metadata: IngestMetadata {
-                tenant_id: "tenant".into(),
-                doc_id: "doc".into(),
-                received_at: demo_timestamp(),
+                tenant_id: Some("tenant".into()),
+                doc_id: Some("doc".into()),
+                received_at: Some(demo_timestamp()),
                 original_source: None,
                 attributes: None,
             },
@@ -201,7 +350,7 @@ mod tests {
         let result = process_record(record, &cfg);
         assert!(matches!(
             result,
-            Err(PipelineError::Ingest(IngestError::MissingPayload))
+            Err(PipelineError::Ingest(IngestError::EmptyNormalizedText))
         ));
     }
 
@@ -221,8 +370,10 @@ mod tests {
     #[test]
     fn process_record_with_perceptual_produces_fingerprint() {
         let canonical_cfg = CanonicalizeConfig::default();
-        let mut perceptual_cfg = PerceptualConfig::default();
-        perceptual_cfg.k = 3; // ensure tokens >= k for the short input
+        let perceptual_cfg = PerceptualConfig {
+            k: 3, // ensure tokens >= k for the short input
+            ..Default::default()
+        };
         let record = base_record(IngestPayload::Text(
             "The quick brown fox jumps over the lazy dog".into(),
         ));
@@ -235,11 +386,75 @@ mod tests {
         assert_eq!(fp.meta.k, 3);
     }
 
+    #[derive(Default)]
+    struct CountingMetrics {
+        events: Arc<RwLock<Vec<&'static str>>>,
+    }
+
+    impl CountingMetrics {
+        fn new() -> Self {
+            Self {
+                events: Arc::new(RwLock::new(Vec::new())),
+            }
+        }
+
+        fn snapshot(&self) -> Vec<&'static str> {
+            self.events.read().unwrap().clone()
+        }
+    }
+
+    impl PipelineMetrics for CountingMetrics {
+        fn record_ingest(&self, _latency: Duration, result: Result<(), IngestError>) {
+            let label = if result.is_ok() {
+                "ingest_ok"
+            } else {
+                "ingest_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
+
+        fn record_canonical(&self, _latency: Duration, result: Result<(), PipelineError>) {
+            let label = if result.is_ok() {
+                "canonical_ok"
+            } else {
+                "canonical_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
+
+        fn record_perceptual(&self, _latency: Duration, result: Result<(), PerceptualError>) {
+            let label = if result.is_ok() {
+                "perceptual_ok"
+            } else {
+                "perceptual_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
+    }
+
     #[test]
-    fn big_text_demo_runs_full_pipeline() {
-        let mut cfg = PerceptualConfig::default();
-        cfg.use_parallel = false;
-        let (_doc, fp) = big_text_demo(&cfg).expect("demo pipeline should succeed");
-        assert!(!fp.minhash.is_empty());
+    fn metrics_recorder_tracks_pipeline_outcome() {
+        let metrics = Arc::new(CountingMetrics::new());
+        set_pipeline_metrics(Some(metrics.clone()));
+
+        let canonical_cfg = CanonicalizeConfig::default();
+        let perceptual_cfg = PerceptualConfig {
+            k: 2,
+            ..Default::default()
+        };
+        let record = base_record(IngestPayload::Text(
+            "This is a metrics validation payload".into(),
+        ));
+
+        let result = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+
+        assert!(result.is_ok());
+
+        let events = metrics.snapshot();
+        assert!(events.contains(&"ingest_ok"));
+        assert!(events.contains(&"canonical_ok"));
+        assert!(events.contains(&"perceptual_ok"));
+
+        set_pipeline_metrics(None);
     }
 }

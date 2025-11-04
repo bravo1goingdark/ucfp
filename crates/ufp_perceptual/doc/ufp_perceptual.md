@@ -2,20 +2,19 @@
 
 ## Purpose
 
-`ufp_perceptual` converts canonicalized token streams into perceptual fingerprints that remain
-stable across minor text edits. The library provides three deterministic stages:
+`ufp_perceptual` transforms canonicalized token streams into perceptual fingerprints that remain stable across small textual edits. The pipeline is deterministic and consists of three stages:
 
-1. rolling-hash shingles from contiguous token windows
-2. winnowing to keep the rightmost minimum hash per window
-3. MinHash signatures for locality-sensitive similarity
+1. rolling-hash shingles built from contiguous token windows
+2. winnowing to retain rightmost minimum hashes per window
+3. MinHash signatures that enable locality-sensitive similarity search
 
-All behavior is driven by `PerceptualConfig`, including shingle length, winnow window size, seed,
-and whether to use parallel MinHash computation.
+All behavior is configured at runtime through `PerceptualConfig` (no Cargo features required).
 
 ## Key Types
 
 ```rust
 pub struct PerceptualConfig {
+    pub version: u32,
     pub k: usize,
     pub w: usize,
     pub minhash_bands: usize,
@@ -40,47 +39,43 @@ pub struct PerceptualMeta {
     pub k: usize,
     pub w: usize,
     pub minhash_len: usize,
+    pub minhash_bands: usize,
+    pub minhash_rows_per_band: usize,
     pub seed: u64,
     pub use_parallel: bool,
+    pub config_version: u32,
 }
 ```
 
-Errors surface through `PerceptualError`, which guards invalid configuration (`k == 0`) and ensures
-an adequate number of tokens.
+`PerceptualError` captures invalid configuration (zero/overflowing parameters, unsupported version) and situations where the token stream is too short (`NotEnoughTokens`).
 
 ## Public API
 
 ```rust
-pub fn perceptualize_tokens(
-    tokens: &[String],
+pub fn perceptualize_tokens<T: AsRef<str>>(
+    tokens: &[T],
     cfg: &PerceptualConfig,
 ) -> Result<PerceptualFingerprint, PerceptualError>;
 
-pub fn make_shingles_rolling(tokens: &[String], k: usize, seed: u64) -> Vec<u64>;
+pub fn make_shingles_rolling<T: AsRef<str>>(tokens: &[T], k: usize, seed: u64) -> Vec<u64>;
 pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle>;
 pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConfig) -> Vec<u64>;
 ```
 
-- `perceptualize_tokens` drives the full shingle â†’ winnow â†’ MinHash pipeline.
-- `make_shingles_rolling` exposes the deterministic rolling hash builder, enabling callers to plug
-  in alternate winnowing strategies.
-- `winnow_minq` implements a monotonic deque with rightmost tie-breaking, ensuring consistent minima.
-- `minhash_signature` supports runtime parallelism via Rayon when `cfg.use_parallel` is true.
+- `perceptualize_tokens` drives the full shingle -> winnow -> MinHash pipeline.
+- `make_shingles_rolling` exposes the deterministic rolling hash, allowing custom winnowing strategies.
+- `winnow_minq` implements a monotonic deque with rightmost tie-breaking for consistent minima.
+- `minhash_signature` supports optional Rayon-backed parallelism when `cfg.use_parallel` is `true`.
 
 ### Configuration Fields
 
-- `k` â€” Number of tokens per shingle window. Larger values capture longer phrases while reducing the
-  number of shingles; defaults to 9.
-- `w` â€” Winnowing window size used to select representative shingles. Smaller windows retain more
-  fingerprints; defaults to 4.
-- `minhash_bands` â€” Number of MinHash bands (groups) in the signature. Together with
-  `minhash_rows_per_band` this defines signature length and collision behavior; defaults to 16.
-- `minhash_rows_per_band` â€” Rows per band. The final MinHash length is `minhash_bands *
-  minhash_rows_per_band`; defaults to 8 (128 total values).
-- `seed` â€” Master seed feeding the rolling hash and MinHash permutations for determinism. Changing
-  the seed yields different but stable fingerprints.
-- `use_parallel` â€” Enables Rayon-backed parallel MinHash computation when `true`. Keep it `false`
-  for single-threaded environments or deterministic ordering preferences.
+- `version` — Semantic version of the configuration; must be >= 1.
+- `k` — Tokens per shingle window. Larger values capture longer phrases while reducing the number of shingles; defaults to 9.
+- `w` — Winnowing window size. Smaller windows retain more fingerprints; defaults to 4.
+- `minhash_bands` — Number of MinHash bands. Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
+- `minhash_rows_per_band` — Rows per band. Defaults to 8, producing 128 MinHash values with the default band count.
+- `seed` — Master seed feeding both rolling hash and MinHash permutations for deterministic output.
+- `use_parallel` — Enables Rayon-backed parallel MinHash computation when `true`.
 
 ## Example
 
@@ -88,42 +83,37 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
 use ufp_canonical::{canonicalize, CanonicalizeConfig};
 use ufp_perceptual::{perceptualize_tokens, PerceptualConfig};
 
-let canonical = canonicalize("Hello   perceptual world", &CanonicalizeConfig::default());
+let canonical = canonicalize(
+    "demo-doc",
+    "Hello   perceptual world",
+    &CanonicalizeConfig::default(),
+).expect("canonicalization succeeds");
 let tokens: Vec<String> = canonical.tokens.iter().map(|t| t.text.clone()).collect();
 
-let cfg = PerceptualConfig {
-    k: 5,
-    w: 4,
-    minhash_bands: 16,
-    minhash_rows_per_band: 8,
-    seed: 0x5EED,
-    use_parallel: false,
-};
+let mut cfg = PerceptualConfig::default();
+cfg.k = 2; // ensure enough tokens for the example
+cfg.use_parallel = false;
 
-let fp = perceptualize_tokens(&tokens, &cfg)?;
-assert_eq!(fp.meta.k, 5);
-assert_eq!(fp.meta.use_parallel, false);
+let fingerprint = perceptualize_tokens(&tokens, &cfg)?;
+assert_eq!(fingerprint.meta.k, 2);
+assert_eq!(fingerprint.meta.use_parallel, false);
 ```
 
 ### Examples
 
-- `cargo run --package ufp_perceptual --example fingerprint_demo` - prints shingles, winnowed
-  selections, and MinHash for a sample sentence.
+- `cargo run --package ufp_perceptual --example fingerprint_demo` — prints shingles, winnowed selections, and MinHash output for a sample sentence.
 
 ## Testing
-
-Run unit tests with:
 
 ```bash
 cargo test -p ufp_perceptual
 ```
 
-Tests assert deterministic signatures, parity between parallel and sequential MinHash execution, and
-the rolling hash arithmetic.
+Unit tests cover determinism, parallel vs sequential parity, invalid configuration guards, and rolling-hash arithmetic.
 
 ## Integration
 
-`PerceptualFingerprint` is the third step in the UCFP pipeline. After ingest normalization
-(`ufp_ingest`) and canonicalization (`ufp_canonical`), pass the canonical tokens into
-`perceptualize_tokens` to generate similarity-aware fingerprints suitable for clustering,
-deduplication, or indexing.
+`PerceptualFingerprint` is the third step in the UCFP pipeline. After ingest normalization (`ufp_ingest`) and canonicalization (`ufp_canonical`), pass canonical tokens into `perceptualize_tokens` to obtain similarity-aware fingerprints for clustering, deduplication, or indexing.
+
+
+

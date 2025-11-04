@@ -11,20 +11,21 @@ fn main() {
 
     let cfg = CanonicalizeConfig {
         strip_punctuation: true,
-        lowercase: true,
+        ..Default::default()
     };
 
     let CanonicalizedDocument {
+        doc_id: _,
         canonical_text,
-        tokens,
+        tokens: _tokens,
         sha256_hex,
-    } = canonicalize(&collapsed, &cfg);
+    } = canonicalize("demo-helper", &collapsed, &cfg).expect("canonicalization succeeds");
 
     println!("canonical text -> \"{canonical_text}\"");
     println!("sha256 -> {sha256_hex}");
 
     let helper_tokens = tokenize(&canonical_text);
-    println!("tokens via helper -> {:?}", helper_tokens);
+    println!("tokens via helper -> {helper_tokens:?}");
 
     let checksum_again = hash_text(&canonical_text);
     println!("hash_text helper -> {checksum_again}");

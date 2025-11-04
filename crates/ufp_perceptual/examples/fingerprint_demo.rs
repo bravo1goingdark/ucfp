@@ -8,13 +8,19 @@ fn main() {
     let text = "The quick brown fox jumps over the lazy dog";
     let tokens: Vec<String> = text.split_whitespace().map(|t| t.to_string()).collect();
 
-    let mut cfg = PerceptualConfig::default();
-    cfg.use_parallel = true;
-    cfg.seed = 0xDEADBEEF;
+    let cfg = PerceptualConfig {
+        use_parallel: true,
+        seed: 0xDEADBEEF,
+        ..Default::default()
+    };
 
     match perceptualize_tokens(&tokens, &cfg) {
         Ok(fingerprint) => {
-            println!("Shingles ({}): {:?}", fingerprint.shingles.len(), fingerprint.shingles);
+            println!(
+                "Shingles ({}): {:?}",
+                fingerprint.shingles.len(),
+                fingerprint.shingles
+            );
             println!(
                 "Winnowed selections: {:?}",
                 fingerprint

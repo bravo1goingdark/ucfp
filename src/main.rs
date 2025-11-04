@@ -1,10 +1,12 @@
 use std::error::Error;
 
-use ucfp::{big_text_demo, PerceptualConfig};
+use ucfp::{PerceptualConfig, big_text_demo};
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut cfg : PerceptualConfig = PerceptualConfig::default();
-    cfg.use_parallel = true;
+    let cfg: PerceptualConfig = PerceptualConfig {
+        use_parallel: true,
+        ..PerceptualConfig::default()
+    };
 
     let (_doc, fingerprint) = big_text_demo(&cfg)?;
 

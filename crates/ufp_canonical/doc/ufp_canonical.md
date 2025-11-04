@@ -5,7 +5,7 @@
 `ufp_canonical` converts raw text into a deterministic representation that downstream layers can
 hash, tokenize, and fingerprint. The canonicalizer:
 
-1. normalizes Unicode to NFKC
+1. normalizes Unicode to NFKC (configurable)
 2. optionally lowercases and strips punctuation
 3. collapses whitespace to single spaces
 4. emits UTF-8 byte offsets for each token
@@ -15,11 +15,14 @@ hash, tokenize, and fingerprint. The canonicalizer:
 
 ```rust
 pub struct CanonicalizeConfig {
+    pub version: u32,
+    pub normalize_unicode: bool,
     pub strip_punctuation: bool,
     pub lowercase: bool,
 }
 
 pub struct CanonicalizedDocument {
+    pub doc_id: String,
     pub canonical_text: String,
     pub tokens: Vec<Token>,
     pub sha256_hex: String,
@@ -34,7 +37,7 @@ pub struct Token {
 
 Helper functions are exposed for composition:
 
-- `canonicalize(input, cfg)` - full pipeline
+- `canonicalize(doc_id, input, cfg)` - full pipeline with error reporting
 - `collapse_whitespace(text)` - deterministic whitespace collapsing
 - `tokenize(text)` - convert normalized text into offset-aware tokens
 - `hash_text(text)` - SHA-256 helper used by the pipeline
@@ -42,17 +45,22 @@ Helper functions are exposed for composition:
 ## Public API
 
 ```rust
-pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocument;
+pub fn canonicalize(
+    doc_id: impl Into<String>,
+    input: &str,
+    cfg: &CanonicalizeConfig,
+) -> Result<CanonicalizedDocument, CanonicalError>;
 pub fn collapse_whitespace(text: &str) -> String;
 pub fn tokenize(text: &str) -> Vec<Token>;
 pub fn hash_text(text: &str) -> String;
 ```
 
-`canonicalize` returns a `CanonicalizedDocument` that contains the normalized text, byte-aware
-tokens, and a deterministic SHA-256 digest. `collapse_whitespace` enforces the one-space rule that
-keeps token boundaries stable across ingest sources. `tokenize` exposes the offset calculation logic
-for downstream consumers that need to align canonical text with original payloads, and `hash_text`
-produces the hex-encoded checksum used for deduplication and integrity checks.
+`canonicalize` returns a `CanonicalizedDocument` that contains the normalized text, doc identifier,
+byte-aware tokens, and a deterministic SHA-256 digest. Failures are surfaced via `CanonicalError`:
+empty inputs, invalid configuration versions, or unsupported combinations return descriptive
+variants. `collapse_whitespace` enforces the one-space rule that keeps token boundaries stable,
+`tokenize` exposes the offset calculation logic for downstream consumers, and `hash_text` produces
+the hex-encoded checksum used for deduplication and integrity checks.
 
 ## Example
 
@@ -64,12 +72,14 @@ let cfg = CanonicalizeConfig {
     ..Default::default()
 };
 
-let doc = canonicalize("Hello, WORLD!  This   is a test.", &cfg);
+let doc = canonicalize("doc-demo", "Hello, WORLD!  This   is a test.", &cfg)
+    .expect("canonicalization succeeds");
 assert_eq!(doc.canonical_text, "hello world this is a test");
 assert_eq!(
     doc.tokens.iter().map(|t| &t.text).collect::<Vec<_>>(),
     vec!["hello", "world", "this", "is", "a", "test"]
 );
+assert_eq!(doc.doc_id, "doc-demo");
 ```
 
 ### Examples

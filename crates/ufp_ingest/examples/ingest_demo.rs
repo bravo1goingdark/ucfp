@@ -1,6 +1,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use ufp_ingest::{
-    CanonicalIngestRecord, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord, ingest,
+    CanonicalIngestRecord, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
+    RawIngestRecord, ingest,
 };
 
 fn fixed_timestamp() -> DateTime<Utc> {
@@ -18,9 +19,9 @@ fn main() {
         id: "ingest-demo".into(),
         source: IngestSource::RawText,
         metadata: IngestMetadata {
-            tenant_id: "tenant1".into(),
-            doc_id: "doc1".into(),
-            received_at: fixed_timestamp(),
+            tenant_id: Some("tenant1".into()),
+            doc_id: Some("doc1".into()),
+            received_at: Some(fixed_timestamp()),
             original_source: None,
             attributes: None,
         },
@@ -29,7 +30,7 @@ fn main() {
         )),
     };
 
-    match ingest(record) {
+    match ingest(record, &IngestConfig::default()) {
         Ok(rec) => {
             let CanonicalIngestRecord { .. } = rec;
             println!("{rec:#?}");

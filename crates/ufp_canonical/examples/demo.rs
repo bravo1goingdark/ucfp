@@ -7,9 +7,11 @@ fn main() {
 
     let cfg = CanonicalizeConfig {
         strip_punctuation: true,
-        lowercase: true,
+        ..Default::default()
     };
-    let doc: CanonicalizedDocument = canonicalize(&content, &cfg);
+
+    let doc: CanonicalizedDocument =
+        canonicalize("demo-doc", &content, &cfg).expect("canonicalization succeeds");
     println!("canonical: {}", doc.canonical_text);
     println!();
     println!("tokens: {:?}", doc.tokens);

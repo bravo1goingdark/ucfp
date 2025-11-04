@@ -93,13 +93,14 @@
             <section id="quickstart" class="section-block section-block--accent">
                 <h2 class="section-heading">Quickstart</h2>
                 <p>Build, test, and explore the workspace from the repository root:</p>
-<pre class="code-block" data-lang="bash"><code class="language-bash">cargo build --workspace
-  cargo test --workspace --all-features
+                <pre class="code-block" data-lang="bash"><code class="language-bash">cargo fmt --all
+cargo clippy --all --all-targets -- -D warnings
+cargo test --all
 
-  cargo run --package ufp_ingest --example ingest_demo
-  cargo run --package ufp_canonical --example demo
-  cargo run --package ufp_perceptual --example fingerprint_demo
-  cargo run</code></pre>
+cargo run --package ufp_ingest --example ingest_demo
+cargo run --package ufp_canonical --example demo
+cargo run --package ufp_perceptual --example fingerprint_demo
+cargo run</code></pre>
                 <p>
                     Each crate ships additional notes:
                     <a class="badge badge--file" href="../crates/ufp_ingest/doc/ucfp_ingest.md">ufp_ingest/doc/ucfp_ingest.md</a>,
@@ -127,23 +128,24 @@
                 </p>
                 <ul class="feature-list">
                     <li><span class="badge badge--enum">IngestSource</span> distinguishes raw text, URLs, uploaded files, and API-sourced payloads.</li>
-                    <li><span class="badge badge--struct">IngestMetadata</span> carries tenant scoped identity, ingest document id, timestamps, and optional attributes.</li>
-                    <li><span class="badge badge--struct">RawIngestRecord</span> collects the request id, source, metadata, and optional payload (<span class="badge badge--enum">IngestPayload</span> supports text or binary).</li>
-                    <li><span class="badge badge--struct">CanonicalIngestRecord</span> mirrors the inbound record but replaces payload with <span class="badge badge--enum">CanonicalPayload</span> (normalized text or untouched binary).</li>
+                    <li><span class="badge badge--struct">IngestConfig</span> captures runtime policy: default tenant id, deterministic doc-id namespace, control-character stripping, and semantic versioning.</li>
+                    <li><span class="badge badge--struct">IngestMetadata</span> stores optional tenant/doc identifiers, timestamps, provenance, and attributes; ingest fills in defaults and sanitizes control characters.</li>
+                    <li><span class="badge badge--struct">RawIngestRecord</span> collects the request id, source, metadata, and optional payload (<span class="badge badge--enum">IngestPayload</span> supports UTF-8 text, raw text bytes, or binary).</li>
+                    <li><span class="badge badge--struct">CanonicalIngestRecord</span> mirrors the inbound record but emits sanitized metadata, a resolved timestamp, and <span class="badge badge--enum">CanonicalPayload</span> (normalized text or untouched binary).</li>
                 </ul>
             </section>
 
             <section id="ingest-validation" class="section-block section-block--panel">
                 <h3 class="section-subheading">Validation Pipeline</h3>
                 <p>
-                    <code>ingest(record)</code> performs the following steps:
+                    <code>ingest(record, cfg)</code> performs the following steps:
                 </p>
                 <ol class="pipeline-list">
-                    <li>Validates identifiers — <span class="badge badge--field">id</span>, <span class="badge badge--field">tenant_id</span>, and <span class="badge badge--field">doc_id</span> must be non-empty.</li>
-                    <li>Ensures payload presence for <span class="badge badge--enum">RawText</span> and <span class="badge badge--enum">File</span> sources via <span class="badge badge--fn">ensure_payload</span>.</li>
-                    <li>Normalizes text payloads through <span class="badge badge--fn">normalize_payload</span> (collapses whitespace, trims edges).</li>
-                    <li>Re-emits binary payloads unchanged so perceptual layers can operate later.</li>
-                    <li>Returns <span class="badge badge--struct">CanonicalIngestRecord</span> or an <span class="badge badge--enum">IngestError</span> variant (<span class="badge badge--enum">MissingPayload</span>, <span class="badge badge--enum">InvalidMetadata</span>).</li>
+                    <li>Sanitizes identifiers &mdash; strips control characters, requires a non-empty <span class="badge badge--field">id</span>, and applies config defaults when <span class="badge badge--field">tenant_id</span>/<span class="badge badge--field">doc_id</span> are missing (deterministically deriving a UUIDv5).</li>
+                    <li>Validates payloads &mdash; <span class="badge badge--enum">RawText</span> and <span class="badge badge--enum">File</span> sources must include data; <span class="badge badge--enum">TextBytes</span> are decoded to UTF-8 with <span class="badge badge--enum">InvalidUtf8</span> on failure.</li>
+                    <li>Normalizes text via <span class="badge badge--fn">normalize_payload</span>, rejecting empty results as <span class="badge badge--enum">EmptyNormalizedText</span>.</li>
+                    <li>Re-emits binary payloads untouched for downstream perceptual stages.</li>
+                    <li>Records structured logs/metrics and returns a <span class="badge badge--struct">CanonicalIngestRecord</span> or an <span class="badge badge--enum">IngestError</span> variant.</li>
                 </ol>
                 <p>
                     Tests in <span class="badge badge--file">crates/ufp_ingest/src/lib.rs</span> cover whitespace handling, empty payload rejection, metadata preservation, and mixed payload support.
@@ -158,27 +160,31 @@
                     <li><span class="terminal-command">cargo run --package ufp_ingest --example batch_ingest</span> — demonstrates mixed text, URL, and binary records.</li>
                 </ul>
                 <pre class="code-block" data-lang="rust"><code class="language-rust">use chrono::{DateTime, NaiveDate, Utc};
-use ufp_ingest::{ingest, CanonicalPayload, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+use ufp_ingest::{
+    ingest, CanonicalPayload, IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord,
+};
 
 fn fixed_timestamp() -> DateTime<Utc> {
     let date = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
     DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
 }
 
+let cfg = IngestConfig::default();
+
 let record = RawIngestRecord {
     id: "ingest-1".into(),
     source: IngestSource::RawText,
     metadata: IngestMetadata {
-        tenant_id: "tenant".into(),
-        doc_id: "doc".into(),
-        received_at: fixed_timestamp(),
+        tenant_id: Some("tenant".into()),
+        doc_id: Some("doc".into()),
+        received_at: Some(fixed_timestamp()),
         original_source: None,
         attributes: None,
     },
     payload: Some(IngestPayload::Text("  Hello   world  ".into())),
 };
 
-let canonical = ingest(record)?;
+let canonical = ingest(record, &cfg)?;
 assert_eq!(
     canonical.normalized_payload,
     Some(CanonicalPayload::Text("Hello world".into()))
@@ -200,7 +206,7 @@ assert_eq!(
             <section id="canonical-pipeline" class="section-block section-block--soft">
                 <h3 class="section-subheading">Pipeline Steps</h3>
                 <p>
-                    <span class="badge badge--fn">canonicalize(input, cfg)</span> executes the canonical pipeline:
+                    <span class="badge badge--fn">canonicalize(doc_id, input, cfg) -> Result<CanonicalizedDocument, CanonicalError></span> executes the canonical pipeline:
                 </p>
                 <ol>
                     <li>Unicode NFKC normalization to harmonize decompositions (<span class="badge badge--example">Caf&eacute;</span> = <span class="badge badge--example">Cafe\u{0301}</span>).</li>
@@ -233,7 +239,7 @@ let cfg = CanonicalizeConfig {
     ..Default::default()
 };
 
-let doc = canonicalize("Hello, WORLD!  This   is a test.", &cfg);
+let doc = canonicalize("demo-doc", "Hello, WORLD!  This   is a test.", &cfg).expect("canonicalization succeeds");
 assert_eq!(doc.canonical_text, "hello world this is a test");
 assert_eq!(
     doc.tokens.iter().map(|t| &t.text).collect::<Vec<_>>(),
@@ -257,11 +263,11 @@ assert_eq!(
 
             <section id="perceptual-pipeline" class="section-block section-block--soft">
                 <h3 class="section-subheading">Fingerprinting Steps</h3>
-                <p><span class="badge badge--fn">perceptualize_tokens(tokens, cfg)</span> executes:</p>
+                <p><span class="badge badge--fn">perceptualize_tokens(tokens, cfg) -&gt; Result&lt;PerceptualFingerprint, PerceptualError&gt;</span> executes:</p>
                 <ol class="pipeline-list">
                     <li><strong>Rolling shingles</strong> &mdash; hash contiguous windows of <code>k</code> tokens with a seeded rolling hash.</li>
                     <li><strong>Winnowing</strong> &mdash; slide a window of size <code>w</code> and keep the rightmost minimum hash for stability.</li>
-                    <li><strong>MinHash</strong> &mdash; deduplicate hashes, then compute a signature of <code>bands * rows</code> values (parallel when configured).</li>
+                    <li><strong>MinHash</strong> &mdash; deduplicate hashes, then compute a signature of <code>bands &times; rows</code> values (parallel when configured).</li>
                 </ol>
                 <p>
                     The result is a <span class="badge badge--struct">PerceptualFingerprint</span> containing all intermediate hashes plus metadata for reproducibility.
@@ -271,9 +277,10 @@ assert_eq!(
             <section id="perceptual-config" class="section-block section-block--accent">
                 <h3 class="section-subheading">Configuration</h3>
                 <ul class="feature-list">
+                    <li><span class="badge badge--field">version</span> &mdash; semantic configuration version; must be &gt;= 1.</li>
                     <li><span class="badge badge--field">k</span> &mdash; tokens per shingle. Larger values capture longer phrases; defaults to 9.</li>
                     <li><span class="badge badge--field">w</span> &mdash; winnowing window size. Smaller windows keep more minima; defaults to 4.</li>
-                    <li><span class="badge badge--field">minhash_bands</span> &amp; <span class="badge badge--field">minhash_rows_per_band</span> &mdash; define signature length (<code>bands × rows</code>); defaults to 16 &times; 8.</li>
+                    <li><span class="badge badge--field">minhash_bands</span> &amp; <span class="badge badge--field">minhash_rows_per_band</span> &mdash; define signature length (<code>bands &times; rows</code>); defaults to 16 &times; 8.</li>
                     <li><span class="badge badge--field">seed</span> &mdash; master seed for rolling hash and MinHash permutations, ensuring reproducible fingerprints.</li>
                     <li><span class="badge badge--field">use_parallel</span> &mdash; toggles Rayon-backed MinHash computation when true.</li>
                 </ul>
@@ -286,7 +293,10 @@ assert_eq!(
                 <ul class="terminal-list">
                     <li><span class="terminal-command">cargo run --package ufp_perceptual --example fingerprint_demo</span> &mdash; prints shingles, winnowed minima, and the MinHash signature.</li>
                 </ul>
-                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{process_record_with_perceptual, CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord};
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{
+    process_record_with_perceptual_configs, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord
+};
 use chrono::{DateTime, NaiveDate, Utc};
 
 fn ts() -> DateTime<Utc> {
@@ -294,33 +304,38 @@ fn ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
 }
 
+let ingest_cfg = IngestConfig::default();
 let canonical_cfg = CanonicalizeConfig::default();
-let mut perceptual_cfg = PerceptualConfig::default();
-perceptual_cfg.k = 5;
+let perceptual_cfg = PerceptualConfig { k: 5, ..Default::default() };
 
 let record = RawIngestRecord {
     id: "perceptual-demo".into(),
     source: IngestSource::RawText,
     metadata: IngestMetadata {
-        tenant_id: "tenant".into(),
-        doc_id: "doc".into(),
-        received_at: ts(),
+        tenant_id: Some("tenant".into()),
+        doc_id: Some("doc".into()),
+        received_at: Some(ts()),
         original_source: None,
         attributes: None,
     },
     payload: Some(IngestPayload::Text("The quick brown fox jumps over the lazy dog".into())),
 };
 
-let (_doc, fp) = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
+let (_doc, fp) = process_record_with_perceptual_configs(
+    record, &ingest_cfg, &canonical_cfg, &perceptual_cfg,
+)?;
 assert_eq!(fp.meta.k, 5);</code></pre>
             </section>
 
             <section id="integration-process" class="section-block section-block--panel">
                 <h2 class="section-heading">Workspace Integration</h2>
                 <p>
-                    The root crate re-exports all layers and exposes <span class="badge badge--fn">process_record</span> for ingest + canonical or <span class="badge badge--fn">process_record_with_perceptual</span> for the full pipeline.
+                    The root crate re-exports all layers and offers <span class="badge badge--fn">process_record</span> (ingest defaults), <span class="badge badge--fn">process_record_with_configs</span>, and <span class="badge badge--fn">process_record_with_perceptual_configs</span> for fully controlled runs.
                 </p>
-                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{process_record_with_perceptual, CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord};
+                <pre class="code-block" data-lang="rust"><code class="language-rust">use ucfp::{
+    process_record_with_perceptual_configs, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord
+};
 use chrono::{DateTime, NaiveDate, Utc};
 
 fn ts() -> DateTime<Utc> {
@@ -328,27 +343,36 @@ fn ts() -> DateTime<Utc> {
     DateTime::<Utc>::from_naive_utc_and_offset(date, Utc)
 }
 
-let cfg = CanonicalizeConfig::default();
-let perceptual = PerceptualConfig::default();
+let ingest_cfg = IngestConfig::default();
+let canonical_cfg = CanonicalizeConfig::default();
+let perceptual_cfg = PerceptualConfig::default();
 let record = RawIngestRecord {
     id: "ingest-42".into(),
     source: IngestSource::RawText,
     metadata: IngestMetadata {
-        tenant_id: "tenant".into(),
-        doc_id: "doc".into(),
-        received_at: ts(),
+        tenant_id: Some("tenant".into()),
+        doc_id: Some("doc".into()),
+        received_at: Some(ts()),
         original_source: None,
         attributes: None,
     },
     payload: Some(IngestPayload::Text("  Hello   world  ".into())),
 };
 
-let (doc, fingerprint) = process_record_with_perceptual(record, &cfg, &perceptual)?;
+let (doc, fingerprint) = process_record_with_perceptual_configs(
+    record, &ingest_cfg, &canonical_cfg, &perceptual_cfg,
+)?;
 assert_eq!(doc.canonical_text, "hello world");
-assert_eq!(fingerprint.meta.minhash_len, perceptual.minhash_bands * perceptual.minhash_rows_per_band);</code></pre>
+assert_eq!(
+    fingerprint.meta.minhash_len,
+    perceptual_cfg.minhash_bands * perceptual_cfg.minhash_rows_per_band
+);</code></pre>
                 <p>
                     Failures map to <span class="badge badge--enum">PipelineError</span> variants: ingest validation issues bubble up, binary payloads return
                     <span class="badge badge--enum">PipelineError::NonTextPayload</span>, missing canonical payloads are surfaced explicitly, and perceptual misconfiguration yields <span class="badge badge--enum">PipelineError::Perceptual</span>.
+                <p>
+                    Register a metrics observer with <span class="badge badge--fn">set_pipeline_metrics</span> to capture ingest, canonical, and perceptual latencies and outcomes.
+                </p>
                 </p>
                 <p>
                     For a full demonstration, run <span class="terminal-command">cargo run</span> to process <code>crates/ufp_canonical/examples/big_text.txt</code> and print the resulting MinHash signature.
@@ -380,4 +404,14 @@ assert_eq!(fingerprint.meta.minhash_len, perceptual.minhash_bands * perceptual.m
     <script src="script.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
 

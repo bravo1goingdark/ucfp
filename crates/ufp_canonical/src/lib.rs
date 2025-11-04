@@ -10,12 +10,17 @@
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use thiserror::Error;
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
 
 /// Configuration for canonicalization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CanonicalizeConfig {
+    /// Semantic version of the canonicalization configuration.
+    pub version: u32,
+    /// If true, apply Unicode NFKC normalization before other transforms.
+    pub normalize_unicode: bool,
     /// If true, strip punctuation characters before tokenizing.
     pub strip_punctuation: bool,
     /// If true, lowercase the text.
@@ -25,10 +30,23 @@ pub struct CanonicalizeConfig {
 impl Default for CanonicalizeConfig {
     fn default() -> Self {
         Self {
+            version: 1,
+            normalize_unicode: true,
             strip_punctuation: false,
             lowercase: true,
         }
     }
+}
+
+/// Errors that can occur during canonicalization.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum CanonicalError {
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+    #[error("canonical document requires a non-empty doc_id")]
+    MissingDocId,
+    #[error("input text empty after normalization")]
+    EmptyInput,
 }
 
 /// A token with its UTF-8 byte offsets in the canonical text.
@@ -42,43 +60,168 @@ pub struct Token {
 /// Output of canonicalization: canonical text, token stream and checksum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CanonicalizedDocument {
+    pub doc_id: String,
     pub canonical_text: String,
     pub tokens: Vec<Token>,
     pub sha256_hex: String,
 }
 
 /// Main entry point. Takes an optional payload and config and returns a canonicalized document.
-pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocument {
+pub fn canonicalize(
+    doc_id: impl Into<String>,
+    input: &str,
+    cfg: &CanonicalizeConfig,
+) -> Result<CanonicalizedDocument, CanonicalError> {
+    if cfg.version == 0 {
+        return Err(CanonicalError::InvalidConfig(
+            "config version must be >= 1".into(),
+        ));
+    }
+
+    let doc_id = doc_id.into();
+    let doc_id = doc_id.trim();
+    if doc_id.is_empty() {
+        return Err(CanonicalError::MissingDocId);
+    }
+    let doc_id = doc_id.to_string();
+
     let mut canonical_text = String::with_capacity(input.len());
     let mut hasher = Sha256::new();
     let mut tokens: Vec<Token> = Vec::new();
     let mut pending_space = false;
     let mut current_token_start: Option<usize> = None;
 
-    let push_char = |ch: char,
-                     canonical_text: &mut String,
-                     hasher: &mut Sha256,
-                     current_token_start: &mut Option<usize>,
-                     pending_space: &mut bool| {
-        if *pending_space {
-            canonical_text.push(' ');
-            hasher.update(b" ");
-            *pending_space = false;
-            *current_token_start = Some(canonical_text.len());
-        } else if current_token_start.is_none() {
-            *current_token_start = Some(canonical_text.len());
+    if cfg.normalize_unicode {
+        process_chars(
+            input.nfkc(),
+            cfg,
+            &mut canonical_text,
+            &mut hasher,
+            &mut tokens,
+            &mut pending_space,
+            &mut current_token_start,
+        );
+    } else {
+        process_chars(
+            input.chars(),
+            cfg,
+            &mut canonical_text,
+            &mut hasher,
+            &mut tokens,
+            &mut pending_space,
+            &mut current_token_start,
+        );
+    }
+
+    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
+
+    if canonical_text.is_empty() {
+        return Err(CanonicalError::EmptyInput);
+    }
+
+    let sha256_hex = hex::encode(hasher.finalize());
+
+    Ok(CanonicalizedDocument {
+        doc_id,
+        canonical_text,
+        tokens,
+        sha256_hex,
+    })
+}
+
+fn process_chars<I>(
+    iter: I,
+    cfg: &CanonicalizeConfig,
+    canonical_text: &mut String,
+    hasher: &mut Sha256,
+    tokens: &mut Vec<Token>,
+    pending_space: &mut bool,
+    current_token_start: &mut Option<usize>,
+) where
+    I: Iterator<Item = char>,
+{
+    for ch in iter {
+        if cfg.lowercase {
+            for lower in ch.to_lowercase() {
+                dispatch_char(
+                    lower,
+                    cfg,
+                    canonical_text,
+                    hasher,
+                    tokens,
+                    pending_space,
+                    current_token_start,
+                );
+            }
+        } else {
+            dispatch_char(
+                ch,
+                cfg,
+                canonical_text,
+                hasher,
+                tokens,
+                pending_space,
+                current_token_start,
+            );
         }
+    }
+}
 
-        let mut buf = [0u8; 4];
-        let encoded = ch.encode_utf8(&mut buf);
-        canonical_text.push_str(encoded);
-        hasher.update(encoded.as_bytes());
-    };
+fn dispatch_char(
+    ch: char,
+    cfg: &CanonicalizeConfig,
+    canonical_text: &mut String,
+    hasher: &mut Sha256,
+    tokens: &mut Vec<Token>,
+    pending_space: &mut bool,
+    current_token_start: &mut Option<usize>,
+) {
+    let is_delim = ch.is_whitespace() || (cfg.strip_punctuation && ch.is_punctuation());
+    if is_delim {
+        finalize_token(tokens, canonical_text, current_token_start);
+        if !canonical_text.is_empty() {
+            *pending_space = true;
+        }
+    } else {
+        append_char(
+            ch,
+            canonical_text,
+            hasher,
+            current_token_start,
+            pending_space,
+        );
+    }
+}
 
-    let finalize_token = |tokens: &mut Vec<Token>,
-                          canonical_text: &String,
-                          current_token_start: &mut Option<usize>| {
-        if let Some(start) = current_token_start.take() {
+fn append_char(
+    ch: char,
+    canonical_text: &mut String,
+    hasher: &mut Sha256,
+    current_token_start: &mut Option<usize>,
+    pending_space: &mut bool,
+) {
+    if *pending_space {
+        canonical_text.push(' ');
+        hasher.update(b" ");
+        *pending_space = false;
+        *current_token_start = Some(canonical_text.len());
+    } else if current_token_start.is_none() {
+        *current_token_start = Some(canonical_text.len());
+    }
+
+    let mut buf = [0u8; 4];
+    let encoded = ch.encode_utf8(&mut buf);
+    canonical_text.push_str(encoded);
+    hasher.update(encoded.as_bytes());
+}
+
+fn finalize_token(
+    tokens: &mut Vec<Token>,
+    canonical_text: &str,
+    current_token_start: &mut Option<usize>,
+) {
+    if let Some(start) = current_token_start.take() {
+        if start < canonical_text.len() {
             let end = canonical_text.len();
             tokens.push(Token {
                 text: canonical_text[start..end].to_string(),
@@ -86,55 +229,6 @@ pub fn canonicalize(input: &str, cfg: &CanonicalizeConfig) -> CanonicalizedDocum
                 end,
             });
         }
-    };
-
-    for ch in input.nfkc() {
-        if cfg.lowercase {
-            for lower in ch.to_lowercase() {
-                let is_delim = lower.is_whitespace()
-                    || (cfg.strip_punctuation && lower.is_punctuation());
-                if is_delim {
-                    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
-                    if !canonical_text.is_empty() {
-                        pending_space = true;
-                    }
-                } else {
-                    push_char(
-                        lower,
-                        &mut canonical_text,
-                        &mut hasher,
-                        &mut current_token_start,
-                        &mut pending_space,
-                    );
-                }
-            }
-        } else {
-            let is_delim = ch.is_whitespace()
-                || (cfg.strip_punctuation && ch.is_punctuation());
-            if is_delim {
-                finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
-                if !canonical_text.is_empty() {
-                    pending_space = true;
-                }
-            } else {
-                push_char(
-                    ch,
-                    &mut canonical_text,
-                    &mut hasher,
-                    &mut current_token_start,
-                    &mut pending_space,
-                );
-            }
-        }
-    }
-
-    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
-    let sha256_hex = hex::encode(hasher.finalize());
-
-    CanonicalizedDocument {
-        canonical_text,
-        tokens,
-        sha256_hex,
     }
 }
 
@@ -199,9 +293,10 @@ mod tests {
     fn test_basic_canonicalize_default() {
         let input = "  HAcllo\nWORLD!  This is   UCFP. ";
         let cfg = CanonicalizeConfig::default();
-        let out = canonicalize(input, &cfg);
+        let out = canonicalize("doc-basic", input, &cfg).expect("canonicalization succeeds");
 
         assert_eq!(out.canonical_text, "hacllo world! this is ucfp.");
+        assert_eq!(out.doc_id, "doc-basic");
 
         let expected_tokens = vec![
             ("hacllo", 0usize, 6usize),
@@ -227,7 +322,7 @@ mod tests {
             strip_punctuation: true,
             ..Default::default()
         };
-        let out = canonicalize(input, &cfg);
+        let out = canonicalize("doc-strip", input, &cfg).expect("canonicalization succeeds");
         assert_eq!(out.canonical_text, "hello world it s ucfp 100 fun");
         let token_texts: Vec<String> = out.tokens.iter().map(|t| t.text.clone()).collect();
         assert_eq!(
@@ -242,8 +337,8 @@ mod tests {
         let decomposed = "Cafe\u{0301}";
         let cfg = CanonicalizeConfig::default();
 
-        let doc_a = canonicalize(composed, &cfg);
-        let doc_b = canonicalize(decomposed, &cfg);
+        let doc_a = canonicalize("doc-a", composed, &cfg).expect("canonical composed");
+        let doc_b = canonicalize("doc-b", decomposed, &cfg).expect("canonical decomposed");
 
         assert_eq!(doc_a.canonical_text, doc_b.canonical_text);
         assert_eq!(doc_a.sha256_hex, doc_b.sha256_hex);
@@ -252,7 +347,8 @@ mod tests {
     #[test]
     fn test_token_offsets_stable() {
         let cfg = CanonicalizeConfig::default();
-        let doc = canonicalize(" a\u{10348}b  c ", &cfg);
+        let doc =
+            canonicalize("doc-token", " a\u{10348}b  c ", &cfg).expect("canonicalization succeeds");
 
         let expected = vec![
             Token {
@@ -278,5 +374,39 @@ mod tests {
             let hash_twice = hash_text(text);
             assert_eq!(hash_once, hash_twice);
         }
+    }
+
+    #[test]
+    fn test_empty_input_rejected() {
+        let cfg = CanonicalizeConfig::default();
+        let res = canonicalize("empty-doc", "   ", &cfg);
+        assert!(matches!(res, Err(CanonicalError::EmptyInput)));
+    }
+
+    #[test]
+    fn test_missing_doc_id_rejected() {
+        let cfg = CanonicalizeConfig::default();
+        let res = canonicalize("", "content", &cfg);
+        assert!(matches!(res, Err(CanonicalError::MissingDocId)));
+    }
+
+    #[test]
+    fn test_disable_unicode_normalization() {
+        let cfg = CanonicalizeConfig {
+            normalize_unicode: false,
+            ..Default::default()
+        };
+        let doc = canonicalize("doc-raw", "Cafe\u{0301}", &cfg).expect("canonicalization succeeds");
+        assert_eq!(doc.canonical_text, "cafe\u{0301}");
+    }
+
+    #[test]
+    fn test_invalid_config_version_rejected() {
+        let cfg = CanonicalizeConfig {
+            version: 0,
+            ..Default::default()
+        };
+        let res = canonicalize("doc-invalid", "content", &cfg);
+        assert!(matches!(res, Err(CanonicalError::InvalidConfig(_))));
     }
 }

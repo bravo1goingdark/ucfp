@@ -1,8 +1,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use ucfp::{
-    canonicalize, process_record_with_perceptual, CanonicalizeConfig, IngestMetadata,
-    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
+    CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
+    RawIngestRecord, canonicalize, process_record_with_perceptual,
 };
 
 const BIG_TEXT: &str = include_str!("../crates/ufp_canonical/examples/big_text.txt");
@@ -11,7 +11,8 @@ fn canonical_bench(c: &mut Criterion) {
     let cfg = CanonicalizeConfig::default();
     c.bench_function("canonicalize_big_text", |b| {
         b.iter(|| {
-            let doc = canonicalize(black_box(BIG_TEXT), &cfg);
+            let doc = canonicalize("bench-canonical", black_box(BIG_TEXT), &cfg)
+                .expect("bench canonical");
             black_box(doc);
         });
     });
@@ -19,7 +20,8 @@ fn canonical_bench(c: &mut Criterion) {
 
 fn perceptual_bench(c: &mut Criterion) {
     let canonical_cfg = CanonicalizeConfig::default();
-    let doc = canonicalize(BIG_TEXT, &canonical_cfg);
+    let doc = canonicalize("bench-canonical", BIG_TEXT, &canonical_cfg)
+        .expect("canonicalization succeeds");
     let tokens: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
     let perceptual_cfg = PerceptualConfig::default();
 
@@ -54,9 +56,9 @@ fn demo_raw_record() -> RawIngestRecord {
         id: "bench-big-text".into(),
         source: IngestSource::RawText,
         metadata: IngestMetadata {
-            tenant_id: "bench-tenant".into(),
-            doc_id: "bench-doc".into(),
-            received_at: demo_timestamp(),
+            tenant_id: Some("bench-tenant".into()),
+            doc_id: Some("bench-doc".into()),
+            received_at: Some(demo_timestamp()),
             original_source: Some("benches/pipeline.rs".into()),
             attributes: None,
         },
@@ -72,5 +74,10 @@ fn demo_timestamp() -> DateTime<Utc> {
     DateTime::<Utc>::from_naive_utc_and_offset(time, Utc)
 }
 
-criterion_group!(pipeline_benches, canonical_bench, perceptual_bench, pipeline_bench);
+criterion_group!(
+    pipeline_benches,
+    canonical_bench,
+    perceptual_bench,
+    pipeline_bench
+);
 criterion_main!(pipeline_benches);

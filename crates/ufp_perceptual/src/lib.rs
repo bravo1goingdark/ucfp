@@ -6,14 +6,16 @@
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use std::collections::VecDeque;
+use thiserror::Error;
 use xxhash_rust::xxh3::xxh3_64_with_seed;
 
 /// Configuration for perceptual fingerprinting.
 /// Everything is runtime-configurable (no feature flags).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerceptualConfig {
+    /// Semantic version for config evolution.
+    pub version: u32,
     /// Number of tokens per shingle (default = 9)
     pub k: usize,
     /// Window size for winnowing (default = 4)
@@ -30,6 +32,7 @@ pub struct PerceptualConfig {
 impl Default for PerceptualConfig {
     fn default() -> Self {
         Self {
+            version: 1,
             k: 9,
             w: 4,
             minhash_bands: 16,
@@ -62,8 +65,11 @@ pub struct PerceptualMeta {
     pub k: usize,
     pub w: usize,
     pub minhash_len: usize,
+    pub minhash_bands: usize,
+    pub minhash_rows_per_band: usize,
     pub seed: u64,
     pub use_parallel: bool,
+    pub config_version: u32,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -73,6 +79,21 @@ pub enum PerceptualError {
 
     #[error("invalid config: k must be >= 1 (got {k})")]
     InvalidConfigK { k: usize },
+
+    #[error("invalid config: w must be >= 1 (got {w})")]
+    InvalidConfigW { w: usize },
+
+    #[error("invalid config: minhash_bands must be >= 1 (got {bands})")]
+    InvalidConfigBands { bands: usize },
+
+    #[error("invalid config: minhash_rows_per_band must be >= 1 (got {rows})")]
+    InvalidConfigRows { rows: usize },
+
+    #[error("invalid config version {version}; expected >= 1")]
+    InvalidConfigVersion { version: u32 },
+
+    #[error("invalid config: minhash length overflow for bands={bands} rows={rows}")]
+    InvalidConfigMinhashLength { bands: usize, rows: usize },
 }
 
 /// Compute a perceptual fingerprint (shingles → winnow → MinHash).
@@ -83,12 +104,38 @@ pub fn perceptualize_tokens<S>(
 where
     S: AsRef<str>,
 {
+    if cfg.version == 0 {
+        return Err(PerceptualError::InvalidConfigVersion {
+            version: cfg.version,
+        });
+    }
     if cfg.k == 0 {
         return Err(PerceptualError::InvalidConfigK { k: cfg.k });
+    }
+    if cfg.w == 0 {
+        return Err(PerceptualError::InvalidConfigW { w: cfg.w });
+    }
+    if cfg.minhash_bands == 0 {
+        return Err(PerceptualError::InvalidConfigBands {
+            bands: cfg.minhash_bands,
+        });
+    }
+    if cfg.minhash_rows_per_band == 0 {
+        return Err(PerceptualError::InvalidConfigRows {
+            rows: cfg.minhash_rows_per_band,
+        });
     }
     if tokens.len() < cfg.k {
         return Err(PerceptualError::NotEnoughTokens { k: cfg.k });
     }
+
+    let minhash_len = cfg
+        .minhash_bands
+        .checked_mul(cfg.minhash_rows_per_band)
+        .ok_or(PerceptualError::InvalidConfigMinhashLength {
+            bands: cfg.minhash_bands,
+            rows: cfg.minhash_rows_per_band,
+        })?;
 
     // Step 1: Rolling-hash shingles (O(n))
     let shingles = make_shingles_rolling(tokens, cfg.k, cfg.seed);
@@ -106,7 +153,6 @@ where
         hashes
     };
 
-    let minhash_len = cfg.minhash_bands * cfg.minhash_rows_per_band;
     let minhash = minhash_signature(&uniq, minhash_len, cfg);
 
     Ok(PerceptualFingerprint {
@@ -117,8 +163,11 @@ where
             k: cfg.k,
             w: cfg.w,
             minhash_len,
+            minhash_bands: cfg.minhash_bands,
+            minhash_rows_per_band: cfg.minhash_rows_per_band,
             seed: cfg.seed,
             use_parallel: cfg.use_parallel,
+            config_version: cfg.version,
         },
     })
 }
@@ -126,10 +175,10 @@ where
 /// Compute rolling-hash shingles deterministically in O(n).
 pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -> Vec<u64> {
     let n = tokens.len();
-    let mut th: Vec<u64> = Vec::with_capacity(n);
-    for t in tokens {
-        th.push(xxh3_64_with_seed(t.as_ref().as_bytes(), seed));
-    }
+    let th: Vec<u64> = tokens
+        .iter()
+        .map(|t| xxh3_64_with_seed(t.as_ref().as_bytes(), seed))
+        .collect();
 
     const BASE: u64 = 1_000_003;
     let base = BASE ^ splitmix64(seed);
@@ -141,15 +190,14 @@ pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -
 
     let mut out = Vec::with_capacity(n - k + 1);
     let mut h = 0u64;
-    for i in 0..k {
-        h = h.wrapping_mul(base).wrapping_add(th[i]);
+    for &val in th.iter().take(k) {
+        h = h.wrapping_mul(base).wrapping_add(val);
     }
     out.push(h);
 
-    for i in k..n {
-        let old = th[i - k];
+    for (&old, &new) in th.iter().zip(th.iter().skip(k)) {
         h = h.wrapping_sub(old.wrapping_mul(base_km1));
-        h = h.wrapping_mul(base).wrapping_add(th[i]);
+        h = h.wrapping_mul(base).wrapping_add(new);
         out.push(h);
     }
     out
@@ -182,7 +230,10 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
         push(&mut dq, i, shingles);
     }
 
-    let emit = |dq: &VecDeque<usize>, out: &mut Vec<WinnowedShingle>, last: &mut Option<usize>, vals: &[u64]| {
+    let emit = |dq: &VecDeque<usize>,
+                out: &mut Vec<WinnowedShingle>,
+                last: &mut Option<usize>,
+                vals: &[u64]| {
         // Rightmost tie-breaking keeps winnowing deterministic when minima repeat.
         if let Some(&idx) = dq.back() {
             if *last != Some(idx) {
@@ -276,23 +327,126 @@ mod tests {
 
     #[test]
     fn test_determinism() {
-        let mut cfg = PerceptualConfig::default();
-        cfg.k = 2;
+        let cfg = PerceptualConfig {
+            k: 2,
+            ..Default::default()
+        };
         let t1 = toks("hello world this is test text");
         let t2 = toks("hello   world this   is test text");
         let fp1 = perceptualize_tokens(&t1, &cfg).unwrap();
         let fp2 = perceptualize_tokens(&t2, &cfg).unwrap();
         assert_eq!(fp1.minhash, fp2.minhash);
+        assert_eq!(fp1.meta.config_version, cfg.version);
+        assert_eq!(
+            fp1.meta.minhash_len,
+            cfg.minhash_bands * cfg.minhash_rows_per_band
+        );
     }
 
     #[test]
     fn test_parallel_equivalence() {
-        let mut cfg = PerceptualConfig::default();
-        cfg.use_parallel = true;
+        let cfg_parallel = PerceptualConfig {
+            use_parallel: true,
+            ..Default::default()
+        };
         let tokens = toks("the quick brown fox jumps over the lazy dog");
-        let fp1 = perceptualize_tokens(&tokens, &cfg).unwrap();
-        cfg.use_parallel = false;
-        let fp2 = perceptualize_tokens(&tokens, &cfg).unwrap();
+        let fp1 = perceptualize_tokens(&tokens, &cfg_parallel).unwrap();
+        let cfg_serial = PerceptualConfig::default();
+        let fp2 = perceptualize_tokens(&tokens, &cfg_serial).unwrap();
         assert_eq!(fp1.minhash, fp2.minhash);
+    }
+
+    #[test]
+    fn test_invalid_k_rejected() {
+        let cfg = PerceptualConfig {
+            k: 0,
+            ..Default::default()
+        };
+        let tokens = toks("a b c");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(res, Err(PerceptualError::InvalidConfigK { k: 0 })));
+    }
+
+    #[test]
+    fn test_invalid_w_rejected() {
+        let cfg = PerceptualConfig {
+            k: 2,
+            w: 0,
+            ..Default::default()
+        };
+        let tokens = toks("a b c d");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(res, Err(PerceptualError::InvalidConfigW { w: 0 })));
+    }
+
+    #[test]
+    fn test_invalid_bands_rejected() {
+        let cfg = PerceptualConfig {
+            k: 2,
+            minhash_bands: 0,
+            ..Default::default()
+        };
+        let tokens = toks("a b c d e");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(
+            res,
+            Err(PerceptualError::InvalidConfigBands { bands: 0 })
+        ));
+    }
+
+    #[test]
+    fn test_invalid_rows_rejected() {
+        let cfg = PerceptualConfig {
+            k: 2,
+            minhash_rows_per_band: 0,
+            ..Default::default()
+        };
+        let tokens = toks("a b c d e f");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(
+            res,
+            Err(PerceptualError::InvalidConfigRows { rows: 0 })
+        ));
+    }
+
+    #[test]
+    fn test_invalid_version_rejected() {
+        let cfg = PerceptualConfig {
+            version: 0,
+            k: 2,
+            ..Default::default()
+        };
+        let tokens = toks("a b c d e f g");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(
+            res,
+            Err(PerceptualError::InvalidConfigVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn test_minhash_length_overflow_rejected() {
+        let cfg = PerceptualConfig {
+            k: 2,
+            minhash_bands: usize::MAX,
+            minhash_rows_per_band: 2,
+            ..Default::default()
+        };
+        let tokens = toks(
+            "overflow check requires enough tokens to skip early not-enough check and trigger overflow",
+        );
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(
+            res,
+            Err(PerceptualError::InvalidConfigMinhashLength { .. })
+        ));
+    }
+
+    #[test]
+    fn test_not_enough_tokens_error() {
+        let cfg = PerceptualConfig::default();
+        let tokens = toks("short");
+        let res = perceptualize_tokens(&tokens, &cfg);
+        assert!(matches!(res, Err(PerceptualError::NotEnoughTokens { .. })));
     }
 }
