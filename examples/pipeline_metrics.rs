@@ -3,18 +3,9 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ucfp::{
-    process_record_with_perceptual,
-    set_pipeline_metrics,
-    CanonicalizeConfig,
-    IngestError,
-    IngestMetadata,
-    IngestPayload,
-    IngestSource,
-    PerceptualConfig,
-    PerceptualError,
-    PipelineError,
-    PipelineMetrics,
-    RawIngestRecord,
+    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
+    PerceptualError, PipelineError, PipelineMetrics, RawIngestRecord,
+    process_record_with_perceptual, set_pipeline_metrics,
 };
 
 fn main() -> Result<(), PipelineError> {
@@ -27,11 +18,8 @@ fn main() -> Result<(), PipelineError> {
         ..PerceptualConfig::default()
     };
 
-    let (_doc, _fingerprint) = process_record_with_perceptual(
-        build_demo_record(),
-        &canonical_cfg,
-        &perceptual_cfg,
-    )?;
+    let (_doc, _fingerprint) =
+        process_record_with_perceptual(build_demo_record(), &canonical_cfg, &perceptual_cfg)?;
 
     println!("Recorded metrics events:");
     for event in metrics.snapshot() {
