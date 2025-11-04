@@ -109,9 +109,18 @@ when ingest validation fails. The binary in `src/main.rs` loads
 `crates/ufp_canonical/examples/big_text.txt`, runs every layer, and prints the final MinHash
 signature.
 
+## Metrics Instrumentation
+
+Install a `PipelineMetrics` recorder via `set_pipeline_metrics(...)` to observe ingest, canonical, and perceptual stages. The `examples/pipeline_metrics.rs` binary wires up a simple recorder, runs the pipeline, and prints each metric event:
+
+```bash
+cargo run --example pipeline_metrics
+```
+
 ## Next Steps
 
 - Expand the ingest layer with additional metadata validation rules.
 - Extend perceptual matching with storage and similarity search.
 - Wire CI to enforce `cargo fmt`, `cargo clippy`, and the workspace test suite.
+
 
