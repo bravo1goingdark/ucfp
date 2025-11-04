@@ -220,15 +220,15 @@ fn finalize_token(
     canonical_text: &str,
     current_token_start: &mut Option<usize>,
 ) {
-    if let Some(start) = current_token_start.take() {
-        if start < canonical_text.len() {
-            let end = canonical_text.len();
-            tokens.push(Token {
-                text: canonical_text[start..end].to_string(),
-                start,
-                end,
-            });
-        }
+    if let Some(start) = current_token_start.take()
+        && start < canonical_text.len()
+    {
+        let end = canonical_text.len();
+        tokens.push(Token {
+            text: canonical_text[start..end].to_string(),
+            start,
+            end,
+        });
     }
 }
 
