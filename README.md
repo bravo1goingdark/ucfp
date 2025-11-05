@@ -1,8 +1,12 @@
 # Universal Content Fingerprinting (UCFP)
 
-Universal Content Fingerprinting is a Rust workspace for building deterministic fingerprints of text
-and binary payloads. It gives you the ingest validation, canonical text processing, and perceptual
-similarity layers needed to prepare data for large-scale indexing or deduplication systems.
+UCFP (Universal Content Fingerprint) is an open-source framework for generating unique, reproducible,
+and meaning-aware fingerprints across text, audio, image, video, and document payloads. It unifies 
+exact hashing, perceptual similarity, and semantic embeddings into one coherent pipeline,so developers
+can identify, compare, and link content deterministically and perceptually. Built in Rust for speed and
+reliability, UCFP powers use cases such as deduplication, plagiarism detection, data cleaning, 
+content provenance, and multimodal search.
+
 
 ## Why UCFP?
 
@@ -16,6 +20,15 @@ similarity layers needed to prepare data for large-scale indexing or deduplicati
   `process_record_with_perceptual`, so applications can adopt the full pipeline one call at a time.
 - **Built-in observability** – plug in a `PipelineMetrics` recorder to capture latency and results for
   ingest, canonical, and perceptual stages.
+
+## Use cases
+
+| Use case              | What UCFP contributes                                                                      | Layers & configs                                           |
+|-----------------------|-------------------------------------------------------------------------------------------|------------------------------------------------------------|
+| Dataset deduplication | Deterministic IDs and canonical hashes collapse byte-identical submissions                | `ufp_ingest` + `IngestConfig`, `ufp_canonical` SHA-256     |
+| Plagiarism detection  | Token offsets, shingles, and MinHash detect paraphrased overlaps                          | `ufp_canonical` tokens, `ufp_perceptual` tuned `k`/`w`     |
+| Content provenance    | Canonical metadata + perceptual signatures trace assets across feeds, storage, and audits | `ufp_ingest`, `PipelineMetrics`, `PerceptualConfig` seeds  |
+| Multimodal search     | Canonical text + binary passthrough feed embedding stores and downstream modalities       | `IngestPayload::Binary`, canonical helpers, embeddings roadmap |
 
 ## Quickstart
 
@@ -65,11 +78,73 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 ### Layer responsibilities
 
-| Layer           | Responsibilities                                                                                                       | Key types                                     |
-|-----------------|------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
-| `ufp_ingest`    | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
-| `ufp_canonical` | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
-| `ufp_perceptual`| Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
+| Layer                                                           | Responsibilities                                                                                                       | Key types                                     |
+|-----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
+| `ufp_ingest`            | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
+| `ufp_canonical`    | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
+| `ufp_perceptual` | Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
+
+### Documentation map
+
+- [`docs/index.html`](docs/index.html) – workspace-wide architecture overview, diagrams, and glossary.
+- [`crates/ufp_ingest/doc/ucfp_ingest.md`](crates/ufp_ingest/doc/ucfp_ingest.md) – ingest invariants, metadata normalization flow, and error taxonomy.
+- [`crates/ufp_canonical/doc/ufp_canonical.md`](crates/ufp_canonical/doc/ufp_canonical.md) – canonical transforms, token semantics, and checksum derivation.
+- [`crates/ufp_perceptual/doc/ucfp_perceptual.md`](crates/ufp_perceptual/doc/ucfp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
+
+### Config quick reference
+
+| Config type          | Knobs you probably care about                                                | Default highlights                              |
+|----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
+| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`               | v1, deterministic namespace UUID, strip-on      |
+| `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
+| `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`   | v1, 9-token shingles, 16x8 MinHash, serial mode |
+
+```rust
+use ucfp::{
+    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
+    RawIngestRecord,
+};
+use uuid::Uuid;
+
+let ingest_cfg = IngestConfig {
+    default_tenant_id: "tenant-acme".into(),
+    doc_id_namespace: Uuid::parse_str("3ba60f64-7d5a-11ee-b962-0242ac120002")?,
+    strip_control_chars: true,
+    ..Default::default()
+};
+
+let canonical_cfg = CanonicalizeConfig {
+    strip_punctuation: true,
+    lowercase: true,
+    ..Default::default()
+};
+
+let perceptual_cfg = PerceptualConfig {
+    k: 7,
+    minhash_bands: 32,
+    minhash_rows_per_band: 4,
+    use_parallel: true,
+    ..Default::default()
+};
+
+let (doc, fingerprint) = ucfp::process_record_with_perceptual(
+    RawIngestRecord {
+        id: "demo".into(),
+        source: IngestSource::RawText,
+        metadata: IngestMetadata {
+            tenant_id: None,
+            doc_id: None,
+            received_at: None,
+            original_source: None,
+            attributes: None,
+        },
+        payload: Some(IngestPayload::Text("Streamlined config demo".into())),
+    },
+    &canonical_cfg,
+    &perceptual_cfg,
+)?;
+assert_eq!(doc.canonical_text, "streamlined config demo");
+```
 
 ### Pipeline in code
 
@@ -153,4 +228,3 @@ examples/            # workspace-level demos (metrics, etc.)
 
 - Introduce semantic extraction and multi-modality pathways (e.g., text + binary embeddings) feeding the existing canonical/perceptual layers.
 - Enrich observability with structured logging backends and metrics exporters.
-
