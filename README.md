@@ -16,6 +16,8 @@ content provenance, and multimodal search.
   and SHA-256 digests are exposed as standalone helpers.
 - **Perceptual fingerprints** – rolling-hash shingles, winnowing, and MinHash signatures make
   similarity search and near-duplicate detection straightforward.
+- **Semantic embeddings** – `ufp_semantic` turns canonical text into ONNX/API-backed dense vectors
+  with deterministic fallbacks for offline tiers.
 - **Single entry point** – the root `ucfp` crate wires every stage into `process_record` and
   `process_record_with_perceptual`, so applications can adopt the full pipeline one call at a time.
 - **Built-in observability** – plug in a `PipelineMetrics` recorder to capture latency and results for
@@ -53,6 +55,7 @@ cargo run --package ufp_ingest --example batch_ingest
 cargo run --package ufp_canonical --example demo
 cargo run --package ufp_canonical --example helpers
 cargo run --package ufp_perceptual --example fingerprint_demo
+cargo run --package ufp_semantic --example embed "Doc Title" "Some text to embed"
 cargo run                              # end-to-end demo on big_text.txt
 cargo run --example pipeline_metrics   # observe metrics events
 ```
@@ -67,6 +70,8 @@ UCFP is a layered pipeline:
    streams with byte offsets, and SHA-256 hashes.
 3. **Perceptual (`ufp_perceptual`)** – shingles canonical tokens, applies winnowing, and produces
    MinHash fingerprints tuned by `PerceptualConfig`.
+4. **Semantic (`ufp_semantic`)** – turns canonical text into dense embeddings via ONNX Runtime or
+   remote HTTP APIs, then normalizes/stubs vectors based on the configured tier.
 
 The root `ucfp` crate re-exports all public types and orchestrates the stages through:
 
@@ -78,18 +83,20 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 ### Layer responsibilities
 
-| Layer                                                           | Responsibilities                                                                                                       | Key types                                     |
-|-----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------|
-| `ufp_ingest`            | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
-| `ufp_canonical`    | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
-| `ufp_perceptual` | Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
+| Layer           | Responsibilities                                                                                                       | Key types                                                               |
+|-----------------|------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| `ufp_ingest`    | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
+| `ufp_canonical` | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token`                  |
+| `ufp_perceptual`| Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
+| `ufp_semantic`  | ONNX/API inference, tokenizer lifecycle management, deterministic stub embeddings for offline or “fast” tiers          | `SemanticConfig`, `SemanticEmbedding`, `SemanticError`                  |
 
 ### Documentation map
 
 - [`docs/index.html`](docs/index.html) – workspace-wide architecture overview, diagrams, and glossary.
 - [`crates/ufp_ingest/doc/ucfp_ingest.md`](crates/ufp_ingest/doc/ucfp_ingest.md) – ingest invariants, metadata normalization flow, and error taxonomy.
 - [`crates/ufp_canonical/doc/ufp_canonical.md`](crates/ufp_canonical/doc/ufp_canonical.md) – canonical transforms, token semantics, and checksum derivation.
-- [`crates/ufp_perceptual/doc/ucfp_perceptual.md`](crates/ufp_perceptual/doc/ucfp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
+- [`crates/ufp_perceptual/doc/ufp_perceptual.md`](crates/ufp_perceptual/doc/ufp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
+- [`crates/ufp_semantic/doc/ufp_semantic.md`](crates/ufp_semantic/doc/ufp_semantic.md) – ONNX/API setup, deterministic stub tiers, and embedding configuration tips.
 
 ### Config quick reference
 

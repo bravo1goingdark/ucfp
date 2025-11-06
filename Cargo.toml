@@ -21,5 +21,6 @@ harness = false
 [workspace]
 members = ["crates/ufp_canonical",
     "crates/ufp_ingest",
-    "crates/ufp_perceptual"
+    "crates/ufp_perceptual",
+    "crates/ufp_semantic"
 ]
