@@ -23,6 +23,20 @@ pub struct IngestConfig {
     pub default_tenant_id: String,
     pub doc_id_namespace: Uuid,
     pub strip_control_chars: bool,
+    pub metadata_policy: MetadataPolicy,
+}
+
+pub struct MetadataPolicy {
+    pub required_fields: Vec<RequiredField>,
+    pub max_attribute_bytes: Option<usize>,
+    pub reject_future_timestamps: bool,
+}
+
+pub enum RequiredField {
+    TenantId,
+    DocId,
+    ReceivedAt,
+    OriginalSource,
 }
 
 pub enum IngestSource {
@@ -68,7 +82,12 @@ pub struct CanonicalIngestRecord {
 The ingest id is supplied by callers. Optional metadata is automatically normalized:
 tenant ids fall back to the configuration default, document ids are deterministically derived
 from the ingest id and tenant when omitted, and missing timestamps are replaced with the current
-UTC time. Control characters in metadata are stripped to prevent log or storage injection.
+UTC time unless a `MetadataPolicy` requires them to be present. Control characters in metadata are
+stripped to prevent log or storage injection. Policy hooks additionally allow you to:
+
+- reject ingests that omit required metadata (tenant/doc/original source/received_at)
+- cap the serialized byte length of `metadata.attributes`
+- reject timestamps that lie in the future
 
 ## Public API
 
