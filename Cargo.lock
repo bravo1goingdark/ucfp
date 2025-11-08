@@ -1600,6 +1600,7 @@ dependencies = [
  "ufp_canonical",
  "ufp_ingest",
  "ufp_perceptual",
+ "ufp_semantic",
 ]
 
 [[package]]

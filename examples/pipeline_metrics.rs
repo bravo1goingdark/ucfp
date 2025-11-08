@@ -3,14 +3,17 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ucfp::{
-    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
-    PerceptualError, PipelineError, PipelineMetrics, RawIngestRecord,
-    process_record_with_perceptual, set_pipeline_metrics,
+    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, KeyValueLogger,
+    PerceptualConfig, PerceptualError, PipelineError, PipelineEventLogger, PipelineMetrics,
+    RawIngestRecord, SemanticConfig, SemanticError, process_record_with_perceptual,
+    semanticize_document, set_pipeline_logger, set_pipeline_metrics,
 };
 
 fn main() -> Result<(), PipelineError> {
     let metrics = Arc::new(RecordingMetrics::new());
     set_pipeline_metrics(Some(metrics.clone()));
+    let logger: Arc<dyn PipelineEventLogger> = Arc::new(KeyValueLogger::stdout());
+    set_pipeline_logger(Some(logger));
 
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig {
@@ -18,14 +21,22 @@ fn main() -> Result<(), PipelineError> {
         ..PerceptualConfig::default()
     };
 
-    let (_doc, _fingerprint) =
+    let (doc, _fingerprint) =
         process_record_with_perceptual(build_demo_record(), &canonical_cfg, &perceptual_cfg)?;
+
+    let semantic_cfg = SemanticConfig {
+        mode: "fast".into(),
+        tier: "fast".into(),
+        ..Default::default()
+    };
+    let _embedding = semanticize_document(&doc, &semantic_cfg)?;
 
     println!("Recorded metrics events:");
     for event in metrics.snapshot() {
         println!(" - {event}");
     }
 
+    set_pipeline_logger(None);
     set_pipeline_metrics(None);
     Ok(())
 }
@@ -77,6 +88,11 @@ impl PipelineMetrics for RecordingMetrics {
 
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>) {
         self.push(format_stage("perceptual", latency, result));
+    }
+
+    fn record_semantic(&self, latency: Duration, result: Result<(), Arc<SemanticError>>) {
+        let result = result.map_err(|err| err.as_ref().to_string());
+        self.push(format_stage("semantic", latency, result));
     }
 }
 
