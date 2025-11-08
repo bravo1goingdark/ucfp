@@ -175,6 +175,9 @@ where
 /// Compute rolling-hash shingles deterministically in O(n).
 pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -> Vec<u64> {
     let n = tokens.len();
+    if k == 0 || n < k {
+        return Vec::new();
+    }
     let th: Vec<u64> = tokens
         .iter()
         .map(|t| xxh3_64_with_seed(t.as_ref().as_bytes(), seed))
@@ -448,5 +451,23 @@ mod tests {
         let tokens = toks("short");
         let res = perceptualize_tokens(&tokens, &cfg);
         assert!(matches!(res, Err(PerceptualError::NotEnoughTokens { .. })));
+    }
+
+    #[test]
+    fn make_shingles_returns_empty_when_k_zero_or_too_large() {
+        let tokens = toks("one two three");
+        assert!(make_shingles_rolling(&tokens, 0, 42).is_empty());
+        assert!(make_shingles_rolling(&tokens, 10, 42).is_empty());
+    }
+
+    #[test]
+    fn make_shingles_matches_direct_hash_when_k_one() {
+        let tokens = toks("alpha beta");
+        let out = make_shingles_rolling(&tokens, 1, 99);
+        assert_eq!(out.len(), tokens.len());
+        for (token, hash) in tokens.iter().zip(out.iter()) {
+            let expected = xxh3_64_with_seed(token.as_bytes(), 99);
+            assert_eq!(*hash, expected);
+        }
     }
 }
