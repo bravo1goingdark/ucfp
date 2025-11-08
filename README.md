@@ -190,16 +190,17 @@ invokes `big_text_demo` and prints the final MinHash signature generated from
 
 ## Metrics & Observability
 
-Hook a recorder into `set_pipeline_metrics(...)` to track stage-level latency and outcomes. The
-`examples/pipeline_metrics.rs` binary provides a reference implementation that prints events such as:
+Hook a recorder into `set_pipeline_metrics(...)` to track stage-level latency and outcomes, or attach
+a structured logger via `set_pipeline_logger(...)`. The `KeyValueLogger` helper emits key/value lines
+such as:
 
 ```
-ingest: ok (65 us)
-canonical: ok (115 us)
-perceptual: ok (89 us)
+timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=640 record_id="demo"
+timestamp="2025-02-10T02:15:01.241Z" stage=canonical status=success latency_us=488 record_id="demo" doc_id="demo"
+timestamp="2025-02-10T02:15:01.245Z" stage=perceptual status=success latency_us=377 record_id="demo" doc_id="demo"
 ```
 
-Run it with:
+`examples/pipeline_metrics.rs` now wires both metrics and structured logging. Run it with:
 
 ```bash
 cargo run --example pipeline_metrics

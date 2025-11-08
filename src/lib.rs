@@ -15,10 +15,11 @@ pub use ufp_perceptual::{
     PerceptualConfig, PerceptualError, PerceptualFingerprint, perceptualize_tokens,
 };
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use std::error::Error;
 use std::fmt;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 /// Errors that can occur while processing an ingest record through the pipeline.
@@ -81,6 +82,156 @@ pub trait PipelineMetrics: Send + Sync {
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>);
 }
 
+/// Processing stage captured in observability events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipelineStage {
+    Ingest,
+    Canonical,
+    Perceptual,
+}
+
+impl fmt::Display for PipelineStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            PipelineStage::Ingest => "ingest",
+            PipelineStage::Canonical => "canonical",
+            PipelineStage::Perceptual => "perceptual",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Outcome of a pipeline stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipelineEventStatus {
+    Success,
+    Failure,
+}
+
+impl fmt::Display for PipelineEventStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let label = match self {
+            PipelineEventStatus::Success => "success",
+            PipelineEventStatus::Failure => "failure",
+        };
+        f.write_str(label)
+    }
+}
+
+/// Structured observation describing the outcome of a pipeline stage.
+#[derive(Debug, Clone)]
+pub struct PipelineEvent {
+    pub stage: PipelineStage,
+    pub status: PipelineEventStatus,
+    pub latency: Duration,
+    pub record_id: String,
+    pub doc_id: Option<String>,
+    pub tenant_id: Option<String>,
+    pub error: Option<String>,
+}
+
+impl PipelineEvent {
+    fn from_outcome(
+        stage: PipelineStage,
+        context: &StageContext,
+        latency: Duration,
+        error: Option<String>,
+    ) -> Self {
+        let status = if error.is_some() {
+            PipelineEventStatus::Failure
+        } else {
+            PipelineEventStatus::Success
+        };
+        Self {
+            stage,
+            status,
+            latency,
+            record_id: context.record_id.clone(),
+            doc_id: context.doc_id.clone(),
+            tenant_id: context.tenant_id.clone(),
+            error,
+        }
+    }
+
+    fn format_key_values(&self, include_timestamp: bool) -> String {
+        let mut parts = Vec::new();
+        if include_timestamp {
+            let ts = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+            parts.push(format!("timestamp=\"{ts}\""));
+        }
+        let stage = self.stage;
+        parts.push(format!("stage={stage}"));
+        let status = self.status;
+        parts.push(format!("status={status}"));
+        let latency_us = self.latency.as_micros();
+        parts.push(format!("latency_us={latency_us}"));
+        let record_id = escape_kv(&self.record_id);
+        parts.push(format!("record_id=\"{record_id}\""));
+        if let Some(doc_id) = &self.doc_id {
+            let doc_id = escape_kv(doc_id);
+            parts.push(format!("doc_id=\"{doc_id}\""));
+        }
+        if let Some(tenant_id) = &self.tenant_id {
+            let tenant_id = escape_kv(tenant_id);
+            parts.push(format!("tenant_id=\"{tenant_id}\""));
+        }
+        if let Some(error) = &self.error {
+            let error = escape_kv(error);
+            parts.push(format!("error=\"{error}\""));
+        }
+        parts.join(" ")
+    }
+}
+
+fn escape_kv(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
+/// Hook for emitting structured events per pipeline stage.
+pub trait PipelineEventLogger: Send + Sync {
+    fn log(&self, event: &PipelineEvent);
+}
+
+/// Simple key-value logger that writes structured events to any writer.
+pub struct KeyValueLogger {
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    include_timestamp: bool,
+}
+
+impl KeyValueLogger {
+    /// Create a logger that writes to stdout.
+    pub fn stdout() -> Self {
+        Self::new(Box::new(io::stdout()))
+    }
+
+    /// Create a logger backed by the provided writer.
+    pub fn new(writer: Box<dyn Write + Send>) -> Self {
+        Self {
+            writer: Arc::new(Mutex::new(writer)),
+            include_timestamp: true,
+        }
+    }
+
+    /// Toggle timestamp emission for the structured log line.
+    pub fn with_timestamps(mut self, include_timestamp: bool) -> Self {
+        self.include_timestamp = include_timestamp;
+        self
+    }
+}
+
+impl PipelineEventLogger for KeyValueLogger {
+    fn log(&self, event: &PipelineEvent) {
+        if let Ok(mut writer) = self.writer.lock() {
+            let line = event.format_key_values(self.include_timestamp);
+            let _ = writeln!(writer, "{line}");
+        }
+    }
+}
+
 /// Install or clear the global pipeline metrics recorder.
 pub fn set_pipeline_metrics(recorder: Option<Arc<dyn PipelineMetrics>>) {
     let lock = metrics_lock();
@@ -100,30 +251,124 @@ fn metrics_recorder() -> Option<Arc<dyn PipelineMetrics>> {
     guard.clone()
 }
 
+/// Install or clear the structured pipeline event logger.
+pub fn set_pipeline_logger(logger: Option<Arc<dyn PipelineEventLogger>>) {
+    let lock = logger_lock();
+    let mut guard = lock.write().expect("pipeline logger lock poisoned");
+    *guard = logger;
+}
+
+fn logger_lock() -> &'static RwLock<Option<Arc<dyn PipelineEventLogger>>> {
+    static LOGGER: OnceLock<RwLock<Option<Arc<dyn PipelineEventLogger>>>> = OnceLock::new();
+    LOGGER.get_or_init(|| RwLock::new(None))
+}
+
+fn pipeline_logger() -> Option<Arc<dyn PipelineEventLogger>> {
+    let guard = logger_lock()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.clone()
+}
+
+#[derive(Debug, Clone)]
+struct StageContext {
+    record_id: String,
+    doc_id: Option<String>,
+    tenant_id: Option<String>,
+}
+
+impl StageContext {
+    fn from_raw(record: &RawIngestRecord) -> Self {
+        Self {
+            record_id: record.id.clone(),
+            doc_id: record.metadata.doc_id.clone(),
+            tenant_id: record.metadata.tenant_id.clone(),
+        }
+    }
+
+    fn update_with_ingest(&mut self, record: &CanonicalIngestRecord) {
+        self.record_id = record.id.clone();
+        self.doc_id = Some(record.doc_id.clone());
+        self.tenant_id = Some(record.tenant_id.clone());
+    }
+
+    fn from_ingest_record(record: &CanonicalIngestRecord) -> Self {
+        Self {
+            record_id: record.id.clone(),
+            doc_id: Some(record.doc_id.clone()),
+            tenant_id: Some(record.tenant_id.clone()),
+        }
+    }
+
+    fn from_document(doc: &CanonicalizedDocument) -> Self {
+        Self {
+            record_id: doc.doc_id.clone(),
+            doc_id: Some(doc.doc_id.clone()),
+            tenant_id: None,
+        }
+    }
+}
+
 struct MetricsSpan {
-    recorder: Arc<dyn PipelineMetrics>,
+    recorder: Option<Arc<dyn PipelineMetrics>>,
+    logger: Option<Arc<dyn PipelineEventLogger>>,
+    stage: PipelineStage,
+    context: StageContext,
     start: Instant,
 }
 
 impl MetricsSpan {
-    fn start() -> Option<Self> {
-        metrics_recorder().map(|recorder| Self {
+    fn start(stage: PipelineStage, context: StageContext) -> Option<Self> {
+        let recorder = metrics_recorder();
+        let logger = pipeline_logger();
+        if recorder.is_none() && logger.is_none() {
+            return None;
+        }
+        Some(Self {
             recorder,
+            logger,
+            stage,
+            context,
             start: Instant::now(),
         })
     }
 
+    fn update_context<F>(&mut self, update: F)
+    where
+        F: FnOnce(&mut StageContext),
+    {
+        update(&mut self.context);
+    }
+
     fn record_ingest(self, result: Result<(), IngestError>) {
-        self.recorder.record_ingest(self.start.elapsed(), result);
+        let latency = self.start.elapsed();
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+        if let Some(recorder) = self.recorder {
+            recorder.record_ingest(latency, result);
+        }
     }
 
     fn record_canonical(self, result: Result<(), PipelineError>) {
-        self.recorder.record_canonical(self.start.elapsed(), result);
+        let latency = self.start.elapsed();
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+        if let Some(recorder) = self.recorder {
+            recorder.record_canonical(latency, result);
+        }
     }
 
     fn record_perceptual(self, result: Result<(), PerceptualError>) {
-        self.recorder
-            .record_perceptual(self.start.elapsed(), result);
+        let latency = self.start.elapsed();
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+        if let Some(recorder) = self.recorder {
+            recorder.record_perceptual(latency, result);
+        }
+    }
+
+    fn emit_event(&self, latency: Duration, error: Option<String>) {
+        if let Some(logger) = self.logger.as_ref() {
+            let event = PipelineEvent::from_outcome(self.stage, &self.context, latency, error);
+            logger.log(&event);
+        }
     }
 }
 
@@ -134,14 +379,10 @@ pub fn process_record_with_configs(
     ingest_cfg: &IngestConfig,
     canonical_cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, PipelineError> {
-    let mut ingest_metrics = MetricsSpan::start();
+    let mut ingest_metrics =
+        MetricsSpan::start(PipelineStage::Ingest, StageContext::from_raw(&raw));
     let canonical_record = match ingest(raw, ingest_cfg) {
-        Ok(record) => {
-            if let Some(span) = ingest_metrics.take() {
-                span.record_ingest(Ok(()));
-            }
-            record
-        }
+        Ok(record) => record,
         Err(err) => {
             if let Some(span) = ingest_metrics.take() {
                 span.record_ingest(Err(err.clone()));
@@ -150,7 +391,17 @@ pub fn process_record_with_configs(
         }
     };
 
-    let mut canonical_metrics = MetricsSpan::start();
+    if let Some(span) = ingest_metrics.as_mut() {
+        span.update_context(|ctx| ctx.update_with_ingest(&canonical_record));
+    }
+    if let Some(span) = ingest_metrics.take() {
+        span.record_ingest(Ok(()));
+    }
+
+    let mut canonical_metrics = MetricsSpan::start(
+        PipelineStage::Canonical,
+        StageContext::from_ingest_record(&canonical_record),
+    );
     let payload = match canonical_record.normalized_payload.as_ref() {
         Some(payload) => payload,
         None => {
@@ -221,8 +472,10 @@ pub fn process_record_with_perceptual_configs(
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
     let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
-    let mut perceptual_metrics = MetricsSpan::start();
-    match perceptualize_tokens(doc.tokens.as_slice(), perceptual_cfg) {
+    let mut perceptual_metrics =
+        MetricsSpan::start(PipelineStage::Perceptual, StageContext::from_document(&doc));
+    let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
+    match perceptualize_tokens(token_refs.as_slice(), perceptual_cfg) {
         Ok(fp) => {
             if let Some(span) = perceptual_metrics.take() {
                 span.record_perceptual(Ok(()));
@@ -456,6 +709,23 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingLogger {
+        stages: Arc<RwLock<Vec<PipelineStage>>>,
+    }
+
+    impl RecordingLogger {
+        fn snapshot(&self) -> Vec<PipelineStage> {
+            self.stages.read().unwrap().clone()
+        }
+    }
+
+    impl PipelineEventLogger for RecordingLogger {
+        fn log(&self, event: &PipelineEvent) {
+            self.stages.write().unwrap().push(event.stage);
+        }
+    }
+
     #[test]
     fn metrics_recorder_tracks_pipeline_outcome() {
         let metrics = Arc::new(CountingMetrics::new());
@@ -480,5 +750,34 @@ mod tests {
         assert!(events.contains(&"perceptual_ok"));
 
         set_pipeline_metrics(None);
+    }
+
+    #[test]
+    fn structured_logger_receives_stage_events() {
+        let logger = Arc::new(RecordingLogger::default());
+        set_pipeline_logger(Some(logger.clone()));
+
+        let canonical_cfg = CanonicalizeConfig::default();
+        let perceptual_cfg = PerceptualConfig {
+            k: 2,
+            ..Default::default()
+        };
+        let record = base_record(IngestPayload::Text("Structured logging validation".into()));
+
+        let result = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+        assert!(result.is_ok());
+
+        let stages = logger.snapshot();
+        let expected = [
+            PipelineStage::Ingest,
+            PipelineStage::Canonical,
+            PipelineStage::Perceptual,
+        ];
+        assert!(
+            stages.ends_with(&expected),
+            "structured events missing or out of order: {stages:?}"
+        );
+
+        set_pipeline_logger(None);
     }
 }

@@ -3,14 +3,16 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ucfp::{
-    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
-    PerceptualError, PipelineError, PipelineMetrics, RawIngestRecord,
-    process_record_with_perceptual, set_pipeline_metrics,
+    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, KeyValueLogger,
+    PerceptualConfig, PerceptualError, PipelineError, PipelineEventLogger, PipelineMetrics,
+    RawIngestRecord, process_record_with_perceptual, set_pipeline_logger, set_pipeline_metrics,
 };
 
 fn main() -> Result<(), PipelineError> {
     let metrics = Arc::new(RecordingMetrics::new());
     set_pipeline_metrics(Some(metrics.clone()));
+    let logger: Arc<dyn PipelineEventLogger> = Arc::new(KeyValueLogger::stdout());
+    set_pipeline_logger(Some(logger));
 
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig {
@@ -26,6 +28,7 @@ fn main() -> Result<(), PipelineError> {
         println!(" - {event}");
     }
 
+    set_pipeline_logger(None);
     set_pipeline_metrics(None);
     Ok(())
 }
