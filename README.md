@@ -235,3 +235,9 @@ examples/            # workspace-level demos (metrics, etc.)
 
 - Introduce semantic extraction and multi-modality pathways (e.g., text + binary embeddings) feeding the existing canonical/perceptual layers.
 - Enrich observability with structured logging backends and metrics exporters.
+
+## Contributing
+
+We welcome fixes, optimizations, and new modalities. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md)
+for the workflow, required checks (`cargo fmt`, `cargo clippy`, `cargo test`), documentation
+expectations, and guidance on updating the architecture diagram as the pipeline evolves.
