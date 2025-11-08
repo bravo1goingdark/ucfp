@@ -57,6 +57,12 @@ pub struct Token {
     pub end: usize,   // byte offset (exclusive)
 }
 
+impl AsRef<str> for Token {
+    fn as_ref(&self) -> &str {
+        self.text.as_str()
+    }
+}
+
 /// Output of canonicalization: canonical text, token stream and checksum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CanonicalizedDocument {

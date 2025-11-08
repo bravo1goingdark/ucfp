@@ -100,21 +100,29 @@ fn metrics_recorder() -> Option<Arc<dyn PipelineMetrics>> {
     guard.clone()
 }
 
-fn record_ingest_metrics(result: Result<(), IngestError>, latency: Duration) {
-    if let Some(recorder) = metrics_recorder() {
-        recorder.record_ingest(latency, result);
-    }
+struct MetricsSpan {
+    recorder: Arc<dyn PipelineMetrics>,
+    start: Instant,
 }
 
-fn record_canonical_metrics(result: Result<(), PipelineError>, latency: Duration) {
-    if let Some(recorder) = metrics_recorder() {
-        recorder.record_canonical(latency, result);
+impl MetricsSpan {
+    fn start() -> Option<Self> {
+        metrics_recorder().map(|recorder| Self {
+            recorder,
+            start: Instant::now(),
+        })
     }
-}
 
-fn record_perceptual_metrics(result: Result<(), PerceptualError>, latency: Duration) {
-    if let Some(recorder) = metrics_recorder() {
-        recorder.record_perceptual(latency, result);
+    fn record_ingest(self, result: Result<(), IngestError>) {
+        self.recorder.record_ingest(self.start.elapsed(), result);
+    }
+
+    fn record_canonical(self, result: Result<(), PipelineError>) {
+        self.recorder.record_canonical(self.start.elapsed(), result);
+    }
+
+    fn record_perceptual(self, result: Result<(), PerceptualError>) {
+        self.recorder.record_perceptual(self.start.elapsed(), result);
     }
 }
 
@@ -125,24 +133,30 @@ pub fn process_record_with_configs(
     ingest_cfg: &IngestConfig,
     canonical_cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, PipelineError> {
-    let ingest_start = Instant::now();
+    let mut ingest_metrics = MetricsSpan::start();
     let canonical_record = match ingest(raw, ingest_cfg) {
         Ok(record) => {
-            record_ingest_metrics(Ok(()), ingest_start.elapsed());
+            if let Some(span) = ingest_metrics.take() {
+                span.record_ingest(Ok(()));
+            }
             record
         }
         Err(err) => {
-            record_ingest_metrics(Err(err.clone()), ingest_start.elapsed());
+            if let Some(span) = ingest_metrics.take() {
+                span.record_ingest(Err(err.clone()));
+            }
             return Err(PipelineError::Ingest(err));
         }
     };
 
-    let canonical_start = Instant::now();
+    let mut canonical_metrics = MetricsSpan::start();
     let payload = match canonical_record.normalized_payload.as_ref() {
         Some(payload) => payload,
         None => {
             let err = PipelineError::MissingCanonicalPayload;
-            record_canonical_metrics(Err(err.clone()), canonical_start.elapsed());
+            if let Some(span) = canonical_metrics.take() {
+                span.record_canonical(Err(err.clone()));
+            }
             return Err(err);
         }
     };
@@ -151,19 +165,25 @@ pub fn process_record_with_configs(
         CanonicalPayload::Text(text) => {
             match canonicalize(canonical_record.doc_id.as_str(), text, canonical_cfg) {
                 Ok(doc) => {
-                    record_canonical_metrics(Ok(()), canonical_start.elapsed());
+                    if let Some(span) = canonical_metrics.take() {
+                        span.record_canonical(Ok(()));
+                    }
                     Ok(doc)
                 }
                 Err(err) => {
-                    let pipeline_err = PipelineError::Canonical(err.clone());
-                    record_canonical_metrics(Err(pipeline_err.clone()), canonical_start.elapsed());
+                    let pipeline_err = PipelineError::Canonical(err);
+                    if let Some(span) = canonical_metrics.take() {
+                        span.record_canonical(Err(pipeline_err.clone()));
+                    }
                     Err(pipeline_err)
                 }
             }
         }
         CanonicalPayload::Binary(_) => {
             let err = PipelineError::NonTextPayload;
-            record_canonical_metrics(Err(err.clone()), canonical_start.elapsed());
+            if let Some(span) = canonical_metrics.take() {
+                span.record_canonical(Err(err.clone()));
+            }
             Err(err)
         }
     }
@@ -200,15 +220,18 @@ pub fn process_record_with_perceptual_configs(
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
     let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
-    let perceptual_start = Instant::now();
-    let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
-    match perceptualize_tokens(&token_refs, perceptual_cfg) {
+    let mut perceptual_metrics = MetricsSpan::start();
+    match perceptualize_tokens(doc.tokens.as_slice(), perceptual_cfg) {
         Ok(fp) => {
-            record_perceptual_metrics(Ok(()), perceptual_start.elapsed());
+            if let Some(span) = perceptual_metrics.take() {
+                span.record_perceptual(Ok(()));
+            }
             Ok((doc, fp))
         }
         Err(err) => {
-            record_perceptual_metrics(Err(err.clone()), perceptual_start.elapsed());
+            if let Some(span) = perceptual_metrics.take() {
+                span.record_perceptual(Err(err.clone()));
+            }
             Err(PipelineError::Perceptual(err))
         }
     }
