@@ -26,7 +26,7 @@ pub struct IngestConfig {
 }
 
 /// Controls which metadata fields must be present and how optional blobs are constrained.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct MetadataPolicy {
     /// Metadata fields that must be provided by the caller (after sanitization).
@@ -35,16 +35,6 @@ pub struct MetadataPolicy {
     pub max_attribute_bytes: Option<usize>,
     /// Reject ingests with timestamps that lie in the future.
     pub reject_future_timestamps: bool,
-}
-
-impl Default for MetadataPolicy {
-    fn default() -> Self {
-        Self {
-            required_fields: Vec::new(),
-            max_attribute_bytes: None,
-            reject_future_timestamps: false,
-        }
-    }
 }
 
 /// Metadata identifiers that can be enforced via `MetadataPolicy`.
@@ -338,10 +328,9 @@ fn enforce_required_metadata(
     field: RequiredField,
     present: bool,
 ) -> Result<(), IngestError> {
-    if policy.required_fields.iter().any(|f| *f == field) && !present {
+    if policy.required_fields.contains(&field) && !present {
         return Err(IngestError::InvalidMetadata(format!(
-            "{:?} is required by ingest policy",
-            field
+            "{field:?} is required by ingest policy"
         )));
     }
     Ok(())
