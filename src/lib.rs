@@ -14,6 +14,7 @@ pub use ufp_ingest::{
 pub use ufp_perceptual::{
     PerceptualConfig, PerceptualError, PerceptualFingerprint, perceptualize_tokens,
 };
+pub use ufp_semantic::{SemanticConfig, SemanticEmbedding, SemanticError, semanticize};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use std::error::Error;
@@ -23,13 +24,14 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 /// Errors that can occur while processing an ingest record through the pipeline.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum PipelineError {
     Ingest(IngestError),
     Canonical(CanonicalError),
     NonTextPayload,
     MissingCanonicalPayload,
     Perceptual(PerceptualError),
+    Semantic(Arc<SemanticError>),
 }
 
 impl fmt::Display for PipelineError {
@@ -41,7 +43,12 @@ impl fmt::Display for PipelineError {
             PipelineError::MissingCanonicalPayload => {
                 write!(f, "ingest succeeded without canonical payload")
             }
-            PipelineError::Perceptual(err) => write!(f, "perceptual fingerprinting failed: {err}"),
+            PipelineError::Perceptual(err) => {
+                write!(f, "perceptual fingerprinting failed: {err}")
+            }
+            PipelineError::Semantic(err) => {
+                write!(f, "semantic embedding failed: {}", err.as_ref())
+            }
         }
     }
 }
@@ -52,6 +59,7 @@ impl Error for PipelineError {
             PipelineError::Ingest(err) => Some(err),
             PipelineError::Canonical(err) => Some(err),
             PipelineError::Perceptual(err) => Some(err),
+            PipelineError::Semantic(err) => Some(err.as_ref()),
             PipelineError::NonTextPayload | PipelineError::MissingCanonicalPayload => None,
         }
     }
@@ -75,11 +83,18 @@ impl From<PerceptualError> for PipelineError {
     }
 }
 
+impl From<SemanticError> for PipelineError {
+    fn from(value: SemanticError) -> Self {
+        PipelineError::Semantic(Arc::new(value))
+    }
+}
+
 /// Metrics observer for pipeline stages.
 pub trait PipelineMetrics: Send + Sync {
     fn record_ingest(&self, latency: Duration, result: Result<(), IngestError>);
     fn record_canonical(&self, latency: Duration, result: Result<(), PipelineError>);
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>);
+    fn record_semantic(&self, latency: Duration, result: Result<(), Arc<SemanticError>>);
 }
 
 /// Processing stage captured in observability events.
@@ -88,6 +103,7 @@ pub enum PipelineStage {
     Ingest,
     Canonical,
     Perceptual,
+    Semantic,
 }
 
 impl fmt::Display for PipelineStage {
@@ -96,6 +112,7 @@ impl fmt::Display for PipelineStage {
             PipelineStage::Ingest => "ingest",
             PipelineStage::Canonical => "canonical",
             PipelineStage::Perceptual => "perceptual",
+            PipelineStage::Semantic => "semantic",
         };
         f.write_str(name)
     }
@@ -364,6 +381,17 @@ impl MetricsSpan {
         }
     }
 
+    fn record_semantic(self, result: Result<(), Arc<SemanticError>>) {
+        let latency = self.start.elapsed();
+        self.emit_event(
+            latency,
+            result.as_ref().err().map(|e| e.as_ref().to_string()),
+        );
+        if let Some(recorder) = self.recorder {
+            recorder.record_semantic(latency, result);
+        }
+    }
+
     fn emit_event(&self, latency: Duration, error: Option<String>) {
         if let Some(logger) = self.logger.as_ref() {
             let event = PipelineEvent::from_outcome(self.stage, &self.context, latency, error);
@@ -518,6 +546,81 @@ pub fn process_document_with_configs(
     Ok(fp)
 }
 
+/// Run ingest, canonicalization, and semantic embedding generation.
+/// Returns the canonical document paired with its embedding.
+pub fn process_record_with_semantic(
+    raw: RawIngestRecord,
+    canonical_cfg: &CanonicalizeConfig,
+    semantic_cfg: &SemanticConfig,
+) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
+    process_record_with_semantic_configs(raw, &IngestConfig::default(), canonical_cfg, semantic_cfg)
+}
+
+/// Semantic pipeline helper that accepts explicit configuration for all stages.
+pub fn process_record_with_semantic_configs(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    semantic_cfg: &SemanticConfig,
+) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
+    let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
+    let embedding = semanticize_document(&doc, semantic_cfg)?;
+    Ok((doc, embedding))
+}
+
+/// Generate a semantic embedding from an existing canonical document.
+pub fn semanticize_document(
+    doc: &CanonicalizedDocument,
+    semantic_cfg: &SemanticConfig,
+) -> Result<SemanticEmbedding, PipelineError> {
+    let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from_document(doc));
+    match semanticize(
+        doc.doc_id.as_str(),
+        doc.canonical_text.as_str(),
+        semantic_cfg,
+    ) {
+        Ok(embedding) => {
+            if let Some(span) = span {
+                span.record_semantic(Ok(()));
+            }
+            Ok(embedding)
+        }
+        Err(err) => {
+            let arc_err = Arc::new(err);
+            if let Some(span) = span {
+                span.record_semantic(Err(arc_err.clone()));
+            }
+            Err(PipelineError::Semantic(arc_err))
+        }
+    }
+}
+
+/// Convenience helper that returns only the semantic embedding using default configs.
+pub fn process_semantic_document(
+    raw: RawIngestRecord,
+    semantic_cfg: &SemanticConfig,
+) -> Result<SemanticEmbedding, PipelineError> {
+    let canonical_cfg = CanonicalizeConfig::default();
+    process_semantic_document_with_configs(
+        raw,
+        &IngestConfig::default(),
+        &canonical_cfg,
+        semantic_cfg,
+    )
+}
+
+/// Semantic embedding helper that accepts configuration for all pipeline stages.
+pub fn process_semantic_document_with_configs(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    semantic_cfg: &SemanticConfig,
+) -> Result<SemanticEmbedding, PipelineError> {
+    let (_, embedding) =
+        process_record_with_semantic_configs(raw, ingest_cfg, canonical_cfg, semantic_cfg)?;
+    Ok(embedding)
+}
+
 fn demo_timestamp() -> DateTime<Utc> {
     let Some(date) = NaiveDate::from_ymd_opt(2025, 1, 1) else {
         panic!("invalid demo date components");
@@ -554,7 +657,7 @@ pub fn big_text_demo(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, RwLock};
+    use std::sync::{Arc, Mutex, OnceLock, RwLock};
     use std::time::Duration;
 
     fn base_record(payload: IngestPayload) -> RawIngestRecord {
@@ -570,6 +673,11 @@ mod tests {
             },
             payload: Some(payload),
         }
+    }
+
+    fn logger_test_mutex() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
     }
 
     #[test]
@@ -663,6 +771,24 @@ mod tests {
         assert_eq!(fp.meta.k, 3);
     }
 
+    #[test]
+    fn process_record_with_semantic_produces_embedding() {
+        let canonical_cfg = CanonicalizeConfig::default();
+        let semantic_cfg = SemanticConfig {
+            tier: "fast".into(),
+            mode: "fast".into(),
+            ..Default::default()
+        };
+        let record = base_record(IngestPayload::Text("Embeddings make search easier".into()));
+
+        let (doc, embedding) = process_record_with_semantic(record, &canonical_cfg, &semantic_cfg)
+            .expect("semantic pipeline should succeed");
+
+        assert_eq!(embedding.doc_id, doc.doc_id);
+        assert!(!embedding.vector.is_empty());
+        assert!(embedding.embedding_dim > 0);
+    }
+
     #[derive(Default)]
     struct CountingMetrics {
         events: Arc<RwLock<Vec<&'static str>>>,
@@ -707,22 +833,31 @@ mod tests {
             };
             self.events.write().unwrap().push(label);
         }
+
+        fn record_semantic(&self, _latency: Duration, result: Result<(), Arc<SemanticError>>) {
+            let label = if result.is_ok() {
+                "semantic_ok"
+            } else {
+                "semantic_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
     }
 
     #[derive(Default)]
     struct RecordingLogger {
-        stages: Arc<RwLock<Vec<PipelineStage>>>,
+        events: Arc<RwLock<Vec<PipelineEvent>>>,
     }
 
     impl RecordingLogger {
-        fn snapshot(&self) -> Vec<PipelineStage> {
-            self.stages.read().unwrap().clone()
+        fn snapshot(&self) -> Vec<PipelineEvent> {
+            self.events.read().unwrap().clone()
         }
     }
 
     impl PipelineEventLogger for RecordingLogger {
         fn log(&self, event: &PipelineEvent) {
-            self.stages.write().unwrap().push(event.stage);
+            self.events.write().unwrap().push(event.clone());
         }
     }
 
@@ -744,16 +879,33 @@ mod tests {
 
         assert!(result.is_ok());
 
+        let semantic_cfg = SemanticConfig {
+            mode: "fast".into(),
+            tier: "fast".into(),
+            ..Default::default()
+        };
+        let semantic_record = base_record(IngestPayload::Text(
+            "Semantic metrics validation payload".into(),
+        ));
+
+        let semantic_result =
+            process_record_with_semantic(semantic_record, &canonical_cfg, &semantic_cfg);
+        assert!(semantic_result.is_ok());
+
         let events = metrics.snapshot();
         assert!(events.contains(&"ingest_ok"));
         assert!(events.contains(&"canonical_ok"));
         assert!(events.contains(&"perceptual_ok"));
+        assert!(events.contains(&"semantic_ok"));
 
         set_pipeline_metrics(None);
     }
 
     #[test]
     fn structured_logger_receives_stage_events() {
+        let _guard = logger_test_mutex()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let logger = Arc::new(RecordingLogger::default());
         set_pipeline_logger(Some(logger.clone()));
 
@@ -762,20 +914,87 @@ mod tests {
             k: 2,
             ..Default::default()
         };
-        let record = base_record(IngestPayload::Text("Structured logging validation".into()));
+        let record = RawIngestRecord {
+            id: "logger-perceptual".into(),
+            source: IngestSource::RawText,
+            metadata: IngestMetadata {
+                tenant_id: Some("logger".into()),
+                doc_id: Some("logger-doc-perceptual".into()),
+                received_at: Some(demo_timestamp()),
+                original_source: None,
+                attributes: None,
+            },
+            payload: Some(IngestPayload::Text("Structured logging validation".into())),
+        };
 
         let result = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
         assert!(result.is_ok());
 
-        let stages = logger.snapshot();
+        let stages: Vec<_> = logger
+            .snapshot()
+            .into_iter()
+            .filter(|event| event.doc_id.as_deref() == Some("logger-doc-perceptual"))
+            .map(|event| event.stage)
+            .collect();
         let expected = [
             PipelineStage::Ingest,
             PipelineStage::Canonical,
             PipelineStage::Perceptual,
         ];
         assert!(
-            stages.ends_with(&expected),
-            "structured events missing or out of order: {stages:?}"
+            stages == expected,
+            "structured events missing or out of order for logger-doc-perceptual: {stages:?}"
+        );
+
+        set_pipeline_logger(None);
+    }
+
+    #[test]
+    fn structured_logger_records_semantic_stage() {
+        let _guard = logger_test_mutex()
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let logger = Arc::new(RecordingLogger::default());
+        set_pipeline_logger(Some(logger.clone()));
+
+        let canonical_cfg = CanonicalizeConfig::default();
+        let semantic_cfg = SemanticConfig {
+            mode: "fast".into(),
+            tier: "fast".into(),
+            ..Default::default()
+        };
+        let record = RawIngestRecord {
+            id: "logger-semantic".into(),
+            source: IngestSource::RawText,
+            metadata: IngestMetadata {
+                tenant_id: Some("logger".into()),
+                doc_id: Some("logger-doc-semantic".into()),
+                received_at: Some(demo_timestamp()),
+                original_source: None,
+                attributes: None,
+            },
+            payload: Some(IngestPayload::Text(
+                "Structured semantic logging validation".into(),
+            )),
+        };
+
+        let result = process_record_with_semantic(record, &canonical_cfg, &semantic_cfg);
+        assert!(result.is_ok());
+
+        let stages: Vec<_> = logger
+            .snapshot()
+            .into_iter()
+            .filter(|event| event.doc_id.as_deref() == Some("logger-doc-semantic"))
+            .map(|event| event.stage)
+            .collect();
+        let expected = [
+            PipelineStage::Ingest,
+            PipelineStage::Canonical,
+            PipelineStage::Semantic,
+        ];
+        assert!(
+            stages == expected,
+            "structured semantic events missing or out of order for logger-doc-semantic: {stages:?}"
         );
 
         set_pipeline_logger(None);

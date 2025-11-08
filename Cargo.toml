@@ -9,6 +9,7 @@ license = "Apache-2.0"
 ufp_canonical = { path = "crates/ufp_canonical" }
 ufp_ingest = { path = "crates/ufp_ingest" }
 ufp_perceptual = { path = "crates/ufp_perceptual" }
+ufp_semantic = { path = "crates/ufp_semantic" }
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]

@@ -181,10 +181,22 @@ let (doc, fingerprint) =
     process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
 assert_eq!(doc.canonical_text, "hello world");
 assert_eq!(fingerprint.meta.k, 5);
+
+let semantic_cfg = SemanticConfig {
+    mode: "fast".into(),
+    tier: "fast".into(),
+    ..Default::default()
+};
+let embedding = semanticize_document(&doc, &semantic_cfg)?;
+assert_eq!(embedding.doc_id, doc.doc_id);
 ```
 
+Call `process_record_with_semantic(...)` to obtain the document and embedding together, or
+`semanticize_document(...)` when you already have a canonical document on hand.
+
 Failures bubble up as `PipelineError::Ingest(_)`, `PipelineError::Canonical(_)`,
-`PipelineError::Perceptual(_)`, or `PipelineError::NonTextPayload`. The CLI binary in `src/main.rs`
+`PipelineError::Perceptual(_)`, `PipelineError::Semantic(_)`,
+or `PipelineError::NonTextPayload`. The CLI binary in `src/main.rs`
 invokes `big_text_demo` and prints the final MinHash signature generated from
 `crates/ufp_canonical/examples/big_text.txt`.
 
@@ -198,6 +210,7 @@ such as:
 timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=640 record_id="demo"
 timestamp="2025-02-10T02:15:01.241Z" stage=canonical status=success latency_us=488 record_id="demo" doc_id="demo"
 timestamp="2025-02-10T02:15:01.245Z" stage=perceptual status=success latency_us=377 record_id="demo" doc_id="demo"
+timestamp="2025-02-10T02:15:01.249Z" stage=semantic status=success latency_us=512 record_id="demo" doc_id="demo"
 ```
 
 `examples/pipeline_metrics.rs` now wires both metrics and structured logging. Run it with:

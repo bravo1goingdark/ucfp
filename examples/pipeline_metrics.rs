@@ -5,7 +5,8 @@ use std::time::Duration;
 use ucfp::{
     CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, KeyValueLogger,
     PerceptualConfig, PerceptualError, PipelineError, PipelineEventLogger, PipelineMetrics,
-    RawIngestRecord, process_record_with_perceptual, set_pipeline_logger, set_pipeline_metrics,
+    RawIngestRecord, SemanticConfig, SemanticError, process_record_with_perceptual,
+    semanticize_document, set_pipeline_logger, set_pipeline_metrics,
 };
 
 fn main() -> Result<(), PipelineError> {
@@ -20,8 +21,15 @@ fn main() -> Result<(), PipelineError> {
         ..PerceptualConfig::default()
     };
 
-    let (_doc, _fingerprint) =
+    let (doc, _fingerprint) =
         process_record_with_perceptual(build_demo_record(), &canonical_cfg, &perceptual_cfg)?;
+
+    let semantic_cfg = SemanticConfig {
+        mode: "fast".into(),
+        tier: "fast".into(),
+        ..Default::default()
+    };
+    let _embedding = semanticize_document(&doc, &semantic_cfg)?;
 
     println!("Recorded metrics events:");
     for event in metrics.snapshot() {
@@ -80,6 +88,11 @@ impl PipelineMetrics for RecordingMetrics {
 
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>) {
         self.push(format_stage("perceptual", latency, result));
+    }
+
+    fn record_semantic(&self, latency: Duration, result: Result<(), Arc<SemanticError>>) {
+        let result = result.map_err(|err| err.as_ref().to_string());
+        self.push(format_stage("semantic", latency, result));
     }
 }
 
