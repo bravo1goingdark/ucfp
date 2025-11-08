@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use thiserror::Error;
-use tracing::{Level, field, info, warn};
+use tracing::{Level, info, warn};
 use uuid::Uuid;
 
 /// Runtime configuration for ingest behavior.
@@ -20,6 +20,40 @@ pub struct IngestConfig {
     pub doc_id_namespace: Uuid,
     /// Whether to strip ASCII control characters from metadata.
     pub strip_control_chars: bool,
+    /// Additional metadata validation policies.
+    #[serde(default)]
+    pub metadata_policy: MetadataPolicy,
+}
+
+/// Controls which metadata fields must be present and how optional blobs are constrained.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MetadataPolicy {
+    /// Metadata fields that must be provided by the caller (after sanitization).
+    pub required_fields: Vec<RequiredField>,
+    /// Maximum serialized byte length allowed for `metadata.attributes`.
+    pub max_attribute_bytes: Option<usize>,
+    /// Reject ingests with timestamps that lie in the future.
+    pub reject_future_timestamps: bool,
+}
+
+impl Default for MetadataPolicy {
+    fn default() -> Self {
+        Self {
+            required_fields: Vec::new(),
+            max_attribute_bytes: None,
+            reject_future_timestamps: false,
+        }
+    }
+}
+
+/// Metadata identifiers that can be enforced via `MetadataPolicy`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RequiredField {
+    TenantId,
+    DocId,
+    ReceivedAt,
+    OriginalSource,
 }
 
 impl Default for IngestConfig {
@@ -29,6 +63,7 @@ impl Default for IngestConfig {
             default_tenant_id: "default".into(),
             doc_id_namespace: Uuid::NAMESPACE_OID,
             strip_control_chars: true,
+            metadata_policy: MetadataPolicy::default(),
         }
     }
 }
@@ -146,7 +181,7 @@ pub fn ingest(
         Level::INFO,
         "ufp_ingest.ingest",
         record_id = %record_id,
-        source = field::debug(&source)
+        source = debug(&source)
     );
     let _guard = span.enter();
 
@@ -211,23 +246,64 @@ fn normalize_metadata(
     cfg: &IngestConfig,
     record_id: &str,
 ) -> Result<NormalizedMetadata, IngestError> {
-    let tenant_id = sanitize_optional_string(metadata.tenant_id, cfg.strip_control_chars)
-        .unwrap_or_else(|| cfg.default_tenant_id.clone());
+    let IngestMetadata {
+        tenant_id,
+        doc_id,
+        received_at,
+        original_source,
+        attributes,
+    } = metadata;
 
-    let doc_id = sanitize_optional_string(metadata.doc_id, cfg.strip_control_chars)
-        .unwrap_or_else(|| derive_doc_id(cfg, &tenant_id, record_id));
+    let mut attributes = attributes;
+    enforce_attribute_limit(&mut attributes, &cfg.metadata_policy)?;
 
-    let original_source =
-        sanitize_optional_string(metadata.original_source, cfg.strip_control_chars);
+    let tenant_id_clean = sanitize_optional_string(tenant_id, cfg.strip_control_chars);
+    enforce_required_metadata(
+        &cfg.metadata_policy,
+        RequiredField::TenantId,
+        tenant_id_clean.is_some(),
+    )?;
+    let tenant_id = tenant_id_clean.unwrap_or_else(|| cfg.default_tenant_id.clone());
 
-    let received_at = metadata.received_at.unwrap_or_else(Utc::now);
+    let doc_id_clean = sanitize_optional_string(doc_id, cfg.strip_control_chars);
+    enforce_required_metadata(
+        &cfg.metadata_policy,
+        RequiredField::DocId,
+        doc_id_clean.is_some(),
+    )?;
+    let doc_id = doc_id_clean.unwrap_or_else(|| derive_doc_id(cfg, &tenant_id, record_id));
+
+    let received_at_opt = received_at;
+    enforce_required_metadata(
+        &cfg.metadata_policy,
+        RequiredField::ReceivedAt,
+        received_at_opt.is_some(),
+    )?;
+    let now = Utc::now();
+    if cfg.metadata_policy.reject_future_timestamps {
+        if let Some(ts) = received_at_opt.as_ref() {
+            if *ts > now {
+                return Err(IngestError::InvalidMetadata(
+                    "received_at lies in the future".into(),
+                ));
+            }
+        }
+    }
+    let received_at = received_at_opt.unwrap_or(now);
+
+    let original_source = sanitize_optional_string(original_source, cfg.strip_control_chars);
+    enforce_required_metadata(
+        &cfg.metadata_policy,
+        RequiredField::OriginalSource,
+        original_source.is_some(),
+    )?;
 
     Ok(NormalizedMetadata {
         tenant_id,
         doc_id,
         received_at,
         original_source,
-        attributes: metadata.attributes,
+        attributes,
     })
 }
 
@@ -237,6 +313,38 @@ fn derive_doc_id(cfg: &IngestConfig, tenant_id: &str, record_id: &str) -> String
     material.push(0);
     material.extend_from_slice(record_id.as_bytes());
     Uuid::new_v5(&cfg.doc_id_namespace, &material).to_string()
+}
+
+fn enforce_attribute_limit(
+    attributes: &mut Option<serde_json::Value>,
+    policy: &MetadataPolicy,
+) -> Result<(), IngestError> {
+    if let (Some(limit), Some(ref value)) = (policy.max_attribute_bytes, attributes.as_ref()) {
+        let serialized = serde_json::to_vec(value).map_err(|err| {
+            IngestError::InvalidMetadata(format!("attributes serialization failed: {err}"))
+        })?;
+        if serialized.len() > limit {
+            return Err(IngestError::InvalidMetadata(format!(
+                "attributes exceed {limit} bytes (got {})",
+                serialized.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn enforce_required_metadata(
+    policy: &MetadataPolicy,
+    field: RequiredField,
+    present: bool,
+) -> Result<(), IngestError> {
+    if policy.required_fields.iter().any(|f| *f == field) && !present {
+        return Err(IngestError::InvalidMetadata(format!(
+            "{:?} is required by ingest policy",
+            field
+        )));
+    }
+    Ok(())
 }
 
 fn validate_payload_requirements(
@@ -360,7 +468,7 @@ pub fn normalize_payload(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, NaiveDate, Utc};
+    use chrono::{DateTime, Duration, NaiveDate, Utc};
 
     fn fixed_timestamp() -> DateTime<Utc> {
         let Some(date) = NaiveDate::from_ymd_opt(2024, 1, 1) else {
@@ -559,5 +667,91 @@ mod tests {
         assert_eq!(rec.tenant_id, "tenant");
         assert_eq!(rec.doc_id, "doc");
         assert_eq!(rec.original_source.as_deref(), Some("source"));
+    }
+
+    #[test]
+    fn required_tenant_id_enforced() {
+        let record = RawIngestRecord {
+            id: "ingest-required-tenant".into(),
+            source: IngestSource::RawText,
+            metadata: IngestMetadata {
+                tenant_id: None,
+                doc_id: Some("doc".into()),
+                received_at: Some(fixed_timestamp()),
+                original_source: None,
+                attributes: None,
+            },
+            payload: Some(IngestPayload::Text("payload".into())),
+        };
+
+        let cfg = IngestConfig {
+            metadata_policy: MetadataPolicy {
+                required_fields: vec![RequiredField::TenantId],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(matches!(res, Err(IngestError::InvalidMetadata(_))));
+    }
+
+    #[test]
+    fn future_timestamp_rejected() {
+        let future = Utc::now() + Duration::days(1);
+        let record = RawIngestRecord {
+            id: "ingest-future-ts".into(),
+            source: IngestSource::Api,
+            metadata: IngestMetadata {
+                tenant_id: Some("tenant".into()),
+                doc_id: Some("doc".into()),
+                received_at: Some(future),
+                original_source: None,
+                attributes: None,
+            },
+            payload: None,
+        };
+
+        let cfg = IngestConfig {
+            metadata_policy: MetadataPolicy {
+                reject_future_timestamps: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(matches!(res, Err(IngestError::InvalidMetadata(msg)) if msg.contains("future")));
+    }
+
+    #[test]
+    fn max_attribute_bytes_enforced() {
+        let record = RawIngestRecord {
+            id: "ingest-attrs".into(),
+            source: IngestSource::Api,
+            metadata: IngestMetadata {
+                tenant_id: Some("tenant".into()),
+                doc_id: Some("doc".into()),
+                received_at: Some(fixed_timestamp()),
+                original_source: None,
+                attributes: Some(serde_json::json!({
+                    "blob": "x".repeat(32)
+                })),
+            },
+            payload: None,
+        };
+
+        let cfg = IngestConfig {
+            metadata_policy: MetadataPolicy {
+                max_attribute_bytes: Some(16),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(
+            matches!(res, Err(IngestError::InvalidMetadata(msg)) if msg.contains("attributes exceed"))
+        );
     }
 }

@@ -102,7 +102,7 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 | Config type          | Knobs you probably care about                                                | Default highlights                              |
 |----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
-| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`               | v1, deterministic namespace UUID, strip-on      |
+| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*` | v1, deterministic namespace UUID, strip-on, policies off |
 | `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
 | `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`   | v1, 9-token shingles, 16x8 MinHash, serial mode |
 
