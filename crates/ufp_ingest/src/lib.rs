@@ -270,14 +270,12 @@ fn normalize_metadata(
         received_at_opt.is_some(),
     )?;
     let now = Utc::now();
-    if cfg.metadata_policy.reject_future_timestamps {
-        if let Some(ts) = received_at_opt.as_ref() {
-            if *ts > now {
-                return Err(IngestError::InvalidMetadata(
-                    "received_at lies in the future".into(),
-                ));
-            }
-        }
+    if cfg.metadata_policy.reject_future_timestamps
+        && matches!(received_at_opt.as_ref(), Some(ts) if *ts > now)
+    {
+        return Err(IngestError::InvalidMetadata(
+            "received_at lies in the future".into(),
+        ));
     }
     let received_at = received_at_opt.unwrap_or(now);
 
