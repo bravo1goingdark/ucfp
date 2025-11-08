@@ -122,7 +122,8 @@ impl MetricsSpan {
     }
 
     fn record_perceptual(self, result: Result<(), PerceptualError>) {
-        self.recorder.record_perceptual(self.start.elapsed(), result);
+        self.recorder
+            .record_perceptual(self.start.elapsed(), result);
     }
 }
 
