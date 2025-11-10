@@ -10,7 +10,10 @@ ufp_canonical = { path = "crates/ufp_canonical" }
 ufp_ingest = { path = "crates/ufp_ingest" }
 ufp_perceptual = { path = "crates/ufp_perceptual" }
 ufp_semantic = { path = "crates/ufp_semantic" }
+ufp_index = { path = "crates/ufp_index" }
 chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+serde_json = "1.0"
 
 [dev-dependencies]
 criterion = { version = "0.5" }
@@ -23,5 +26,6 @@ harness = false
 members = ["crates/ufp_canonical",
     "crates/ufp_ingest",
     "crates/ufp_perceptual",
-    "crates/ufp_semantic"
+    "crates/ufp_semantic",
+    "crates/ufp_index"
 ]
