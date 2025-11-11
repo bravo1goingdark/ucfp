@@ -1,8 +1,8 @@
 # Universal Content Fingerprinting (UCFP)
 
 UCFP (Universal Content Fingerprint) is an open-source framework for generating unique, reproducible,
-and meaning-aware fingerprints across text, audio, image, video, and document payloads. It unifies 
-exact hashing, perceptual similarity, and semantic embeddings into one coherent pipeline,so developers
+and meaning-aware fingerprints across text, audio, image, video, and document payloads. It unifies
+exact hashing, perceptual similarity, and semantic embeddings into one coherent pipeline, so developers
 can identify, compare, and link content deterministically and perceptually. Built in Rust for speed and
 reliability, UCFP powers use cases such as deduplication, plagiarism detection, data cleaning, 
 content provenance, and multimodal search.
@@ -18,10 +18,11 @@ content provenance, and multimodal search.
   similarity search and near-duplicate detection straightforward.
 - **Semantic embeddings** – `ufp_semantic` turns canonical text into ONNX/API-backed dense vectors
   with deterministic fallbacks for offline tiers.
-- **Single entry point** – the root `ucfp` crate wires every stage into `process_record` and
-  `process_record_with_perceptual`, so applications can adopt the full pipeline one call at a time.
+- **Single entry point** – the root `ucfp` crate wires every stage into `process_record`,
+  `process_record_with_perceptual`, and `process_record_with_semantic`, so applications can adopt the
+  full pipeline one call at a time.
 - **Built-in observability** – plug in a `PipelineMetrics` recorder to capture latency and results for
-  ingest, canonical, and perceptual stages.
+  ingest, canonical, perceptual, and semantic stages.
 
 ## Use cases
 
@@ -77,9 +78,11 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 - `process_record` (ingest + canonicalize),
 - `process_record_with_perceptual` (full ingest → canonical → perceptual),
+- `process_record_with_semantic` (ingest → canonical → semantic embedding),
 - `process_record_with_*_configs` helpers when explicit configuration objects are needed,
+- `process_semantic_document` / `semanticize_document` when you need only the embedding,
 - `big_text_demo` for the bundled integration example,
-- `set_pipeline_metrics` / `PipelineMetrics` for observability hooks.
+- `set_pipeline_metrics` / `PipelineMetrics` and `set_pipeline_logger` for observability hooks.
 
 ### Layer responsibilities
 
@@ -159,7 +162,7 @@ assert_eq!(doc.canonical_text, "streamlined config demo");
 use chrono::{Duration, Utc};
 use ucfp::{
     CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
-    RawIngestRecord, process_record_with_perceptual,
+    RawIngestRecord, SemanticConfig, process_record_with_perceptual, semanticize_document,
 };
 
 let canonical_cfg = CanonicalizeConfig::default();

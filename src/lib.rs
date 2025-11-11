@@ -1,7 +1,28 @@
 //! Workspace umbrella crate for Universal Content Fingerprinting (UCFP).
 //!
-//! This crate stitches together ingest normalization and canonicalization so
-//! callers can operate over text payloads with a single API entry point.
+//! The `ucfp` crate re-exports the ingest, canonical, perceptual, and semantic
+//! layers so applications can drive the full pipeline through a single
+//! dependency. Helpers such as [`process_record_with_configs`],
+//! [`process_document_with_configs`], and [`process_record_with_semantic`]
+//! orchestrate the stages end-to-end, while lighter wrappers like
+//! [`process_document`] and [`process_semantic_document`] provide the common
+//! "just give me the fingerprint/embedding" entry points.
+//!
+//! ## Observability
+//!
+//! Metrics and structured logs can be captured by installing a
+//! [`PipelineMetrics`] recorder via [`set_pipeline_metrics`] and/or a
+//! [`PipelineEventLogger`] with [`set_pipeline_logger`]. Both hooks report
+//! latency, stage success/failure, and identifiers derived from the ingest or
+//! canonical steps.
+//!
+//! ## Errors
+//!
+//! Failures produced by any layer converge on [`PipelineError`], which maps the
+//! source error and preserves metadata for downstream handling. Callers can
+//! distinguish between ingest, canonical, perceptual, semantic, or
+//! non-text-payload failures without needing to depend on the individual
+//! workspace crates.
 
 pub use ufp_canonical::{
     CanonicalError, CanonicalizeConfig, CanonicalizedDocument, Token, canonicalize,
