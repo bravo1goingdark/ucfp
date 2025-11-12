@@ -1,4 +1,4 @@
-#![doc = include_str!("../README.md")]
+#![doc = include_str!("../doc/README.md")]
 
 mod backend;
 mod query;
@@ -31,6 +31,9 @@ pub use backend::RocksDbBackend;
 pub use backend::{BackendConfig, InMemoryBackend, IndexBackend};
 pub use query::{QueryMode, QueryResult};
 
+use bincode::config::standard;
+use bincode::error::{DecodeError, EncodeError};
+use bincode::serde::{decode_from_slice, encode_to_vec};
 use ndarray::Array1;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -173,8 +176,10 @@ impl IndexConfig {
 pub enum IndexError {
     #[error("Backend error: {0}")]
     Backend(String),
-    #[error("Serialization error: {0}")]
-    Serde(#[from] bincode::Error),
+    #[error("Serialization encode error: {0}")]
+    Encode(#[from] EncodeError),
+    #[error("Serialization decode error: {0}")]
+    Decode(#[from] DecodeError),
     #[error("Compression error: {0}")]
     Zstd(#[from] std::io::Error),
 }
@@ -252,11 +257,12 @@ impl UfpIndex {
 
     pub(crate) fn decode_record(&self, data: &[u8]) -> Result<IndexRecord, IndexError> {
         let decompressed = self.cfg.compression.decompress(data)?;
-        Ok(bincode::deserialize(&decompressed)?)
+        let (record, _) = decode_from_slice(&decompressed, standard())?;
+        Ok(record)
     }
 
     fn encode_record(&self, rec: &IndexRecord) -> Result<Vec<u8>, IndexError> {
-        let encoded = bincode::serialize(rec)?;
+        let encoded = encode_to_vec(rec, standard())?;
         self.cfg.compression.compress(&encoded)
     }
 }

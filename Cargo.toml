@@ -16,14 +16,15 @@ anyhow = "1.0"
 serde_json = "1.0"
 
 [dev-dependencies]
-criterion = { version = "0.5" }
+criterion = "0.5"
 
 [[bench]]
 name = "pipeline"
 harness = false
 
 [workspace]
-members = ["crates/ufp_canonical",
+members = [
+    "crates/ufp_canonical",
     "crates/ufp_ingest",
     "crates/ufp_perceptual",
     "crates/ufp_semantic",

@@ -57,6 +57,7 @@ cargo run --package ufp_canonical --example demo
 cargo run --package ufp_canonical --example helpers
 cargo run --package ufp_perceptual --example fingerprint_demo
 cargo run --package ufp_semantic --example embed "Doc Title" "Some text to embed"
+cargo run --example full_pipeline              # ingest + semantic + perceptual + index
 cargo run                              # end-to-end demo on big_text.txt
 cargo run --example pipeline_metrics   # observe metrics events
 ```

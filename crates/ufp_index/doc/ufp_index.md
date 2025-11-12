@@ -4,9 +4,9 @@
 
 `ufp_index` is the storage layer for UCFP fingerprints + embeddings. It
 provides deterministic quantization, compression, and search primitives while
-remaining backend-agnostic so deployments can pick RocksDB, Redis, Postgres,
-MongoDB, pure Rust KV stores (redb/sled), in-memory maps, or dynamically loaded
-plugins.
+remaining backend-agnostic so deployments can pick RocksDB for on-disk storage
+or the fast in-memory map for ephemeral workloads (and you can still inject a
+custom backend that implements the trait if you need one later).
 
 The crate exposes a single entry point (`UfpIndex`) that accepts a runtime
 [`IndexConfig`](#configuration) describing the backend, compression and
@@ -71,12 +71,6 @@ directly to `UfpIndex::new(cfg)`.
 | --- | --- |
 | `RocksDb { path }` | Default LSM store (requires `backend-rocksdb` feature; libclang dependency). |
 | `InMemory` | Non-persistent `HashMap`, great for tests/demos. |
-| `Redis { url, namespace }` | Remote cache / distributed store (feature `backend-redis`). |
-| `Postgres { dsn, table }` | SQL backend (feature `backend-postgres`), automatically creates the table if missing. |
-| `Mongo { uri, database, collection }` | Document store (feature `backend-mongo`). |
-| `Redb { path }` | Pure Rust B+tree storage, no FFI (feature `backend-redb`). |
-| `Sled { path }` | Another pure-Rust embedded KV store (feature `backend-sled`). |
-| `Plugin { library_path, symbol, config }` | Dynamically load a backend via `libloading` (`plugin-loader` feature) calling an `extern "C"` constructor. |
 
 ### Backend setup guide
 
@@ -92,55 +86,6 @@ directly to `UfpIndex::new(cfg)`.
       .with_compression(CompressionConfig::default());
   ```
 
-#### Redis
-- Enable feature: `--features backend-redis`.
-- Start Redis locally or supply `url` for hosted service.
-- Optional namespace isolates keys per deployment.
-  ```rust
-  let cfg = IndexConfig::new()
-      .with_backend(BackendConfig::redis("redis://localhost:6379", "ucfp"));
-  ```
-- Recommended: configure persistence (`appendonly yes`) so fingerprints survive restarts.
-
-#### Postgres
-- Enable feature: `--features backend-postgres`.
-- Requires a Postgres instance (local or managed) with `pgvector` optional for advanced similarity queries outside this crate.
-- `dsn` example: `postgres://user:pass@localhost:5432/ucfp`.
-- Table auto-created: `CREATE TABLE IF NOT EXISTS "<table>" (key TEXT PRIMARY KEY, value BYTEA)`.
-- Configure via:
-  ```rust
-  let cfg = IndexConfig::new()
-      .with_backend(BackendConfig::postgres("postgres://user:pass@localhost/ucfp", "fingerprints"));
-  ```
-
-#### MongoDB
-- Enable feature: `--features backend-mongo`.
-- Works with local `mongod`, MongoDB Atlas, or DocumentDB (compatible API).
-- Provide `uri`, `database`, and `collection` names. Documents are `{ key, value: Binary }`.
-  ```rust
-  let cfg = IndexConfig::new().with_backend(BackendConfig::mongo(
-      "mongodb://localhost:27017",
-      "ucfp",
-      "fingerprints",
-  ));
-  ```
-
-#### redb (pure Rust)
-- Enable feature: `--features backend-redb`.
-- Path points to a file (created if missing). Good for environments without libclang.
-- Example:
-  ```rust
-  let cfg = IndexConfig::new().with_backend(BackendConfig::redb("data/ufp.redb"));
-  ```
-
-#### sled (pure Rust)
-- Enable feature: `--features backend-sled`.
-- Path is a directory for sled tree files.
-- Useful for tests / embedded deployments; supports crash recovery out of the box.
-  ```rust
-  let cfg = IndexConfig::new().with_backend(BackendConfig::sled("data/sled-index"));
-  ```
-
 #### In-memory
 - Feature-free, no persistence.
 - Use for CI, fuzzing, or ephemeral demos.
@@ -148,22 +93,8 @@ directly to `UfpIndex::new(cfg)`.
   let cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
   ```
 
-#### Plugin loader
-- Enable feature: `--features plugin-loader`.
-- Build a shared library exposing `extern "C" fn create_backend(json: *const c_char) -> *mut dyn IndexBackend`.
-- Configure in code:
-  ```rust
-  use serde_json::json;
 
-  let cfg = IndexConfig::new().with_backend(BackendConfig::plugin(
-      "./libcustom_backend.so",
-      "create_backend",
-      json!({ "endpoint": "https://api.example.com" }),
-  ));
-  ```
-- The JSON payload is passed verbatim to the plugin constructor for custom settings.
-
-All backends implement the same trait, so you can inject your own via
+Both built-in backends implement the same trait, so you can inject your own via
 `UfpIndex::with_backend` (e.g., to reuse an existing connection pool).
 
 ### Compression (`CompressionConfig`)
@@ -234,53 +165,27 @@ let index = UfpIndex::new(cfg)?;
 // or: UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
 ```
 
-### Plugin backend
-
-1. Build a shared library exposing:
-   ```rust
-   #[no_mangle]
-   pub extern "C" fn create_backend(config_json: *const c_char) -> *mut dyn IndexBackend { ... }
-   ```
-2. Configure:
-   ```rust
-   use serde_json::json;
-
-   let cfg = IndexConfig::new().with_backend(BackendConfig::plugin(
-       "./libmy_backend.so",
-       "create_backend",
-       json!({ "replicas": 3 }),
-   ));
-   ```
-
 ## Feature Flags
 
 | Feature | Enables |
 | --- | --- |
 | `backend-rocksdb` *(default)* | RocksDB backend (requires libclang at build). |
-| `backend-redis` | Redis backend via `redis` crate. |
-| `backend-postgres` | Postgres backend using `postgres` crate. |
-| `backend-mongo` | MongoDB backend (sync driver). |
-| `backend-redb` | Pure-Rust redb backend. |
-| `backend-sled` | Pure-Rust sled backend. |
-| `plugin-loader` | Dynamic backend loading via `libloading`. |
-
-Disable default features (`--no-default-features`) to avoid RocksDB/FFI
-dependencies when using pure-Rust or remote backends in constrained
-environments.
+Disable default features (`--no-default-features`) to run purely in-memory
+without pulling in RocksDB or its libclang toolchain.
 
 ## Testing
 
 ```bash
-# Pure Rust (no RocksDB/libclang needed)
-cargo test -p ufp_index --no-default-features --features backend-sled
+# In-memory only (no RocksDB/libclang needed)
+cargo test -p ufp_index --no-default-features
 
-# Full suite with RocksDB
+# Full suite with RocksDB enabled
 cargo test -p ufp_index
 ```
 
 Unit tests cover serialization roundtrips, backend swaps, and query correctness.
-Integration tests/examples can be run per backend once the corresponding service
-is available (Redis/Postgres/Mongo).
+Integration tests/examples exercise both in-memory and RocksDB paths; enable the
+default feature set when you want parity with production deployments.
 
 ## Integration
 

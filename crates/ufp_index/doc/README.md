@@ -5,11 +5,11 @@ perceptual MinHash signatures, and quantized semantic embeddings for UCFP
 pipelines.
 
 ## Features
-- Pluggable storage layer: RocksDB (default), Redis, Postgres, MongoDB, redb,
-  sled, in-memory, or dynamically loaded plugins.
-- Backends are optional Cargo features (`backend-redis`, `backend-postgres`,
-  `backend-mongo`, `backend-redb`, `backend-sled`, `plugin-loader`) so builds
-  only pull in the dependencies you enable.
+- Storage options: RocksDB (default) for durable indexing or the fast
+  in-memory backend when you only need ephemeral state (tests, demos, lambdas).
+- RocksDB lives behind the `backend-rocksdb` feature so you can build a
+  dependency-light, in-memory-only binary when native libraries are
+  unavailable.
 - Runtime-configurable compression (zstd or none) and quantization strategies.
 - Perceptual MinHash storage with deterministic metadata.
 - Schema versioning via the exported `INDEX_SCHEMA_VERSION` constant for safe migrations.
@@ -53,10 +53,9 @@ let index = UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
 ```
 
 Run `cargo run -p ufp_index --example index_demo` to see end-to-end insert +
-semantic/perceptual queries with the default RocksDB backend. Swap to Redis,
-Postgres, MongoDB, redb, sled, in-memory, or a plugin backend by calling
-`IndexConfig::with_backend(...)` in your initialization code -- no config files
-required.
+semantic/perceptual queries with the default RocksDB backend. Switch to the
+fast in-memory backend by calling `IndexConfig::with_backend(...)` in your
+initialization code—no config files required.
 
 ## Architecture at a glance
 - **Data model:** `IndexRecord` captures the canonical hash, optional perceptual
@@ -69,8 +68,9 @@ required.
   quantization strategy. Clone it when you need to keep the same knobs in
   application state or mirror them inside background workers.
 - **Storage abstraction:** The `IndexBackend` trait isolates persistence so you
-  can pick RocksDB, Redis, Postgres, MongoDB, redb, sled, an in-memory map, or a
-  dynamically loaded plugin. Each backend only needs to implement six methods.
+  can pick RocksDB or the in-memory map today (and keep the door open for
+  bespoke implementations later). Each backend only needs to implement six
+  methods.
 - **Compression + quantization:** `CompressionConfig` (currently none/zstd)
   shrinks serialized payloads before they hit the backend; `QuantizationConfig`
   performs deterministic `i8` conversion on semantic vectors so cosine scores
