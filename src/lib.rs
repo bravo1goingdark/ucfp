@@ -11,39 +11,58 @@
 //! ## Quick start
 //!
 //! The pipeline helpers accept a raw ingest record plus the configuration
-//! bundles that describe how each stage should behave. A minimal end-to-end run
-//! wires up ingest, canonical, and perceptual stages (semantic is optional) and
-//! returns the canonical payload together with any derived signals:
+//! bundles that describe how each stage should behave. [`process_record_with_configs`]
+//! returns the canonical document, while [`process_record_with_perceptual_configs`]
+//! and [`process_record_with_semantic_configs`] keep running the canonical output
+//! through the fingerprinting and embedding layers when you need those signals.
 //!
 //! ```ignore
+//! use chrono::Utc;
 //! use ucfp::{
-//!     process_record_with_configs, IngestConfig, CanonicalizeConfig, PerceptualConfig,
-//!     SemanticConfig, RawIngestRecord,
+//!     process_record_with_configs, process_record_with_perceptual_configs,
+//!     process_record_with_semantic_configs, CanonicalizeConfig, IngestConfig,
+//!     IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
+//!     SemanticConfig,
 //! };
 //!
 //! # fn demo() -> Result<(), ucfp::PipelineError> {
 //! let ingest_config = IngestConfig::default();
 //! let canonical_config = CanonicalizeConfig::default();
 //! let perceptual_config = PerceptualConfig::default();
-//! let semantic_config = Some(SemanticConfig::default());
+//! let semantic_config = SemanticConfig::default();
 //!
 //! let record = RawIngestRecord {
-//!     record_id: "doc-123".into(),
-//!     tenant_id: Some("tenant-a".into()),
-//!     payload: "Hello, world!".into(),
-//!     ..Default::default()
+//!     id: "doc-123".into(),
+//!     source: IngestSource::RawText,
+//!     metadata: IngestMetadata {
+//!         tenant_id: Some("tenant-a".into()),
+//!         doc_id: None,
+//!         received_at: Some(Utc::now()),
+//!         original_source: None,
+//!         attributes: None,
+//!     },
+//!     payload: Some(IngestPayload::Text("Hello, world!".into())),
 //! };
 //!
-//! let output = process_record_with_configs(
-//!     record,
+//! let canonical = process_record_with_configs(
+//!     record.clone(),
+//!     &ingest_config,
+//!     &canonical_config,
+//! )?;
+//!
+//! let (_, fingerprint) = process_record_with_perceptual_configs(
+//!     record.clone(),
 //!     &ingest_config,
 //!     &canonical_config,
 //!     &perceptual_config,
-//!     semantic_config.as_ref(),
 //! )?;
 //!
-//! assert!(output.perceptual_fingerprint.is_some());
-//! assert!(output.semantic_embedding.is_some());
+//! let (_, embedding) = process_record_with_semantic_configs(
+//!     record,
+//!     &ingest_config,
+//!     &canonical_config,
+//!     &semantic_config,
+//! )?;
 //! # Ok(())
 //! # }
 //! ```
@@ -70,17 +89,19 @@
 //!
 //! In typical services these hooks are registered once during startup alongside
 //! construction of the ingest/canonical/perceptual/semantic configs, ensuring
-//! that every call to [`process_record_with_configs`] shares a consistent view
-//! of pipeline behaviour and instrumentation.
+//! that every call to [`process_record_with_configs`] (and the helpers layered
+//! on top of it) shares a consistent view of pipeline behaviour and instrumentation.
 //!
 //! ## Indexing and downstream integration
 //!
 //! The canonical document, perceptual fingerprint, and optional semantic
-//! embedding produced by the helpers map directly into the index types exposed
+//! embedding produced by these helpers map directly into the index types exposed
 //! by the companion [`ufp_index`](https://docs.rs/ufp_index) crate. The
 //! [`IndexRecord`](https://docs.rs/ufp_index/latest/ufp_index/struct.IndexRecord.html)
-//! struct mirrors the output fields returned by [`process_record_with_configs`]
-//! so search or deduplication services can ingest them without translation.
+//! struct mirrors the combined outputs returned by
+//! [`process_record_with_perceptual_configs`] and
+//! [`process_record_with_semantic_configs`] so search or deduplication services
+//! can ingest them without translation.
 //! When semantic embeddings are disabled the struct fields simply remain
 //! `None`, allowing downstream systems to handle mixed-mode deployments.
 //!
