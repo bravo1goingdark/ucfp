@@ -38,8 +38,7 @@ jobs:
       # System deps for onnx / image / db crates
       # -----------------------------------------
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y \
-          clang libclang-dev llvm-dev
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev llvm-dev
 
       # -----------------------------------------
       # Formatting check
