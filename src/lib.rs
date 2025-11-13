@@ -8,13 +8,81 @@
 //! [`process_document`] and [`process_semantic_document`] provide the common
 //! "just give me the fingerprint/embedding" entry points.
 //!
+//! ## Quick start
+//!
+//! The pipeline helpers accept a raw ingest record plus the configuration
+//! bundles that describe how each stage should behave. A minimal end-to-end run
+//! wires up ingest, canonical, and perceptual stages (semantic is optional) and
+//! returns the canonical payload together with any derived signals:
+//!
+//! ```ignore
+//! use ucfp::{
+//!     process_record_with_configs, IngestConfig, CanonicalizeConfig, PerceptualConfig,
+//!     SemanticConfig, RawIngestRecord,
+//! };
+//!
+//! # fn demo() -> Result<(), ucfp::PipelineError> {
+//! let ingest_config = IngestConfig::default();
+//! let canonical_config = CanonicalizeConfig::default();
+//! let perceptual_config = PerceptualConfig::default();
+//! let semantic_config = Some(SemanticConfig::default());
+//!
+//! let record = RawIngestRecord {
+//!     record_id: "doc-123".into(),
+//!     tenant_id: Some("tenant-a".into()),
+//!     payload: "Hello, world!".into(),
+//!     ..Default::default()
+//! };
+//!
+//! let output = process_record_with_configs(
+//!     record,
+//!     &ingest_config,
+//!     &canonical_config,
+//!     &perceptual_config,
+//!     semantic_config.as_ref(),
+//! )?;
+//!
+//! assert!(output.perceptual_fingerprint.is_some());
+//! assert!(output.semantic_embedding.is_some());
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! For workloads that already carry canonicalized tokens you can call
+//! [`process_record_with_perceptual_configs`] or [`process_record_with_semantic`]
+//! to begin at later stages. Document-centric helpers such as
+//! [`process_document_with_configs`] and [`process_document`] wrap the ingest
+//! step for caller convenience.
+//!
 //! ## Observability
 //!
 //! Metrics and structured logs can be captured by installing a
 //! [`PipelineMetrics`] recorder via [`set_pipeline_metrics`] and/or a
-//! [`PipelineEventLogger`] with [`set_pipeline_logger`]. Both hooks report
-//! latency, stage success/failure, and identifiers derived from the ingest or
-//! canonical steps.
+//! [`PipelineEventLogger`] with [`set_pipeline_logger`]. Both hooks receive the
+//! `record_id`, optional document/tenant identifiers, and the concrete stage
+//! outcome so deployments can correlate with upstream systems. The ingest and
+//! canonical configs typically inject those identifiers (for example from HTTP
+//! headers) while perceptual and semantic configs fine-tune downstream
+//! processing; the observability hooks therefore expose the same context that
+//! operators configure in those stages. `PipelineMetrics` is best suited for
+//! emitting latency/histogram telemetry, whereas `PipelineEventLogger` provides
+//! structured events for centralized logging.
+//!
+//! In typical services these hooks are registered once during startup alongside
+//! construction of the ingest/canonical/perceptual/semantic configs, ensuring
+//! that every call to [`process_record_with_configs`] shares a consistent view
+//! of pipeline behaviour and instrumentation.
+//!
+//! ## Indexing and downstream integration
+//!
+//! The canonical document, perceptual fingerprint, and optional semantic
+//! embedding produced by the helpers map directly into the index types exposed
+//! by the companion [`ufp_index`](https://docs.rs/ufp_index) crate. The
+//! [`IndexRecord`](https://docs.rs/ufp_index/latest/ufp_index/struct.IndexRecord.html)
+//! struct mirrors the output fields returned by [`process_record_with_configs`]
+//! so search or deduplication services can ingest them without translation.
+//! When semantic embeddings are disabled the struct fields simply remain
+//! `None`, allowing downstream systems to handle mixed-mode deployments.
 //!
 //! ## Errors
 //!
