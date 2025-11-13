@@ -2,8 +2,7 @@ name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
 
 jobs:
@@ -14,22 +13,57 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # -----------------------------------------
+      # Rust toolchain (fast + reliable)
+      # -----------------------------------------
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          override: true
           components: rustfmt, clippy
 
+      # -----------------------------------------
+      # Enable sccache for massive speedups
+      # -----------------------------------------
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.3
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+
+      # -----------------------------------------
+      # Cache cargo artifacts
+      # -----------------------------------------
+      - name: Cache Cargo registry + git + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      # -----------------------------------------
+      # Install system deps (LLVM/Clang)
+      # -----------------------------------------
       - name: Install system deps
         run: sudo apt-get update && sudo apt-get install -y clang libclang-dev llvm-dev
 
+      # -----------------------------------------
+      # Format (fast-fail)
+      # -----------------------------------------
       - name: Cargo fmt
         run: cargo fmt --all -- --check
 
+      # -----------------------------------------
+      # Lint
+      # -----------------------------------------
       - name: Cargo clippy
-        run: cargo clippy --all --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
+      # -----------------------------------------
+      # Test (with cache + sccache)
+      # -----------------------------------------
       - name: Cargo test
-        run: cargo test --all
+        run: cargo test --workspace --all-targets -- --nocapture
