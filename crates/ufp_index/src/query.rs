@@ -143,6 +143,8 @@ impl UfpIndex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BackendConfig, IndexConfig, INDEX_SCHEMA_VERSION};
+    use serde_json::json;
 
     #[test]
     fn jaccard_similarity_counts_value_matches() {
@@ -154,5 +156,102 @@ mod tests {
         let score = UfpIndex::jaccard_similarity(&query_set, &candidate, &mut scratch);
 
         assert!((score - (2.0 / 6.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn semantic_search_orders_by_score_and_tie_breaks_hashes() {
+        let index = seed_index(vec![
+            semantic_record("doc-b", &[5, 0, 0, 0]),
+            semantic_record("doc-a", &[5, 0, 0, 0]),
+            semantic_record("doc-c", &[1, 1, 1, 1]),
+        ]);
+
+        let query = IndexRecord {
+            schema_version: INDEX_SCHEMA_VERSION,
+            canonical_hash: "query".into(),
+            perceptual: None,
+            embedding: Some(vec![5, 0, 0, 0]),
+            metadata: json!({}),
+        };
+
+        let hits = index
+            .search(&query, QueryMode::Semantic, 3)
+            .expect("semantic search");
+        assert_eq!(hits.len(), 3);
+        assert_eq!(hits[0].canonical_hash, "doc-a");
+        assert_eq!(hits[1].canonical_hash, "doc-b");
+        assert_eq!(hits[2].canonical_hash, "doc-c");
+        assert!((hits[0].score - hits[1].score).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn perceptual_search_respects_top_k_and_filters_zero_scores() {
+        let index = seed_index(vec![
+            perceptual_record("doc-a", &[1, 2, 9, 10]),
+            perceptual_record("doc-b", &[3, 4, 7, 8]),
+            perceptual_record("doc-c", &[10, 11, 12, 13]),
+        ]);
+
+        let query = IndexRecord {
+            schema_version: INDEX_SCHEMA_VERSION,
+            canonical_hash: "query".into(),
+            perceptual: Some(vec![3, 4, 7, 8]),
+            embedding: None,
+            metadata: json!({}),
+        };
+
+        let hits = index
+            .search(&query, QueryMode::Perceptual, 1)
+            .expect("perceptual search");
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].canonical_hash, "doc-b");
+        assert!(hits[0].score > 0.0);
+    }
+
+    #[test]
+    fn zero_top_k_short_circuits() {
+        let index = seed_index(vec![semantic_record("doc-a", &[1, 0, 0, 0])]);
+        let query = IndexRecord {
+            schema_version: INDEX_SCHEMA_VERSION,
+            canonical_hash: "query".into(),
+            embedding: Some(vec![1, 0, 0, 0]),
+            perceptual: None,
+            metadata: json!({}),
+        };
+
+        let hits = index
+            .search(&query, QueryMode::Semantic, 0)
+            .expect("semantic search");
+        assert!(hits.is_empty());
+    }
+
+    fn seed_index(records: Vec<IndexRecord>) -> UfpIndex {
+        let cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
+        let index = UfpIndex::new(cfg).expect("index init");
+        for record in records {
+            index.upsert(&record).expect("seed record");
+        }
+        index
+    }
+
+    fn semantic_record(hash: &str, embedding: &[i8]) -> IndexRecord {
+        IndexRecord {
+            schema_version: INDEX_SCHEMA_VERSION,
+            canonical_hash: hash.into(),
+            perceptual: None,
+            embedding: Some(embedding.to_vec()),
+            metadata: json!({ "hash": hash }),
+        }
+    }
+
+    fn perceptual_record(hash: &str, fingerprint: &[u64]) -> IndexRecord {
+        IndexRecord {
+            schema_version: INDEX_SCHEMA_VERSION,
+            canonical_hash: hash.into(),
+            perceptual: Some(fingerprint.to_vec()),
+            embedding: None,
+            metadata: json!({ "hash": hash }),
+        }
     }
 }
