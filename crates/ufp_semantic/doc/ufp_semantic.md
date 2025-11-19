@@ -3,9 +3,10 @@
 ## Purpose
 
 `ufp_semantic` converts canonicalized text into dense vector embeddings using transformer models
-packaged as ONNX graphs. The crate keeps runtime requirements tiny (CPU-only by default), provides
-stubbed outputs for offline or "fast" tiers, and normalizes every embedding so downstream search and
-similarity components receive consistent vectors.
+packaged as ONNX graphs. The crate keeps runtime requirements tiny (CPU-only by default), caches
+tokenizers and ONNX sessions per thread for low-latency reuse, provides stubbed outputs for offline
+or "fast" tiers (plus automatic fallback when model assets are missing), and normalizes every
+embedding so downstream search and similarity components receive consistent vectors.
 
 The pipeline:
 
@@ -17,8 +18,9 @@ The pipeline:
 
 Setting `tier` or `mode` to `"fast"` returns a deterministic stub generator for offline testing.
 Other tiers expect ONNX assets to exist locally or be downloadable through the configured
-`model_url` / `tokenizer_url`; when those artifacts are missing the crate surfaces a descriptive
-`SemanticError` instead of silently falling back.
+`model_url` / `tokenizer_url`; when those artifacts are missing (or temporarily unreachable) the
+crate automatically falls back to the deterministic stub so pipelines keep running. Fatal
+`SemanticError`s only arise from misconfiguration (e.g., unknown inputs, invalid URLs, etc.).
 
 ## Key Types
 
@@ -71,8 +73,8 @@ pub fn semanticize(
 ) -> Result<SemanticEmbedding, SemanticError>;
 ```
 
-- `semanticize` orchestrates tokenizer loading, ONNX session creation, inference, and optional
-  normalization. Unknown ONNX inputs produce a descriptive `SemanticError`.
+- `semanticize` orchestrates tokenizer resolution, cached ONNX session creation/reuse, inference,
+  and optional normalization. Unknown ONNX inputs still produce a descriptive `SemanticError`.
 - The fallback generator used by the `"fast"` tier is exposed internally through `make_stub_embedding`
   (useful for deterministic fixtures and integration tests).
 
@@ -84,8 +86,8 @@ pub fn semanticize(
   providers, and `"fast"` always emits the deterministic stub without touching models.
 - `model_name`: purely descriptive, echoed in the resulting `SemanticEmbedding`.
 - `model_path`: local filesystem path to the ONNX export. Provide `model_url` (and `tokenizer_url`)
-  when you want the crate to download assets on demand; missing files without URLs result in
-  `SemanticError::ModelNotFound` / `SemanticError::TokenizerMissing`.
+  when you want the crate to download assets on demand; when assets are missing or the download
+  fails the crate falls back to the deterministic stub instead of erroring out.
 - `api_url` / `api_auth_header` / `api_provider` / `api_timeout_secs`: configure remote inference.
   API mode always requires `api_url`; the other fields are optional helpers for authentication and
   request shaping.
@@ -97,6 +99,8 @@ pub fn semanticize(
 
 Drop your ONNX model under `models/<name>/onnx/<file>.onnx` alongside its tokenizer JSON; the new
 integration test `test_real_model_inference` shows the expected layout using the BGE small encoder.
+Once a session loads successfully, it is cached within the thread so subsequent calls reuse the same
+tokenizer and ONNX graph without paying I/O or compilation costs.
 
 ### Remote API mode
 
@@ -120,7 +124,8 @@ let embedding = semanticize("doc-42", "hello world", &cfg)?;
 ```
 
 Need stub behavior? Skip API mode entirely and set `mode = "fast"` (or `tier = "fast"`) so the
-deterministic generator returns immediately.
+deterministic generator returns immediately. When `mode = "onnx"` but models are missing, the stub
+is used automatically.
 
 ## Example
 
@@ -145,9 +150,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-If the ONNX model or tokenizer is missing and no download URL is configured, the call returns
-`SemanticError::ModelNotFound`/`TokenizerMissing`. Configure `model_url` + `tokenizer_url` or switch
-to the `"fast"` tier/mode whenever you want the deterministic stub instead of full inference.
+If the ONNX model or tokenizer is missing and no download URL is configured, the call still
+completes by falling back to the deterministic stub. Configure `model_url` + `tokenizer_url` when
+you want automatic downloading, or set `mode = "fast"` to force stub behavior explicitly.
 
 ### Running the example
 
@@ -173,4 +178,6 @@ graph (enabled once the model assets are available locally).
 
 `SemanticEmbedding` is designed to feed the ingest + pipeline crates. Each embedding carries the
 document id, tier, and normalization flag so downstream services (e.g., ANN indexes) can select the
-right scorer or apply batching heuristics without re-reading configuration.
+right scorer or apply batching heuristics without re-reading configuration. The cached ONNX sessions
+and batched inputs used by `semanticize_batch` keep steady-state pipelines efficient even under high
+load.
