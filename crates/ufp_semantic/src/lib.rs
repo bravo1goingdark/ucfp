@@ -615,7 +615,7 @@ fn execute_session(
     if flat.is_empty() {
         return Ok(vec![Vec::new(); batch]);
     }
-    if flat.len() % batch != 0 {
+    if !flat.len().is_multiple_of(batch) {
         return Err(SemanticError::Inference(format!(
             "model output shape {}/{} is not divisible",
             flat.len(),
