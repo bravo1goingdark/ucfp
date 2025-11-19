@@ -64,18 +64,28 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
 
 - `perceptualize_tokens` drives the full shingle -> winnow -> MinHash pipeline.
 - `make_shingles_rolling` exposes the deterministic rolling hash, allowing custom winnowing strategies.
-- `winnow_minq` implements a monotonic deque with rightmost tie-breaking for consistent minima.
+- `winnow_minq` implements a monotonic deque with rightmost tie-breaking for consistent minima. The deque stores candidate indices in non-decreasing hash order, evicts stale entries as the window slides, and inspects the **front** element so we truly pick the minimum hash (older revisions accidentally peeked at the back, selecting maxima). When hashes tie, newer candidates replace older ones to enforce deterministic rightmost minima.
 - `minhash_signature` supports optional Rayon-backed parallelism when `cfg.use_parallel` is `true`.
+
+### Winnowing behavior
+
+`winnow_minq` guarantees coverage even when `w` is larger than the shingle count by clamping to at least one window. Each step:
+
+1. Drops indices that fell left of the current window.
+2. Pops trailing candidates whose hash is greater than or equal to the new entrant.
+3. Emits the front index if it differs from the previously published shingle.
+
+This mirrors the classic winnowing algorithm and produces deterministic fingerprints for deduplication and similarity scoring.
 
 ### Configuration Fields
 
-- `version` — Semantic version of the configuration; must be >= 1.
-- `k` — Tokens per shingle window. Larger values capture longer phrases while reducing the number of shingles; defaults to 9.
-- `w` — Winnowing window size. Smaller windows retain more fingerprints; defaults to 4.
-- `minhash_bands` — Number of MinHash bands. Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
-- `minhash_rows_per_band` — Rows per band. Defaults to 8, producing 128 MinHash values with the default band count.
-- `seed` — Master seed feeding both rolling hash and MinHash permutations for deterministic output.
-- `use_parallel` — Enables Rayon-backed parallel MinHash computation when `true`.
+- `version` - Semantic version of the configuration; must be >= 1.
+- `k` - Tokens per shingle window. Larger values capture longer phrases while reducing the number of shingles; defaults to 9.
+- `w` - Winnowing window size (in shingles). Smaller windows retain more fingerprints; defaults to 4. When `w` exceeds the number of shingles we treat the entire document as a single window so at least one fingerprint is emitted.
+- `minhash_bands` - Number of MinHash bands. Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
+- `minhash_rows_per_band` - Rows per band. Defaults to 8, producing 128 MinHash values with the default band count.
+- `seed` - Master seed feeding both rolling hash and MinHash permutations for deterministic output.
+- `use_parallel` - Enables Rayon-backed parallel MinHash computation when `true`.
 
 ## Example
 
@@ -101,7 +111,7 @@ assert_eq!(fingerprint.meta.use_parallel, false);
 
 ### Examples
 
-- `cargo run --package ufp_perceptual --example fingerprint_demo` — prints shingles, winnowed selections, and MinHash output for a sample sentence.
+- `cargo run --package ufp_perceptual --example fingerprint_demo` - prints shingles, winnowed selections, and MinHash output for a sample sentence.
 
 ## Testing
 
@@ -114,6 +124,7 @@ Unit tests cover determinism, parallel vs sequential parity, invalid configurati
 ## Integration
 
 `PerceptualFingerprint` is the third step in the UCFP pipeline. After ingest normalization (`ufp_ingest`) and canonicalization (`ufp_canonical`), pass canonical tokens into `perceptualize_tokens` to obtain similarity-aware fingerprints for clustering, deduplication, or indexing.
+
 
 
 
