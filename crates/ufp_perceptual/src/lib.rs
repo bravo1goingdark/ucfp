@@ -237,8 +237,10 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
                 out: &mut Vec<WinnowedShingle>,
                 last: &mut Option<usize>,
                 vals: &[u64]| {
-        // Rightmost tie-breaking keeps winnowing deterministic when minima repeat.
-        if let Some(&idx) = dq.back() {
+        // Rightmost tie-breaking keeps winnowing deterministic when minima repeat. The
+        // deque is maintained in non-decreasing order, so the *front* entry is the
+        // current minimum for the window.
+        if let Some(&idx) = dq.front() {
             if *last != Some(idx) {
                 out.push(WinnowedShingle {
                     hash: vals[idx],
@@ -469,5 +471,16 @@ mod tests {
             let expected = xxh3_64_with_seed(token.as_bytes(), 99);
             assert_eq!(*hash, expected);
         }
+    }
+
+    #[test]
+    fn winnow_minq_selects_window_minima() {
+        // Explicit hashes make it easy to reason about the chosen shingles.
+        let shingles = vec![9, 3, 5, 3, 4];
+        let picked = winnow_minq(&shingles, 3);
+        let hashes: Vec<u64> = picked.iter().map(|s| s.hash).collect();
+        assert_eq!(hashes, vec![3, 3], "expected minima per window");
+        let indices: Vec<usize> = picked.iter().map(|s| s.start_idx).collect();
+        assert_eq!(indices, vec![1, 3], "should prefer rightmost minima when tied");
     }
 }
