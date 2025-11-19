@@ -1,11 +1,16 @@
 //! ufp_semantic: Meaning-level fingerprinting with runtime-configurable models.
 //!
 //! Converts canonicalized text into dense embeddings using ONNX transformer models.
-//! Falls back to deterministic stub if model isn't found. Designed for full offline
-//! operation and configurable model tiers (fast, balanced, accurate).
+//! Falls back to deterministic stub if model assets are missing or temporarily unreachable.
+//! Designed for full offline operation, configurable model tiers (fast, balanced, accurate),
+//! and low-latency inference via per-thread caching of tokenizers and ONNX sessions.
 
 use once_cell::sync::OnceCell;
-use onnxruntime::{environment::Environment, ndarray::Array};
+use onnxruntime::{
+    environment::Environment,
+    ndarray::{Array, Array2},
+    session::Session,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -13,14 +18,52 @@ use tokenizers::Tokenizer;
 use ureq::AgentBuilder;
 
 use std::{
+    cell::RefCell,
+    collections::HashMap,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
+    rc::Rc,
     time::Duration,
 };
 
 static ORT_ENV: OnceCell<Environment> = OnceCell::new();
 const ORT_NAME: &str = "ufp_semantic";
+
+thread_local! {
+    static MODEL_CACHE: RefCell<HashMap<ModelCacheKey, Rc<CachedModel>>> =
+        RefCell::new(HashMap::new());
+}
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct ModelCacheKey {
+    model_path: PathBuf,
+    tokenizer_path: PathBuf,
+}
+
+struct CachedModel {
+    tokenizer: Tokenizer,
+    session: RefCell<Session<'static>>,
+}
+
+impl CachedModel {
+    fn load(assets: &ModelAssets) -> Result<Self, SemanticError> {
+        let tokenizer = Tokenizer::from_file(&assets.tokenizer_path)
+            .map_err(|e| SemanticError::Inference(e.to_string()))?;
+
+        let env = ort_environment()?;
+        let session = env
+            .new_session_builder()
+            .map_err(|e| SemanticError::Inference(e.to_string()))?
+            .with_model_from_file(assets.model_path.clone())
+            .map_err(|e| SemanticError::Inference(e.to_string()))?;
+
+        Ok(Self {
+            tokenizer,
+            session: RefCell::new(session),
+        })
+    }
+}
 
 #[derive(Clone, Copy)]
 enum ApiProviderKind {
@@ -160,81 +203,20 @@ pub fn semanticize(
         return Ok(make_stub_embedding(doc_id, text, cfg));
     }
 
-    let assets = resolve_model_assets(cfg)?;
-
-    let tokenizer = Tokenizer::from_file(&assets.tokenizer_path)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-    let enc = tokenizer
-        .encode(text, true)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-    let ids: Vec<i64> = enc.get_ids().iter().map(|&x| x as i64).collect();
-    let mask: Vec<i64> = enc.get_attention_mask().iter().map(|&x| x as i64).collect();
-
-    let seq_len = ids.len();
-    let attn_len = mask.len();
-
-    let env = ort_environment()?;
-    let mut session = env
-        .new_session_builder()
-        .map_err(|e| SemanticError::Inference(e.to_string()))?
-        .with_model_from_file(&assets.model_path)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-
-    let input_ids = Array::from_shape_vec((1, seq_len), ids)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-    let attn_mask = Array::from_shape_vec((1, attn_len), mask)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-
-    let mut runtime_inputs = Vec::with_capacity(session.inputs.len());
-    let mut input_ids_tensor = Some(input_ids);
-    let mut attn_mask_tensor = Some(attn_mask);
-
-    for input in &session.inputs {
-        match input.name.as_str() {
-            "input_ids" => {
-                let tensor = input_ids_tensor.take().ok_or_else(|| {
-                    SemanticError::InvalidConfig(
-                        "model requested `input_ids` multiple times".into(),
-                    )
-                })?;
-                runtime_inputs.push(tensor.into_dyn());
-            }
-            "attention_mask" => {
-                let tensor = attn_mask_tensor.take().ok_or_else(|| {
-                    SemanticError::InvalidConfig(
-                        "model requested `attention_mask` multiple times".into(),
-                    )
-                })?;
-                runtime_inputs.push(tensor.into_dyn());
-            }
-            "token_type_ids" => {
-                let tensor = Array::from_elem((1, seq_len), 0_i64);
-                runtime_inputs.push(tensor.into_dyn());
-            }
-            other => {
-                return Err(SemanticError::Inference(format!(
-                    "unsupported model input '{other}'"
-                )))
-            }
+    let assets = match resolve_model_assets(cfg) {
+        Ok(assets) => assets,
+        Err(err) if should_fallback_to_stub(&err) => {
+            return Ok(make_stub_embedding(doc_id, text, cfg));
         }
-    }
+        Err(err) => return Err(err),
+    };
 
-    if runtime_inputs.is_empty() {
-        return Err(SemanticError::Inference(
-            "model did not declare any inputs".into(),
-        ));
-    }
-
-    let outputs = session
-        .run::<i64, f32, _>(runtime_inputs)
-        .map_err(|e| SemanticError::Inference(e.to_string()))?;
-
-    let output_tensor = outputs
-        .into_iter()
-        .next()
+    let handle = get_or_load_model_handle(&assets)?;
+    let texts = [text];
+    let mut vectors = run_onnx_embeddings(handle.as_ref(), &texts)?;
+    let mut embedding = vectors
+        .pop()
         .ok_or_else(|| SemanticError::Inference("model returned no outputs".into()))?;
-
-    let mut embedding: Vec<f32> = output_tensor.iter().copied().collect();
 
     if cfg.normalize {
         l2_normalize_in_place(&mut embedding);
@@ -254,8 +236,9 @@ pub fn semanticize(
 
 /// Batch variant of [`semanticize`] that reuses the configured mode.
 ///
-/// For `"api"` mode, the function prefers provider-native batch semantics; other modes fall back to
-/// per-document inference.
+/// For `"api"` mode, the function prefers provider-native batch semantics; ONNX mode now shares the
+/// cached session and executes a single batched inference (padding shorter sequences) so callers
+/// pay the setup cost only once per batch.
 pub fn semanticize_batch<'a, D, T>(
     docs: &'a [(D, T)],
     cfg: &SemanticConfig,
@@ -265,16 +248,66 @@ where
     T: AsRef<str> + 'a,
 {
     match cfg.mode.as_str() {
-        "fast" => docs
+        "fast" => {
+            return docs
+                .iter()
+                .map(|(doc_id, text)| Ok(make_stub_embedding(doc_id.as_ref(), text.as_ref(), cfg)))
+                .collect()
+        }
+        "api" => return semanticize_batch_via_api(docs, cfg),
+        _ => {}
+    }
+
+    if docs.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if cfg.tier == "fast" {
+        return docs
             .iter()
             .map(|(doc_id, text)| Ok(make_stub_embedding(doc_id.as_ref(), text.as_ref(), cfg)))
-            .collect(),
-        "api" => semanticize_batch_via_api(docs, cfg),
-        _ => docs
-            .iter()
-            .map(|(doc_id, text)| semanticize(doc_id.as_ref(), text.as_ref(), cfg))
-            .collect(),
+            .collect();
     }
+
+    let assets = match resolve_model_assets(cfg) {
+        Ok(assets) => assets,
+        Err(err) if should_fallback_to_stub(&err) => {
+            return docs
+                .iter()
+                .map(|(doc_id, text)| Ok(make_stub_embedding(doc_id.as_ref(), text.as_ref(), cfg)))
+                .collect();
+        }
+        Err(err) => return Err(err),
+    };
+
+    let handle = get_or_load_model_handle(&assets)?;
+    let text_refs: Vec<&str> = docs.iter().map(|(_, text)| text.as_ref()).collect();
+    let embeddings = run_onnx_embeddings(handle.as_ref(), &text_refs)?;
+    if embeddings.len() != docs.len() {
+        return Err(SemanticError::Inference(format!(
+            "model returned {} embeddings for {} inputs",
+            embeddings.len(),
+            docs.len()
+        )));
+    }
+
+    let mut results = Vec::with_capacity(docs.len());
+    for ((doc_id, _), mut vector) in docs.iter().zip(embeddings.into_iter()) {
+        if cfg.normalize {
+            l2_normalize_in_place(&mut vector);
+        }
+        let embedding_dim = vector.len();
+        results.push(SemanticEmbedding {
+            doc_id: doc_id.as_ref().to_owned(),
+            vector,
+            model_name: cfg.model_name.clone(),
+            tier: cfg.tier.clone(),
+            embedding_dim,
+            normalized: cfg.normalize,
+        });
+    }
+
+    Ok(results)
 }
 
 fn semanticize_via_api(
@@ -414,6 +447,188 @@ fn l2_normalize_in_place(v: &mut [f32]) {
 struct ModelAssets {
     model_path: PathBuf,
     tokenizer_path: PathBuf,
+}
+
+fn should_fallback_to_stub(err: &SemanticError) -> bool {
+    matches!(
+        err,
+        SemanticError::ModelNotFound(_)
+            | SemanticError::TokenizerMissing(_)
+            | SemanticError::Download(_)
+    )
+}
+
+fn get_or_load_model_handle(assets: &ModelAssets) -> Result<Rc<CachedModel>, SemanticError> {
+    let key = ModelCacheKey {
+        model_path: assets.model_path.clone(),
+        tokenizer_path: assets.tokenizer_path.clone(),
+    };
+
+    MODEL_CACHE.with(|cache| {
+        if let Some(handle) = cache.borrow().get(&key).cloned() {
+            return Ok(handle);
+        }
+
+        let handle = Rc::new(CachedModel::load(assets)?);
+        cache.borrow_mut().insert(key.clone(), handle.clone());
+        Ok(handle)
+    })
+}
+
+fn run_onnx_embeddings<T>(handle: &CachedModel, texts: &[T]) -> Result<Vec<Vec<f32>>, SemanticError>
+where
+    T: AsRef<str>,
+{
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let (encoded, max_len) = encode_documents(&handle.tokenizer, texts)?;
+    let (input_ids, attn_mask) = build_padded_arrays(encoded, max_len)?;
+    execute_session(&handle.session, input_ids, attn_mask)
+}
+
+struct EncodedDoc {
+    ids: Vec<i64>,
+    mask: Vec<i64>,
+}
+
+fn encode_documents<T>(
+    tokenizer: &Tokenizer,
+    texts: &[T],
+) -> Result<(Vec<EncodedDoc>, usize), SemanticError>
+where
+    T: AsRef<str>,
+{
+    let mut encoded = Vec::with_capacity(texts.len());
+    let mut max_len = 0usize;
+
+    for text in texts {
+        let encoding = tokenizer
+            .encode(text.as_ref(), true)
+            .map_err(|e| SemanticError::Inference(e.to_string()))?;
+        let ids: Vec<i64> = encoding.get_ids().iter().map(|&x| x as i64).collect();
+        let mask: Vec<i64> = encoding
+            .get_attention_mask()
+            .iter()
+            .map(|&x| x as i64)
+            .collect();
+        max_len = max_len.max(ids.len());
+        encoded.push(EncodedDoc { ids, mask });
+    }
+
+    Ok((encoded, max_len))
+}
+
+fn build_padded_arrays(
+    encoded: Vec<EncodedDoc>,
+    max_len: usize,
+) -> Result<(Array2<i64>, Array2<i64>), SemanticError> {
+    let seq_len = max_len.max(1);
+    let batch = encoded.len();
+    let mut id_storage = Vec::with_capacity(batch * seq_len);
+    let mut mask_storage = Vec::with_capacity(batch * seq_len);
+
+    for EncodedDoc { ids, mask } in encoded {
+        if ids.len() != mask.len() {
+            return Err(SemanticError::Inference(
+                "tokenizer produced mismatched id/mask lengths".into(),
+            ));
+        }
+        let len = ids.len();
+        let pad = seq_len.saturating_sub(len);
+        id_storage.extend(ids);
+        mask_storage.extend(mask);
+        if pad > 0 {
+            id_storage.extend(std::iter::repeat_n(0, pad));
+            mask_storage.extend(std::iter::repeat_n(0, pad));
+        }
+    }
+
+    let input_ids = Array::from_shape_vec((batch, seq_len), id_storage)
+        .map_err(|e| SemanticError::Inference(e.to_string()))?;
+    let attn_mask = Array::from_shape_vec((batch, seq_len), mask_storage)
+        .map_err(|e| SemanticError::Inference(e.to_string()))?;
+    Ok((input_ids, attn_mask))
+}
+
+fn execute_session(
+    session: &RefCell<Session<'static>>,
+    input_ids: Array2<i64>,
+    attn_mask: Array2<i64>,
+) -> Result<Vec<Vec<f32>>, SemanticError> {
+    let (batch, seq_len) = input_ids.dim();
+    let mut guard = session.borrow_mut();
+    let session_ref = &mut *guard;
+    let mut runtime_inputs = Vec::with_capacity(session_ref.inputs.len());
+    let mut input_ids_tensor = Some(input_ids);
+    let mut attn_mask_tensor = Some(attn_mask);
+
+    for input in &session_ref.inputs {
+        match input.name.as_str() {
+            "input_ids" => {
+                let tensor = input_ids_tensor.take().ok_or_else(|| {
+                    SemanticError::InvalidConfig(
+                        "model requested `input_ids` multiple times".into(),
+                    )
+                })?;
+                runtime_inputs.push(tensor.into_dyn());
+            }
+            "attention_mask" => {
+                let tensor = attn_mask_tensor.take().ok_or_else(|| {
+                    SemanticError::InvalidConfig(
+                        "model requested `attention_mask` multiple times".into(),
+                    )
+                })?;
+                runtime_inputs.push(tensor.into_dyn());
+            }
+            "token_type_ids" => {
+                let tensor = Array::from_elem((batch, seq_len), 0_i64);
+                runtime_inputs.push(tensor.into_dyn());
+            }
+            other => {
+                return Err(SemanticError::Inference(format!(
+                    "unsupported model input '{other}'"
+                )))
+            }
+        }
+    }
+
+    if runtime_inputs.is_empty() {
+        return Err(SemanticError::Inference(
+            "model did not declare any inputs".into(),
+        ));
+    }
+
+    let outputs = session_ref
+        .run::<i64, f32, _>(runtime_inputs)
+        .map_err(|e| SemanticError::Inference(e.to_string()))?;
+    let output_tensor = outputs
+        .into_iter()
+        .next()
+        .ok_or_else(|| SemanticError::Inference("model returned no outputs".into()))?;
+
+    let flat: Vec<f32> = output_tensor.iter().copied().collect();
+    if batch == 0 {
+        return Ok(Vec::new());
+    }
+    if flat.is_empty() {
+        return Ok(vec![Vec::new(); batch]);
+    }
+    if flat.len() % batch != 0 {
+        return Err(SemanticError::Inference(format!(
+            "model output shape {}/{} is not divisible",
+            flat.len(),
+            batch
+        )));
+    }
+
+    let chunk = flat.len() / batch;
+    let mut vectors = Vec::with_capacity(batch);
+    for slice in flat.chunks(chunk) {
+        vectors.push(slice.to_vec());
+    }
+    Ok(vectors)
 }
 
 /// Ensures that the model and tokenizer exist locally, downloading them when URLs are provided.
@@ -684,6 +899,43 @@ mod tests {
         let e1 = semanticize("d1", "big cat", &cfg).unwrap();
         let e2 = semanticize("d1", "big cat", &cfg).unwrap();
         assert_eq!(e1.vector, e2.vector);
+    }
+
+    #[test]
+    fn semanticize_falls_back_when_model_missing() {
+        let cfg = SemanticConfig {
+            model_path: PathBuf::from("./missing/model.onnx"),
+            tokenizer_path: Some(PathBuf::from("./missing/tokenizer.json")),
+            tier: "balanced".into(),
+            ..SemanticConfig::default()
+        };
+
+        let embedding = semanticize("doc-stub", "fallback text", &cfg)
+            .expect("missing assets should produce stub");
+        let stub = make_stub_embedding("doc-stub", "fallback text", &cfg);
+        assert_eq!(embedding.vector, stub.vector);
+        assert_eq!(embedding.embedding_dim, stub.embedding_dim);
+    }
+
+    #[test]
+    fn semanticize_batch_falls_back_when_model_missing() {
+        let cfg = SemanticConfig {
+            model_path: PathBuf::from("./missing/model.onnx"),
+            tokenizer_path: Some(PathBuf::from("./missing/tokenizer.json")),
+            tier: "balanced".into(),
+            ..SemanticConfig::default()
+        };
+
+        let docs = vec![("doc-a", "hello"), ("doc-b", "world")];
+        let embeddings =
+            semanticize_batch(&docs, &cfg).expect("batch fallback should produce stub embeddings");
+        assert_eq!(embeddings.len(), docs.len());
+
+        for (actual, (doc_id, text)) in embeddings.iter().zip(docs.iter()) {
+            let stub = make_stub_embedding(doc_id, text, &cfg);
+            assert_eq!(actual.vector, stub.vector);
+            assert_eq!(actual.embedding_dim, stub.embedding_dim);
+        }
     }
 
     #[test]
