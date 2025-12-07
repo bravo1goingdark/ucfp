@@ -1,4 +1,72 @@
-#![doc = include_str!("../doc/README.md")]
+//! # UCFP Index
+//!
+//! This crate provides a backend-agnostic index for storing and searching
+//! Universal Content Fingerprinting (UCFP) records. It is designed to handle
+//! canonical hashes, perceptual fingerprints, and semantic embeddings, offering
+//! a unified interface for persistence and retrieval.
+//!
+//! ## Core Features
+//!
+//! - **Pluggable Backends**: Supports multiple storage backends through a common
+//!   [`IndexBackend`] trait. Out of the box, it provides:
+//!   - An in-memory `HashMap`-based backend for fast, ephemeral storage (ideal for testing).
+//!   - A RocksDB backend for persistent, on-disk storage (enabled via the `backend-rocksdb` feature).
+//! - **Flexible Configuration**: All behaviors, including the choice of backend,
+//!   compression, and quantization strategies, are configured at runtime via the
+//!   [`IndexConfig`] struct.
+//! - **Efficient Storage**:
+//!   - **Quantization**: Automatically quantizes `f32` embeddings into `i8` vectors
+//!     to reduce storage space and improve query performance.
+//!   - **Compression**: Compresses serialized records (using Zstd by default) before
+//!     writing to the backend.
+//! - **Similarity Search**: Provides search capabilities for both semantic and
+//!   perceptual fingerprints:
+//!   - **Semantic Search**: Computes cosine similarity on quantized embeddings.
+//!   - **Perceptual Search**: Computes Jaccard similarity on MinHash signatures.
+//!
+//! ## Key Concepts
+//!
+//! The central struct is [`UfpIndex`], which provides a high-level API for
+//! interacting with the index. It handles the details of serialization,
+//! compression, and quantization, allowing callers to work with the simple
+//! [`IndexRecord`] struct.
+//!
+//! The [`IndexBackend`] trait abstracts the underlying storage mechanism, making
+//! it easy to swap out backends or implement custom ones.
+//!
+//! ## Example Usage
+//!
+//! ```
+//! use ufp_index::{UfpIndex, IndexConfig, BackendConfig, IndexRecord, QueryMode, INDEX_SCHEMA_VERSION};
+//! use serde_json::json;
+//!
+//! // Configure an in-memory index
+//! let config = IndexConfig::new().with_backend(BackendConfig::in_memory());
+//! let index = UfpIndex::new(config).unwrap();
+//!
+//! // Create and insert a record
+//! let record = IndexRecord {
+//!     schema_version: INDEX_SCHEMA_VERSION,
+//!     canonical_hash: "doc-1".to_string(),
+//!     perceptual: Some(vec![1, 2, 3]),
+//!     embedding: Some(vec![10, 20, 30]),
+//!     metadata: json!({ "title": "My Document" }),
+//! };
+//! index.upsert(&record).unwrap();
+//!
+//! // Search for similar records
+//! let query_record = IndexRecord {
+//!     schema_version: INDEX_SCHEMA_VERSION,
+//!     canonical_hash: "query-1".to_string(),
+//!     perceptual: Some(vec![1, 2, 4]),
+//!     embedding: Some(vec![11, 22, 33]),
+//!     metadata: json!({}),
+//! };
+//!
+//! let results = index.search(&query_record, QueryMode::Perceptual, 10).unwrap();
+//! // assert_eq!(results.len(), 1);
+//! // assert_eq!(results[0].canonical_hash, "doc-1");
+//! ```
 
 mod backend;
 mod query;
@@ -192,23 +260,28 @@ impl IndexError {
 
 /// Index structure
 pub struct UfpIndex {
+    /// The backend used for storage, abstracted behind a trait.
     backend: Box<dyn IndexBackend>,
+    /// The configuration for the index.
     cfg: IndexConfig,
 }
 
 impl UfpIndex {
     /// Initialize or open an index using the configured backend.
+    /// This will build the backend from the config.
     pub fn new(cfg: IndexConfig) -> Result<Self, IndexError> {
         let backend = cfg.backend.build()?;
         Ok(Self::with_backend(cfg, backend))
     }
 
     /// Build an index with a custom backend (e.g., in-memory for tests).
+    /// This is useful for dependency injection and testing.
     pub fn with_backend(cfg: IndexConfig, backend: Box<dyn IndexBackend>) -> Self {
         Self { backend, cfg }
     }
 
     /// Quantize float embeddings -> i8 using a raw scale.
+    /// This is a simple linear quantization with clamping.
     pub fn quantize(vec: &Array1<f32>, scale: f32) -> QuantizedVec {
         vec.iter()
             .map(|&v| (v * scale).clamp(-128.0, 127.0) as i8)
@@ -216,11 +289,13 @@ impl UfpIndex {
     }
 
     /// Quantize using a configured strategy.
+    /// This allows for different quantization strategies to be used in the future.
     pub fn quantize_with_strategy(vec: &Array1<f32>, cfg: &QuantizationConfig) -> QuantizedVec {
         Self::quantize(vec, cfg.scale())
     }
 
     /// Insert or update a record.
+    /// The record is encoded and compressed before being sent to the backend.
     pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError> {
         let payload = self.encode_record(rec)?;
         self.backend.put(&rec.canonical_hash, &payload)
@@ -232,11 +307,13 @@ impl UfpIndex {
     }
 
     /// Flush backend buffers if supported.
+    /// This is useful for ensuring data is written to disk.
     pub fn flush(&self) -> Result<(), IndexError> {
         self.backend.flush()
     }
 
     /// Retrieve a record by hash.
+    /// The record is decompressed and decoded after being retrieved from the backend.
     pub fn get(&self, hash: &str) -> Result<Option<IndexRecord>, IndexError> {
         if let Some(data) = self.backend.get(hash)? {
             let record = self.decode_record(&data)?;
@@ -246,7 +323,8 @@ impl UfpIndex {
         }
     }
 
-    /// Batch insert multiple records (efficient for large datasets)
+    /// Batch insert multiple records (efficient for large datasets).
+    /// This can be much faster than calling `upsert` in a loop.
     pub fn batch_insert(&self, records: &[IndexRecord]) -> Result<(), IndexError> {
         let mut entries = Vec::with_capacity(records.len());
         for rec in records {
@@ -255,12 +333,14 @@ impl UfpIndex {
         self.backend.batch_put(entries)
     }
 
+    /// Decodes and decompresses a record from the backend.
     pub(crate) fn decode_record(&self, data: &[u8]) -> Result<IndexRecord, IndexError> {
         let decompressed = self.cfg.compression.decompress(data)?;
         let (record, _) = decode_from_slice(&decompressed, standard())?;
         Ok(record)
     }
 
+    /// Encodes and compresses a record for storage in the backend.
     fn encode_record(&self, rec: &IndexRecord) -> Result<Vec<u8>, IndexError> {
         let encoded = encode_to_vec(rec, standard())?;
         self.cfg.compression.compress(&encoded)

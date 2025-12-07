@@ -1,6 +1,6 @@
 use ufp_canonical::{
-    CanonicalizeConfig, CanonicalizedDocument, canonicalize, collapse_whitespace, hash_text,
-    tokenize,
+    canonicalize, collapse_whitespace, hash_text, tokenize, CanonicalizeConfig,
+    CanonicalizedDocument,
 };
 
 fn main() {

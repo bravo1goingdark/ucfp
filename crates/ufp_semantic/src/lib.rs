@@ -1,9 +1,68 @@
-//! ufp_semantic: Meaning-level fingerprinting with runtime-configurable models.
+//! # UCFP Semantic Fingerprinting
 //!
-//! Converts canonicalized text into dense embeddings using ONNX transformer models.
-//! Falls back to deterministic stub if model assets are missing or temporarily unreachable.
-//! Designed for full offline operation, configurable model tiers (fast, balanced, accurate),
-//! and low-latency inference via per-thread caching of tokenizers and ONNX sessions.
+//! This crate provides meaning-aware fingerprinting by converting canonicalized
+//! text into dense vector embeddings. It is designed for flexibility and
+//! resilience, supporting multiple inference modes and offering deterministic
+//! fallbacks.
+//!
+//! ## Core Features
+//!
+//! - **Multiple Inference Modes**:
+//!   - **ONNX**: Local inference using ONNX Runtime for full offline capability.
+//!   - **API**: Remote inference via HTTP, with support for Hugging Face, OpenAI,
+//!     and custom API endpoints.
+//!   - **Fast**: A deterministic stub generator for testing and development,
+//!     which produces reproducible vectors without requiring model assets.
+//! - **Resilience**: Automatically falls back to the "fast" mode if model assets
+//!   are missing or unreachable, ensuring the pipeline continues to operate.
+//! - **Performance**: Caches tokenizers and ONNX sessions on a per-thread basis
+//!   to minimize I/O and compilation overhead in hot paths. Batch processing
+//!   is supported to efficiently handle multiple documents.
+//! - **Configurability**: All behavior is controlled at runtime via the
+//!   [`SemanticConfig`] struct, allowing for different models, tiers (fast,
+//!   balanced, accurate), and post-processing options (e.g., L2 normalization).
+//!
+//! ## Key Concepts
+//!
+//! The main entry point is the [`semanticize`] function, which orchestrates the
+//! entire process: asset resolution (including on-demand downloading),
+//! tokenization, inference, and normalization. The resulting [`SemanticEmbedding`]
+//! contains the vector and rich metadata for downstream use.
+//!
+//! The implementation uses a thread-local cache for model handles, ensuring that
+//! expensive setup costs are paid only once per thread. This makes it suitable
+//! for high-throughput services.
+//!
+//! ## Example Usage
+//!
+//! ### Local ONNX Inference
+//! ```no_run
+//! use ufp_semantic::{semanticize, SemanticConfig};
+//! use std::path::PathBuf;
+//!
+//! let cfg = SemanticConfig {
+//!     model_path: PathBuf::from("path/to/your/model.onnx"),
+//!     tokenizer_path: Some(PathBuf::from("path/to/your/tokenizer.json")),
+//!     ..Default::default()
+//! };
+//!
+//! let embedding = semanticize("doc-1", "This is a test.", &cfg).unwrap();
+//! ```
+//!
+//! ### Remote API Inference
+//! ```no_run
+//! use ufp_semantic::{semanticize, SemanticConfig};
+//!
+//! let cfg = SemanticConfig {
+//!     mode: "api".into(),
+//!     api_url: Some("https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5".into()),
+//!     api_auth_header: Some("Bearer YOUR_HF_TOKEN".into()),
+//!     api_provider: Some("hf".into()),
+//!     ..Default::default()
+//! };
+//!
+//! let embedding = semanticize("doc-2", "Another test.", &cfg).unwrap();
+//! ```
 
 use once_cell::sync::OnceCell;
 use onnxruntime::{
@@ -192,17 +251,22 @@ pub fn semanticize(
     text: &str,
     cfg: &SemanticConfig,
 ) -> Result<SemanticEmbedding, SemanticError> {
+    // --- Mode selection ---
     match cfg.mode.as_str() {
         "fast" => return Ok(make_stub_embedding(doc_id, text, cfg)),
         "api" => return semanticize_via_api(doc_id, text, cfg),
-        "onnx" => {}
-        _ => {}
+        "onnx" => {} // Continue to ONNX logic
+        _ => {}      // Default to ONNX for unknown modes
     }
 
+    // The "fast" tier is a shortcut to the stub embedding, regardless of mode.
     if cfg.tier == "fast" {
         return Ok(make_stub_embedding(doc_id, text, cfg));
     }
 
+    // --- Asset resolution ---
+    // Attempt to resolve model assets, but fall back to a stub if they are not found
+    // and no download URLs are provided. This makes the system resilient to missing assets.
     let assets = match resolve_model_assets(cfg) {
         Ok(assets) => assets,
         Err(err) if should_fallback_to_stub(&err) => {
@@ -211,13 +275,18 @@ pub fn semanticize(
         Err(err) => return Err(err),
     };
 
+    // --- Inference ---
+    // Get a handle to the cached model, loading it if necessary.
     let handle = get_or_load_model_handle(&assets)?;
     let texts = [text];
+    // Run the ONNX model to get the embeddings.
     let mut vectors = run_onnx_embeddings(handle.as_ref(), &texts)?;
     let mut embedding = vectors
         .pop()
         .ok_or_else(|| SemanticError::Inference("model returned no outputs".into()))?;
 
+    // --- Post-processing ---
+    // Normalize the embedding to unit length if requested. This is important for cosine similarity.
     if cfg.normalize {
         l2_normalize_in_place(&mut embedding);
     }
@@ -247,6 +316,7 @@ where
     D: AsRef<str> + 'a,
     T: AsRef<str> + 'a,
 {
+    // --- Mode selection ---
     match cfg.mode.as_str() {
         "fast" => {
             return docs
@@ -255,7 +325,7 @@ where
                 .collect()
         }
         "api" => return semanticize_batch_via_api(docs, cfg),
-        _ => {}
+        _ => {} // Default to ONNX
     }
 
     if docs.is_empty() {
@@ -269,6 +339,7 @@ where
             .collect();
     }
 
+    // --- Asset resolution ---
     let assets = match resolve_model_assets(cfg) {
         Ok(assets) => assets,
         Err(err) if should_fallback_to_stub(&err) => {
@@ -280,6 +351,7 @@ where
         Err(err) => return Err(err),
     };
 
+    // --- Inference ---
     let handle = get_or_load_model_handle(&assets)?;
     let text_refs: Vec<&str> = docs.iter().map(|(_, text)| text.as_ref()).collect();
     let embeddings = run_onnx_embeddings(handle.as_ref(), &text_refs)?;
@@ -291,6 +363,7 @@ where
         )));
     }
 
+    // --- Post-processing ---
     let mut results = Vec::with_capacity(docs.len());
     for ((doc_id, _), mut vector) in docs.iter().zip(embeddings.into_iter()) {
         if cfg.normalize {
@@ -310,6 +383,7 @@ where
     Ok(results)
 }
 
+/// Handles the API-based embedding generation.
 fn semanticize_via_api(
     doc_id: &str,
     text: &str,
@@ -321,7 +395,9 @@ fn semanticize_via_api(
         .ok_or_else(|| SemanticError::InvalidConfig("api_url is required for api mode".into()))?;
     let provider = api_provider_kind(cfg);
     let payload_text = vec![text.to_string()];
+    // Build the API payload according to the provider's expected format.
     let payload = build_api_payload(provider, &payload_text, cfg, false);
+    // Send the request and parse the response.
     let response = send_api_request(url, cfg, payload)?;
     let mut vectors = parse_embeddings_from_value(response)?;
     let mut embedding = vectors
@@ -347,6 +423,7 @@ fn semanticize_via_api(
     })
 }
 
+/// Handles batch API-based embedding generation.
 fn semanticize_batch_via_api<D, T>(
     docs: &[(D, T)],
     cfg: &SemanticConfig,

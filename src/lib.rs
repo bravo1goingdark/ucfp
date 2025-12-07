@@ -517,11 +517,15 @@ pub fn process_record_with_configs(
     ingest_cfg: &IngestConfig,
     canonical_cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, PipelineError> {
+    // --- Ingest Stage ---
+    // The first step is to ingest the raw record, which validates and normalizes metadata.
+    // A metrics span is started to record the duration and outcome of this stage.
     let mut ingest_metrics =
         MetricsSpan::start(PipelineStage::Ingest, StageContext::from_raw(&raw));
     let canonical_record = match ingest(raw, ingest_cfg) {
         Ok(record) => record,
         Err(err) => {
+            // If ingest fails, record the error and return immediately.
             if let Some(span) = ingest_metrics.take() {
                 span.record_ingest(Err(err.clone()));
             }
@@ -529,6 +533,7 @@ pub fn process_record_with_configs(
         }
     };
 
+    // If ingest was successful, update the metrics context with the normalized IDs.
     if let Some(span) = ingest_metrics.as_mut() {
         span.update_context(|ctx| ctx.update_with_ingest(&canonical_record));
     }
@@ -536,6 +541,8 @@ pub fn process_record_with_configs(
         span.record_ingest(Ok(()));
     }
 
+    // --- Canonicalization Stage ---
+    // The next step is to canonicalize the ingested record.
     let mut canonical_metrics = MetricsSpan::start(
         PipelineStage::Canonical,
         StageContext::from_ingest_record(&canonical_record),
@@ -543,6 +550,7 @@ pub fn process_record_with_configs(
     let payload = match canonical_record.normalized_payload.as_ref() {
         Some(payload) => payload,
         None => {
+            // This should not happen if ingest was successful, but we handle it defensively.
             let err = PipelineError::MissingCanonicalPayload;
             if let Some(span) = canonical_metrics.take() {
                 span.record_canonical(Err(err.clone()));
@@ -551,6 +559,7 @@ pub fn process_record_with_configs(
         }
     };
 
+    // Canonicalization only works on text payloads.
     match payload {
         CanonicalPayload::Text(text) => {
             match canonicalize(canonical_record.doc_id.as_str(), text, canonical_cfg) {
@@ -584,6 +593,7 @@ pub fn process_record(
     raw: RawIngestRecord,
     cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, PipelineError> {
+    // This is a convenience wrapper that uses the default ingest configuration.
     process_record_with_configs(raw, &IngestConfig::default(), cfg)
 }
 
@@ -594,6 +604,7 @@ pub fn process_record_with_perceptual(
     canonical_cfg: &CanonicalizeConfig,
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
+    // Convenience wrapper with default ingest config.
     process_record_with_perceptual_configs(
         raw,
         &IngestConfig::default(),
@@ -609,7 +620,9 @@ pub fn process_record_with_perceptual_configs(
     canonical_cfg: &CanonicalizeConfig,
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
+    // First, run the ingest and canonicalization stages.
     let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
+    // --- Perceptual Stage ---
     let mut perceptual_metrics =
         MetricsSpan::start(PipelineStage::Perceptual, StageContext::from_document(&doc));
     let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
@@ -663,6 +676,7 @@ pub fn process_record_with_semantic(
     canonical_cfg: &CanonicalizeConfig,
     semantic_cfg: &SemanticConfig,
 ) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
+    // Convenience wrapper with default ingest config.
     process_record_with_semantic_configs(raw, &IngestConfig::default(), canonical_cfg, semantic_cfg)
 }
 
@@ -673,7 +687,9 @@ pub fn process_record_with_semantic_configs(
     canonical_cfg: &CanonicalizeConfig,
     semantic_cfg: &SemanticConfig,
 ) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
+    // First, run the ingest and canonicalization stages.
     let doc = process_record_with_configs(raw, ingest_cfg, canonical_cfg)?;
+    // Then, generate the semantic embedding from the canonical document.
     let embedding = semanticize_document(&doc, semantic_cfg)?;
     Ok((doc, embedding))
 }
@@ -683,6 +699,7 @@ pub fn semanticize_document(
     doc: &CanonicalizedDocument,
     semantic_cfg: &SemanticConfig,
 ) -> Result<SemanticEmbedding, PipelineError> {
+    // --- Semantic Stage ---
     let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from_document(doc));
     match semanticize(
         doc.doc_id.as_str(),
@@ -1102,8 +1119,8 @@ mod tests {
             PipelineStage::Canonical,
             PipelineStage::Semantic,
         ];
-        assert!(
-            stages == expected,
+        assert_eq!(
+            stages, expected,
             "structured semantic events missing or out of order for logger-doc-semantic: {stages:?}"
         );
 

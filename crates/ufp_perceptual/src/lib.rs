@@ -1,8 +1,58 @@
-//! ufp_perceptual: Perceptual fingerprinting for canonicalized text.
+//! # UCFP Perceptual Fingerprinting
 //!
-//! This module implements deterministic shingling, winnowing, and MinHash
-//! for textual data. It is configuration-driven (no Cargo features needed)
-//! and supports optional parallelism controlled at runtime.
+//! This crate provides perceptual fingerprinting capabilities for the Universal
+//! Content Fingerprinting (UCFP) framework. It takes a stream of canonicalized
+//! tokens and generates a compact, similarity-preserving signature that is robust
+//! to minor content modifications.
+//!
+//! ## Core Pipeline
+//!
+//! The perceptual fingerprinting process consists of three main stages:
+//!
+//! 1.  **Shingling**: The token stream is converted into a sequence of overlapping
+//!     k-shingles (contiguous subsequences of `k` tokens). Each shingle is
+//!     hashed into a 64-bit integer using a deterministic rolling hash algorithm.
+//!     This captures the local structure of the text.
+//!
+//! 2.  **Winnowing**: To reduce the number of fingerprints while preserving a
+//!     guarantee on matching, a winnowing algorithm is applied to the shingle
+//!     hashes. It selects a subset of shingles by choosing the minimum hash
+//!     value within a sliding window. This significantly reduces the data size
+//!     without sacrificing the ability to detect similarities.
+//!
+//! 3.  **MinHashing**: The set of winnowed shingle hashes is used to generate a
+//!     fixed-size MinHash signature. This signature is a compact representation
+//!     of the document's content that can be efficiently compared with other
+//!     signatures to estimate Jaccard similarity. The implementation supports
+//!     optional parallelism via Rayon for improved performance on large documents.
+//!
+//! ## Key Concepts
+//!
+//! - **Determinism**: The entire pipeline is deterministic for a given
+//!   configuration and input, ensuring that the same content always produces
+//!   the same fingerprint.
+//! - **Configuration**: All parameters, such as shingle size (`k`), winnowing
+//!   window size (`w`), and MinHash signature length, are runtime-configurable
+//!   via the [`PerceptualConfig`] struct.
+//! - **Performance**: The shingling and winnowing algorithms are implemented in
+//!   O(n) time complexity, and MinHash computation can be parallelized.
+//!
+//! ## Example Usage
+//!
+//! ```
+//! use ufp_perceptual::{perceptualize_tokens, PerceptualConfig};
+//!
+//! let tokens = vec!["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog"];
+//! let config = PerceptualConfig {
+//!     k: 3,
+//!     ..Default::default()
+//! };
+//!
+//! let fingerprint = perceptualize_tokens(&tokens, &config).unwrap();
+//!
+//! assert!(!fingerprint.minhash.is_empty());
+//! assert_eq!(fingerprint.meta.k, 3);
+//! ```
 
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -104,6 +154,7 @@ pub fn perceptualize_tokens<S>(
 where
     S: AsRef<str>,
 {
+    // --- Configuration validation ---
     if cfg.version == 0 {
         return Err(PerceptualError::InvalidConfigVersion {
             version: cfg.version,
@@ -129,6 +180,7 @@ where
         return Err(PerceptualError::NotEnoughTokens { k: cfg.k });
     }
 
+    // Prevent overflow when calculating total MinHash length.
     let minhash_len = cfg
         .minhash_bands
         .checked_mul(cfg.minhash_rows_per_band)
@@ -137,13 +189,18 @@ where
             rows: cfg.minhash_rows_per_band,
         })?;
 
-    // Step 1: Rolling-hash shingles (O(n))
+    // --- Pipeline ---
+
+    // Step 1: Create rolling-hash shingles from the token stream.
+    // This is an O(n) operation that produces a hash for each k-token window.
     let shingles = make_shingles_rolling(tokens, cfg.k, cfg.seed);
 
-    // Step 2: Winnowing (O(n))
+    // Step 2: Winnow the shingles to select a smaller, representative set of fingerprints.
+    // This is also O(n) and helps to reduce the data size while preserving similarity.
     let winnowed = winnow_minq(&shingles, cfg.w);
 
-    // Step 3: Deduplicate and compute MinHash
+    // Step 3: Deduplicate the selected shingles to get a set of unique hashes for MinHash.
+    // If winnowing produced no results (e.g., text was too short), use all shingles.
     let uniq: Vec<u64> = if winnowed.is_empty() {
         shingles.clone()
     } else {
@@ -153,6 +210,8 @@ where
         hashes
     };
 
+    // Step 4: Compute the MinHash signature from the unique shingles.
+    // This produces a fixed-size signature that can be used for LSH-based similarity search.
     let minhash = minhash_signature(&uniq, minhash_len, cfg);
 
     Ok(PerceptualFingerprint {
@@ -173,19 +232,24 @@ where
 }
 
 /// Compute rolling-hash shingles deterministically in O(n).
+/// This uses a polynomial rolling hash function with a random base to reduce collisions.
 pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -> Vec<u64> {
     let n = tokens.len();
     if k == 0 || n < k {
         return Vec::new();
     }
+    // Hash each token individually first.
     let th: Vec<u64> = tokens
         .iter()
         .map(|t| xxh3_64_with_seed(t.as_ref().as_bytes(), seed))
         .collect();
 
+    // A large prime used as the base for the polynomial hash.
+    // It's XORed with a seed-derived value to make the base unpredictable.
     const BASE: u64 = 1_000_003;
     let base = BASE ^ splitmix64(seed);
 
+    // Precompute base^(k-1) for efficient removal of the oldest element in the window.
     let mut base_km1 = 1u64;
     for _ in 1..k {
         base_km1 = base_km1.wrapping_mul(base);
@@ -193,34 +257,42 @@ pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -
 
     let mut out = Vec::with_capacity(n - k + 1);
     let mut h = 0u64;
+    // Calculate the hash of the first window.
     for &val in th.iter().take(k) {
         h = h.wrapping_mul(base).wrapping_add(val);
     }
     out.push(h);
 
+    // Slide the window over the rest of the tokens, updating the hash in O(1) at each step.
     for (&old, &new) in th.iter().zip(th.iter().skip(k)) {
-        h = h.wrapping_sub(old.wrapping_mul(base_km1));
-        h = h.wrapping_mul(base).wrapping_add(new);
+        h = h.wrapping_sub(old.wrapping_mul(base_km1)); // Remove old token
+        h = h.wrapping_mul(base).wrapping_add(new); // Add new token
         out.push(h);
     }
     out
 }
 
 /// Winnowing via monotonic deque, O(n).
+/// This selects the minimum hash in each window of shingles, with rightmost tie-breaking.
 pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
     let n = shingles.len();
     if n == 0 {
         return Vec::new();
     }
 
+    // Ensure the window size is at least 1 and not larger than the number of shingles.
     let window = w.max(1);
     let window_span = window.min(n);
     let window_count = if window >= n { 1 } else { n - window + 1 };
     let mut out = Vec::with_capacity(window_count);
+    // The deque stores indices of shingles in the current window, in increasing order of their hash values.
     let mut dq: VecDeque<usize> = VecDeque::with_capacity(window_span);
     let mut last_picked: Option<usize> = None;
 
+    // Helper to push a new index onto the deque, maintaining the monotonic property.
     let push = |dq: &mut VecDeque<usize>, i: usize, vals: &[u64]| {
+        // Remove elements from the back of the deque that are greater than or equal to the new element.
+        // This ensures the deque is monotonically increasing and handles rightmost tie-breaking.
         while let Some(&j) = dq.back() {
             if vals[i] <= vals[j] {
                 dq.pop_back();
@@ -231,18 +303,19 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
         dq.push_back(i);
     };
 
+    // Initialize the first window.
     for i in 0..window_span {
         push(&mut dq, i, shingles);
     }
 
+    // Helper to emit the minimum hash in the current window.
     let emit = |dq: &VecDeque<usize>,
                 out: &mut Vec<WinnowedShingle>,
                 last: &mut Option<usize>,
                 vals: &[u64]| {
-        // Rightmost tie-breaking keeps winnowing deterministic when minima repeat. The
-        // deque is maintained in non-decreasing order, so the *front* entry is the
-        // current minimum for the window.
+        // The front of the deque always holds the index of the minimum hash in the window.
         if let Some(&idx) = dq.front() {
+            // Only emit if it's a new minimum.
             if *last != Some(idx) {
                 out.push(WinnowedShingle {
                     hash: vals[idx],
@@ -255,7 +328,9 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
 
     emit(&dq, &mut out, &mut last_picked, shingles);
 
+    // Slide the window over the rest of the shingles.
     for i in window..n {
+        // Remove indices that are no longer in the window.
         let left = i - window + 1;
         while let Some(&j) = dq.front() {
             if j < left {
@@ -264,6 +339,7 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
                 break;
             }
         }
+        // Push the new index and emit the new minimum if it has changed.
         push(&mut dq, i, shingles);
         emit(&dq, &mut out, &mut last_picked, shingles);
     }
@@ -272,11 +348,14 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
 }
 
 /// Compute a MinHash signature (parallel if cfg.use_parallel = true).
+/// This creates `m` hash values, where each value is the minimum of the hashes of the unique shingles
+/// after being permuted by a different hash function.
 pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConfig) -> Vec<u64> {
     if m == 0 {
         return Vec::new();
     }
 
+    // Rayon is used for parallel computation if enabled.
     if cfg.use_parallel {
         (0..m)
             .into_par_iter()
@@ -289,11 +368,14 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
     }
 }
 
+/// Computes a single slot in the MinHash signature.
 #[inline]
 fn compute_slot(unique_shingles: &[u64], j: usize, seed: u64) -> u64 {
+    // Each slot uses a different key for the hash function to simulate a different permutation.
     let step = (j as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
     let key = splitmix64(seed.wrapping_add(step));
     let mut minv = u64::MAX;
+    // Find the minimum hash value among all shingles for this permutation.
     for &val in unique_shingles {
         let h = mix_u64(val, key);
         if h < minv {
@@ -303,8 +385,10 @@ fn compute_slot(unique_shingles: &[u64], j: usize, seed: u64) -> u64 {
     minv
 }
 
+/// A mixing function to create a new hash from an existing one.
 #[inline]
 fn mix_u64(x: u64, key: u64) -> u64 {
+    // This uses a combination of multiplication and XOR shifts to create a well-distributed hash.
     let mut h = xxh3_64_with_seed(&x.to_le_bytes(), key);
     h ^= h >> 33;
     h = h.wrapping_mul(0xff51afd7ed558ccd);
@@ -313,6 +397,7 @@ fn mix_u64(x: u64, key: u64) -> u64 {
     h ^ (h >> 33)
 }
 
+/// A 64-bit hash function that is fast and has good distribution.
 #[inline]
 fn splitmix64(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9E3779B97F4A7C15);

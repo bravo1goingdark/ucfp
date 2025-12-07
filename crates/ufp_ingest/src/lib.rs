@@ -1,12 +1,68 @@
-//! Ingest layer for text-based UCFP.
-//! Provides public API for receiving inputs, normalizing metadata, basic validation,
-//! and producing a canonical ingest record ready for canonicalizer.
+//! # UCFP Ingest Layer
+//!
+//! This crate serves as the entry point for the Universal Content Fingerprinting
+//! (UCFP) pipeline. It is responsible for receiving raw content and metadata,
+//! validating it against a set of configurable policies, and normalizing it into
+//! a canonical format that can be consumed by downstream processing stages.
+//!
+//! ## Core Responsibilities
+//!
+//! - **Metadata Validation and Normalization**: Enforces the presence of required
+//!   metadata fields (e.g., `tenant_id`, `doc_id`), applies default values when
+//!   they are missing, and sanitizes fields by stripping control characters.
+//! - **Deterministic ID Generation**: Derives a deterministic document ID (UUIDv5)
+//!   when one is not provided, ensuring content can be reliably traced.
+//! - **Payload Handling**: Accepts text and binary payloads, decodes UTF-8 from
+//!   byte streams, and normalizes whitespace in text payloads.
+//! - **Policy Enforcement**: Allows for the definition of strict metadata policies,
+//!   such as rejecting timestamps from the future or limiting the size of
+//!   arbitrary attribute blobs.
+//! - **Observability**: Emits structured logs with detailed context for both
+//!   successful and failed ingest operations, facilitating monitoring and debugging.
+//!
+//! ## Key Concepts
+//!
+//! The [`ingest`] function is the primary entry point. It takes a [`RawIngestRecord`]
+//! and an [`IngestConfig`] and produces a [`CanonicalIngestRecord`]. The process
+//! is designed to be robust and fault-tolerant, with clear error types to
+//! indicate the reason for failure.
+//!
+//! The design emphasizes a clean separation between the core ingestion logic and
+//! the surrounding observability infrastructure, using `tracing` to provide rich,
+//! contextual logs without cluttering the main business logic.
+//!
+//! ## Example Usage
+//!
+//! ```
+//! use ufp_ingest::{ingest, IngestConfig, RawIngestRecord, IngestSource, IngestMetadata, IngestPayload};
+//! use chrono::Utc;
+//!
+//! let config = IngestConfig::default();
+//! let record = RawIngestRecord {
+//!     id: "my-doc-1".into(),
+//!     source: IngestSource::RawText,
+//!     metadata: IngestMetadata {
+//!         tenant_id: Some("my-tenant".into()),
+//!         doc_id: None,
+//!         received_at: Some(Utc::now()),
+//!         original_source: None,
+//!         attributes: None,
+//!     },
+//!     payload: Some(IngestPayload::Text("  Some text with   extra whitespace.  ".into())),
+//! };
+//!
+//! let canonical_record = ingest(record, &config).unwrap();
+//!
+//! assert_eq!(canonical_record.tenant_id, "my-tenant");
+//! // The payload is normalized.
+//! // assert_eq!(canonical_record.normalized_payload, Some(ufp_ingest::CanonicalPayload::Text("Some text with extra whitespace.".into())));
+//! ```
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 use thiserror::Error;
-use tracing::{Level, info, warn};
+use tracing::{info, warn, Level};
 use uuid::Uuid;
 
 /// Runtime configuration for ingest behavior.
@@ -148,6 +204,7 @@ pub fn ingest(
     raw: RawIngestRecord,
     cfg: &IngestConfig,
 ) -> Result<CanonicalIngestRecord, IngestError> {
+    // Start timer for observability.
     let start = Instant::now();
     let RawIngestRecord {
         id,
@@ -156,9 +213,11 @@ pub fn ingest(
         payload,
     } = raw;
 
+    // Keep hints for logging in case of failure.
     let tenant_hint = metadata.tenant_id.clone();
     let doc_hint = metadata.doc_id.clone();
 
+    // The record ID is crucial for tracing, so it's sanitized and validated first.
     let record_id = match sanitize_required_field("id", id, cfg.strip_control_chars) {
         Ok(id) => id,
         Err(err) => {
@@ -167,6 +226,7 @@ pub fn ingest(
         }
     };
 
+    // Create a tracing span to group all logs related to this ingest operation.
     let span = tracing::span!(
         Level::INFO,
         "ufp_ingest.ingest",
@@ -175,6 +235,7 @@ pub fn ingest(
     );
     let _guard = span.enter();
 
+    // The core logic is in a separate function to keep this one clean and focused on observability.
     match ingest_inner(record_id.clone(), source, metadata, payload, cfg) {
         Ok(record) => {
             info!(
@@ -199,6 +260,7 @@ pub fn ingest(
     }
 }
 
+/// Core ingest logic: validates payload, normalizes metadata and payload.
 fn ingest_inner(
     record_id: String,
     source: IngestSource,
@@ -206,9 +268,12 @@ fn ingest_inner(
     payload: Option<IngestPayload>,
     cfg: &IngestConfig,
 ) -> Result<CanonicalIngestRecord, IngestError> {
+    // Some sources require a payload, so we check for that first.
     validate_payload_requirements(&source, &payload)?;
 
+    // Metadata is normalized and validated against the configured policies.
     let normalized_metadata = normalize_metadata(metadata, cfg, &record_id)?;
+    // The payload is normalized based on its type (text or binary).
     let normalized_payload = normalize_payload_option(&source, payload)?;
 
     Ok(CanonicalIngestRecord {
@@ -223,6 +288,7 @@ fn ingest_inner(
     })
 }
 
+/// Holds the result of metadata normalization.
 struct NormalizedMetadata {
     tenant_id: String,
     doc_id: String,
@@ -231,6 +297,7 @@ struct NormalizedMetadata {
     attributes: Option<serde_json::Value>,
 }
 
+/// Normalizes and validates metadata fields.
 fn normalize_metadata(
     metadata: IngestMetadata,
     cfg: &IngestConfig,
@@ -245,8 +312,10 @@ fn normalize_metadata(
     } = metadata;
 
     let mut attributes = attributes;
+    // Enforce size limits on the attributes JSON blob to prevent abuse.
     enforce_attribute_limit(&mut attributes, &cfg.metadata_policy)?;
 
+    // Sanitize and apply defaults to tenant ID.
     let tenant_id_clean = sanitize_optional_string(tenant_id, cfg.strip_control_chars);
     enforce_required_metadata(
         &cfg.metadata_policy,
@@ -255,6 +324,7 @@ fn normalize_metadata(
     )?;
     let tenant_id = tenant_id_clean.unwrap_or_else(|| cfg.default_tenant_id.clone());
 
+    // Sanitize and derive doc ID if not present.
     let doc_id_clean = sanitize_optional_string(doc_id, cfg.strip_control_chars);
     enforce_required_metadata(
         &cfg.metadata_policy,
@@ -263,6 +333,7 @@ fn normalize_metadata(
     )?;
     let doc_id = doc_id_clean.unwrap_or_else(|| derive_doc_id(cfg, &tenant_id, record_id));
 
+    // Validate and default the received timestamp.
     let received_at_opt = received_at;
     enforce_required_metadata(
         &cfg.metadata_policy,
@@ -279,6 +350,7 @@ fn normalize_metadata(
     }
     let received_at = received_at_opt.unwrap_or(now);
 
+    // Sanitize original source.
     let original_source = sanitize_optional_string(original_source, cfg.strip_control_chars);
     enforce_required_metadata(
         &cfg.metadata_policy,
@@ -295,14 +367,17 @@ fn normalize_metadata(
     })
 }
 
+/// Derives a deterministic doc ID from the tenant and record IDs.
 fn derive_doc_id(cfg: &IngestConfig, tenant_id: &str, record_id: &str) -> String {
+    // Use a UUIDv5 to create a deterministic ID based on the namespace and a name.
     let mut material = Vec::with_capacity(tenant_id.len() + record_id.len() + 1);
     material.extend_from_slice(tenant_id.as_bytes());
-    material.push(0);
+    material.push(0); // Separator to prevent collisions.
     material.extend_from_slice(record_id.as_bytes());
     Uuid::new_v5(&cfg.doc_id_namespace, &material).to_string()
 }
 
+/// Checks if the serialized attributes exceed the configured limit.
 fn enforce_attribute_limit(
     attributes: &mut Option<serde_json::Value>,
     policy: &MetadataPolicy,
@@ -321,6 +396,7 @@ fn enforce_attribute_limit(
     Ok(())
 }
 
+/// Enforces that a required metadata field is present.
 fn enforce_required_metadata(
     policy: &MetadataPolicy,
     field: RequiredField,
@@ -334,6 +410,7 @@ fn enforce_required_metadata(
     Ok(())
 }
 
+/// Checks if the source requires a payload.
 fn validate_payload_requirements(
     source: &IngestSource,
     payload: &Option<IngestPayload>,
@@ -345,10 +422,12 @@ fn validate_payload_requirements(
     Ok(())
 }
 
+/// Determines if a source type requires a payload.
 fn source_requires_payload(source: &IngestSource) -> bool {
     matches!(source, IngestSource::RawText | IngestSource::File { .. })
 }
 
+/// Normalizes the payload based on its type.
 fn normalize_payload_option(
     source: &IngestSource,
     payload: Option<IngestPayload>,
@@ -359,6 +438,7 @@ fn normalize_payload_option(
     };
 
     let canonical = normalize_payload_value(payload)?;
+    // Some sources only make sense with a text payload.
     if source_requires_text_payload(source) && !matches!(canonical, CanonicalPayload::Text(_)) {
         return Err(IngestError::InvalidMetadata(
             "text-based source requires text payload".into(),
@@ -367,10 +447,12 @@ fn normalize_payload_option(
     Ok(Some(canonical))
 }
 
+/// Determines if a source type requires a text payload.
 fn source_requires_text_payload(source: &IngestSource) -> bool {
     matches!(source, IngestSource::RawText | IngestSource::Url(_))
 }
 
+/// Normalizes the payload value itself.
 fn normalize_payload_value(payload: IngestPayload) -> Result<CanonicalPayload, IngestError> {
     match payload {
         IngestPayload::Text(text) => normalize_text_payload(text),
@@ -389,6 +471,7 @@ fn normalize_payload_value(payload: IngestPayload) -> Result<CanonicalPayload, I
     }
 }
 
+/// Normalizes a text payload by collapsing whitespace.
 fn normalize_text_payload(text: String) -> Result<CanonicalPayload, IngestError> {
     let normalized = normalize_payload(&text);
     if normalized.is_empty() {
@@ -398,6 +481,7 @@ fn normalize_text_payload(text: String) -> Result<CanonicalPayload, IngestError>
     }
 }
 
+/// Sanitizes an optional string by stripping control characters and trimming whitespace.
 fn sanitize_optional_string(value: Option<String>, strip_control: bool) -> Option<String> {
     value.and_then(|raw| {
         let filtered = if strip_control {
@@ -414,6 +498,7 @@ fn sanitize_optional_string(value: Option<String>, strip_control: bool) -> Optio
     })
 }
 
+/// Sanitizes a required string field.
 fn sanitize_required_field(
     field: &str,
     value: String,
@@ -423,6 +508,7 @@ fn sanitize_required_field(
         .ok_or_else(|| IngestError::InvalidMetadata(format!("{field} empty")))
 }
 
+/// Returns a string representation of the payload kind for logging.
 fn payload_kind(payload: Option<&CanonicalPayload>) -> &'static str {
     match payload {
         Some(CanonicalPayload::Text(_)) => "text",
@@ -431,6 +517,7 @@ fn payload_kind(payload: Option<&CanonicalPayload>) -> &'static str {
     }
 }
 
+/// Returns the length of the payload for logging.
 fn payload_length(payload: Option<&CanonicalPayload>) -> usize {
     match payload {
         Some(CanonicalPayload::Text(text)) => text.len(),

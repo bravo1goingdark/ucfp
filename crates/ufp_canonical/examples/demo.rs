@@ -1,5 +1,5 @@
 use std::fs;
-use ufp_canonical::{CanonicalizeConfig, CanonicalizedDocument, canonicalize};
+use ufp_canonical::{canonicalize, CanonicalizeConfig, CanonicalizedDocument};
 
 fn main() {
     let file_path = "crates/ufp_canonical/examples/big_text.txt";

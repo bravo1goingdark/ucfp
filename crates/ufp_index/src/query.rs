@@ -21,13 +21,16 @@ pub enum QueryMode {
 
 /// Provides semantic & perceptual retrieval methods
 impl UfpIndex {
-    /// Compute cosine similarity between two quantized vectors
+    /// Compute cosine similarity between two quantized vectors.
+    /// The dot product is computed on the i8 values, then normalized.
     #[inline]
     fn cosine_similarity(a: &[i8], b: &[i8]) -> f32 {
         if a.len() != b.len() || a.is_empty() {
             return 0.0;
         }
+        // The dot product can be computed with integer arithmetic for performance.
         let dot: i32 = a.iter().zip(b).map(|(&x, &y)| x as i32 * y as i32).sum();
+        // The norms are computed on the i32 values to avoid overflow.
         let norm_a = (a.iter().map(|&x| (x as i32).pow(2)).sum::<i32>() as f32).sqrt();
         let norm_b = (b.iter().map(|&x| (x as i32).pow(2)).sum::<i32>() as f32).sqrt();
         if norm_a == 0.0 || norm_b == 0.0 {
@@ -36,7 +39,8 @@ impl UfpIndex {
         dot as f32 / (norm_a * norm_b)
     }
 
-    /// Compute Jaccard similarity for perceptual fingerprints (MinHash)
+    /// Compute Jaccard similarity for perceptual fingerprints (MinHash).
+    /// This is the size of the intersection divided by the size of the union.
     #[inline]
     fn jaccard_similarity(
         query: &HashSet<u64>,
@@ -46,12 +50,14 @@ impl UfpIndex {
         if query.is_empty() || candidate.is_empty() {
             return 0.0;
         }
+        // The scratch space is used to avoid re-allocating a HashSet for each candidate.
         scratch.clear();
 
         let mut intersection = 0usize;
         let mut union = query.len();
 
         for &value in candidate {
+            // If the value is already in the scratch set, it's a duplicate in the candidate.
             if !scratch.insert(value) {
                 continue;
             }
@@ -70,7 +76,7 @@ impl UfpIndex {
         }
     }
 
-    /// Search for top-k most similar entries
+    /// Search for top-k most similar entries.
     pub fn search(
         &self,
         query: &IndexRecord,
@@ -81,6 +87,7 @@ impl UfpIndex {
             return Ok(Vec::new());
         }
 
+        // Extract the query vectors, returning early if they are empty for the selected mode.
         let query_embedding = query.embedding.as_ref().filter(|emb| !emb.is_empty());
         let query_perceptual = query.perceptual.as_ref().filter(|mh| !mh.is_empty());
 
@@ -91,6 +98,7 @@ impl UfpIndex {
             return Ok(Vec::new());
         }
 
+        // For perceptual search, convert the query MinHash vector to a HashSet for efficient lookups.
         let perceptual_set = query_perceptual.map(|mh| {
             let mut set = HashSet::with_capacity(mh.len());
             set.extend(mh.iter().copied());
@@ -100,7 +108,7 @@ impl UfpIndex {
         let mut results = Vec::new();
         let mut scratch = HashSet::new();
 
-        // Full scan (can be optimized later with ANN index)
+        // This is a full scan of the index. It can be optimized with an ANN index in the future.
         self.backend.scan(&mut |value| {
             let rec = self.decode_record(value)?;
 
@@ -117,6 +125,7 @@ impl UfpIndex {
                 },
             };
 
+            // Only keep results with a positive score.
             if score > 0.0 {
                 results.push(QueryResult {
                     canonical_hash: rec.canonical_hash.clone(),
@@ -127,14 +136,15 @@ impl UfpIndex {
             Ok(())
         })?;
 
-        // Sort descending by similarity
-        // Break ties lexicographically so deterministic ordering doesn't depend on backend scan order.
+        // Sort results by score in descending order.
+        // Ties are broken by the canonical hash to ensure deterministic ordering.
         results.sort_unstable_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| a.canonical_hash.cmp(&b.canonical_hash))
         });
+        // Return only the top-k results.
         results.truncate(top_k);
         Ok(results)
     }

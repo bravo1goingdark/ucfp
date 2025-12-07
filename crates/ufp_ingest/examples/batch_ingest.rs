@@ -1,7 +1,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use ufp_ingest::{
-    CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestMetadata, IngestPayload,
-    IngestSource, RawIngestRecord, ingest,
+    ingest, CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestMetadata, IngestPayload,
+    IngestSource, RawIngestRecord,
 };
 
 fn timestamp(hour: u32) -> DateTime<Utc> {

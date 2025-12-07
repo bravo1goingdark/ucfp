@@ -1,12 +1,55 @@
-//! Canonical text normalization utilities for the Universal Content Fingerprinting (UCFP) pipeline.
+//! # UCFP Canonicalization
 //!
-//! Responsibilities:
-//! - Unicode NFKC normalization
-//! - Lowercasing (Unicode-aware)
-//! - Optional punctuation stripping
-//! - Collapsing whitespace to single spaces
-//! - Tokenization into tokens with byte offsets (UTF-8 byte offsets)
-//! - SHA-256 checksum of canonical text
+//! This crate provides the core text canonicalization pipeline for the Universal
+//! Content Fingerprinting (UCFP) framework. Its primary responsibility is to
+//! transform raw text into a deterministic, normalized representation that can be
+//! reliably used by downstream consumers for fingerprinting, embedding, and
+//! content-based analysis.
+//!
+//! ## Core Responsibilities
+//!
+//! - **Unicode Normalization**: Converts text to a canonical form (NFKC by default)
+//!   to handle variations in Unicode representation (e.g., "Café" vs. "Café").
+//! - **Text Cleaning**: Optionally strips punctuation and normalizes case
+//!   (lowercase by default) to reduce noise.
+//! - **Whitespace Collapsing**: Collapses all whitespace sequences (spaces, tabs,
+//!   newlines) into a single space to ensure tokenization is consistent.
+//! - **Tokenization**: Splits the normalized text into a stream of tokens,
+//!   preserving the byte offsets of each token relative to the canonical text.
+//!   This is crucial for mapping fingerprints back to the original content.
+//! - **Checksumming**: Computes a SHA-256 digest of the canonical text, providing
+//!   a deterministic identifier for byte-identical content.
+//!
+//! ## Key Concepts
+//!
+//! The pipeline is driven by the [`CanonicalizeConfig`] struct, which allows callers
+//! to fine-tune the normalization process. The main entry point is the
+//! [`canonicalize`] function, which takes a document ID and raw text, and returns
+//! a [`CanonicalizedDocument`]. This output struct contains the cleaned text, a
+//! vector of [`Token`]s with their offsets, and the SHA-256 hash.
+//!
+//! The design emphasizes determinism and efficiency. By processing the text in a
+//! single pass, it minimizes allocations and computational overhead while ensuring
+//! that the same input always produces the same output for a given configuration.
+//!
+//! ## Example Usage
+//!
+//! ```
+//! use ufp_canonical::{canonicalize, CanonicalizeConfig};
+//!
+//! let cfg = CanonicalizeConfig {
+//!     strip_punctuation: true,
+//!     ..Default::default()
+//! };
+//!
+//! let doc = canonicalize("doc-123", "  Hello,  \n world!  ", &cfg)
+//!     .expect("Canonicalization should succeed");
+//!
+//! assert_eq!(doc.canonical_text, "hello world");
+//! assert_eq!(doc.tokens.len(), 2);
+//! assert_eq!(doc.tokens[0].text, "hello");
+//! assert_eq!(doc.tokens[1].text, "world");
+//! ```
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -78,12 +121,14 @@ pub fn canonicalize(
     input: &str,
     cfg: &CanonicalizeConfig,
 ) -> Result<CanonicalizedDocument, CanonicalError> {
+    // Config validation: version 0 is reserved and invalid.
     if cfg.version == 0 {
         return Err(CanonicalError::InvalidConfig(
             "config version must be >= 1".into(),
         ));
     }
 
+    // A document ID is required for traceability.
     let doc_id = doc_id.into();
     let doc_id = doc_id.trim();
     if doc_id.is_empty() {
@@ -91,12 +136,15 @@ pub fn canonicalize(
     }
     let doc_id = doc_id.to_string();
 
+    // Pre-allocate for efficiency, assuming canonical text is roughly the same size as input.
     let mut canonical_text = String::with_capacity(input.len());
     let mut hasher = Sha256::new();
     let mut tokens: Vec<Token> = Vec::new();
+    // State machine for tokenization and whitespace collapsing.
     let mut pending_space = false;
     let mut current_token_start: Option<usize> = None;
 
+    // Unicode normalization is the first step, as it can affect character boundaries.
     if cfg.normalize_unicode {
         process_chars(
             input.nfkc(),
@@ -119,8 +167,10 @@ pub fn canonicalize(
         );
     }
 
+    // The last token needs to be finalized after the loop.
     finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
 
+    // After all transformations, if the text is empty, it's an error.
     if canonical_text.is_empty() {
         return Err(CanonicalError::EmptyInput);
     }
@@ -135,6 +185,7 @@ pub fn canonicalize(
     })
 }
 
+/// Helper to iterate over characters and dispatch them for processing.
 fn process_chars<I>(
     iter: I,
     cfg: &CanonicalizeConfig,
@@ -147,6 +198,7 @@ fn process_chars<I>(
     I: Iterator<Item = char>,
 {
     for ch in iter {
+        // Lowercasing can expand a single character into multiple (e.g., German ß -> ss).
         if cfg.lowercase {
             for lower in ch.to_lowercase() {
                 dispatch_char(
@@ -173,6 +225,7 @@ fn process_chars<I>(
     }
 }
 
+/// Decides whether a character is part of a token or a delimiter.
 fn dispatch_char(
     ch: char,
     cfg: &CanonicalizeConfig,
@@ -184,11 +237,14 @@ fn dispatch_char(
 ) {
     let is_delim = ch.is_whitespace() || (cfg.strip_punctuation && ch.is_punctuation());
     if is_delim {
+        // When a delimiter is found, the current token (if any) is finalized.
         finalize_token(tokens, canonical_text, current_token_start);
+        // We note that a space should be added before the next token.
         if !canonical_text.is_empty() {
             *pending_space = true;
         }
     } else {
+        // If it's not a delimiter, it's part of a token.
         append_char(
             ch,
             canonical_text,
@@ -199,6 +255,7 @@ fn dispatch_char(
     }
 }
 
+/// Appends a character to the canonical text and updates the hasher.
 fn append_char(
     ch: char,
     canonical_text: &mut String,
@@ -206,35 +263,41 @@ fn append_char(
     current_token_start: &mut Option<usize>,
     pending_space: &mut bool,
 ) {
+    // If a space is pending, add it and mark the start of a new token.
     if *pending_space {
         canonical_text.push(' ');
         hasher.update(b" ");
         *pending_space = false;
         *current_token_start = Some(canonical_text.len());
     } else if current_token_start.is_none() {
+        // If there's no token in progress, start a new one.
         *current_token_start = Some(canonical_text.len());
     }
 
+    // Append the character to the canonical text and update the hash.
     let mut buf = [0u8; 4];
     let encoded = ch.encode_utf8(&mut buf);
     canonical_text.push_str(encoded);
     hasher.update(encoded.as_bytes());
 }
 
+/// Creates a token from the current token start and adds it to the list.
 fn finalize_token(
     tokens: &mut Vec<Token>,
     canonical_text: &str,
     current_token_start: &mut Option<usize>,
 ) {
-    if let Some(start) = current_token_start.take()
-        && start < canonical_text.len()
-    {
-        let end = canonical_text.len();
-        tokens.push(Token {
-            text: canonical_text[start..end].to_string(),
-            start,
-            end,
-        });
+    // `take()` removes the value from the Option, leaving `None`.
+    if let Some(start) = current_token_start.take() {
+        // Ensure the token has content before creating it.
+        if start < canonical_text.len() {
+            let end = canonical_text.len();
+            tokens.push(Token {
+                text: canonical_text[start..end].to_string(),
+                start,
+                end,
+            });
+        }
     }
 }
 
