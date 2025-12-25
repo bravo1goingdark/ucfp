@@ -15,9 +15,9 @@
 //!   compression, and quantization strategies, are configured at runtime via the
 //!   [`IndexConfig`] struct.
 //! - **Efficient Storage**:
-//!   - **Quantization**: Automatically quantizes `f32` embeddings into `i8` vectors
-//!     to reduce storage space and improve query performance.
-//!   - **Compression**: Compresses serialized records (using Zstd by default) before
+//!   - **Quantization**: Provides utilities to quantize `f32` embeddings into `i8` vectors
+//!     to reduce storage space and improve query performance. Use the `quantize` or
+//!     `quantize_with_strategy` methods before creating `IndexRecord` instances.//!   - **Compression**: Compresses serialized records (using Zstd by default) before
 //!     writing to the backend.
 //! - **Similarity Search**: Provides search capabilities for both semantic and
 //!   perceptual fingerprints:

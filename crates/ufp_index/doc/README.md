@@ -34,8 +34,13 @@ index.upsert(&IndexRecord {
     metadata: json!({"source": "guide.md"}),
 })?;
 
-let query = IndexRecord { schema_version: INDEX_SCHEMA_VERSION, .. }; // Fill vectors.
-let hits = index.search(&query, QueryMode::Perceptual, 10)?;
+let query = IndexRecord { 
+    schema_version: INDEX_SCHEMA_VERSION,
+    canonical_hash: "query-hash".into(),
+    perceptual: Some(vec![111, 222, 333]), // or populate from your query payload
+    embedding: None, // or populate semantic embedding if needed
+    metadata: json!({}),
+};let hits = index.search(&query, QueryMode::Perceptual, 10)?;
 ```
 
 ### Swapping backends
@@ -52,10 +57,11 @@ let cfg = IndexConfig::new().with_backend(BackendConfig::InMemory);
 let index = UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
 ```
 
-Run `cargo run -p ufp_index --example index_demo` to see end-to-end insert +
-semantic/perceptual queries with the default RocksDB backend. Switch to the
-fast in-memory backend by calling `IndexConfig::with_backend(...)` in your
-initialization code—no config files required.
+From the workspace root, run `cargo run -p ufp_index --example index_demo` to
+see end-to-end insert + semantic/perceptual queries with the default RocksDB
+backend. Switch to the fast in-memory backend by calling
+`IndexConfig::with_backend(...)` in your initialization code—no config files
+required.
 
 ## Architecture at a glance
 - **Data model:** `IndexRecord` captures the canonical hash, optional perceptual
@@ -183,7 +189,7 @@ This pattern keeps the upper layer focused on pipeline orchestration and
 business logic while `ufp_index` handles storage details, compression,
 quantization, and query semantics in a single place.
 
-For a runnable walkthrough, execute `cargo run --example full_pipeline` from the
+For a runnable walkthrough, run `cargo run -p ucfp --example full_pipeline` from the
 workspace root; it wires ingest + canonical + perceptual + semantic stages
 directly into the in-memory backend and prints both semantic and perceptual
 matches.

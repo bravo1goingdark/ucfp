@@ -190,6 +190,8 @@ pub enum CanonicalPayload {
 pub enum IngestError {
     #[error("missing payload for source that requires payload")]
     MissingPayload,
+    #[error("binary payload is empty")]
+    EmptyBinaryPayload,
     #[error("invalid metadata: {0}")]
     InvalidMetadata(String),
     #[error("invalid utf-8 payload: {0}")]
@@ -231,10 +233,9 @@ pub fn ingest(
         Level::INFO,
         "ufp_ingest.ingest",
         record_id = %record_id,
-        source = debug(&source)
+        source = ?source
     );
     let _guard = span.enter();
-
     // The core logic is in a separate function to keep this one clean and focused on observability.
     match ingest_inner(record_id.clone(), source, metadata, payload, cfg) {
         Ok(record) => {
@@ -463,7 +464,7 @@ fn normalize_payload_value(payload: IngestPayload) -> Result<CanonicalPayload, I
         }
         IngestPayload::Binary(bytes) => {
             if bytes.is_empty() {
-                Err(IngestError::MissingPayload)
+                Err(IngestError::EmptyBinaryPayload)
             } else {
                 Ok(CanonicalPayload::Binary(bytes))
             }
@@ -827,5 +828,21 @@ mod tests {
         assert!(
             matches!(res, Err(IngestError::InvalidMetadata(msg)) if msg.contains("attributes exceed"))
         );
+    }
+
+    #[test]
+    fn test_ingest_empty_binary_payload() {
+        let record = RawIngestRecord {
+            id: "ingest-empty-binary".into(),
+            source: IngestSource::File {
+                filename: "empty.bin".into(),
+                content_type: Some("application/octet-stream".into()),
+            },
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::Binary(vec![])),
+        };
+
+        let res = ingest(record, &IngestConfig::default());
+        assert!(matches!(res, Err(IngestError::EmptyBinaryPayload)));
     }
 }

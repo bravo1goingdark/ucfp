@@ -68,9 +68,17 @@ impl BackendConfig {
 
 impl Default for BackendConfig {
     fn default() -> Self {
-        // The default backend is RocksDB, with a default path.
-        BackendConfig::RocksDb {
-            path: "data/ufp_index".into(),
+        // The default backend is RocksDB if the feature is enabled.
+        #[cfg(feature = "backend-rocksdb")]
+        {
+            BackendConfig::RocksDb {
+                path: "data/ufp_index".into(),
+            }
+        }
+        // Otherwise, fallback to In-memory.
+        #[cfg(not(feature = "backend-rocksdb"))]
+        {
+            BackendConfig::InMemory
         }
     }
 }
