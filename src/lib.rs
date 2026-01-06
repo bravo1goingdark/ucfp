@@ -585,6 +585,7 @@ pub fn process_record_with_configs(
             }
             Err(err)
         }
+        &_ => todo!(),
     }
 }
 

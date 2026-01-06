@@ -71,6 +71,7 @@ fn main() {
                     println!("binary payload -> {} bytes", bytes.len());
                 }
                 None => println!("no payload provided"),
+                Some(_) => println!("unsupported payload variant"),
             },
             Err(err) => eprintln!("ingest failed: {err}"),
         }

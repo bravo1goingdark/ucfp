@@ -57,155 +57,77 @@
 //! // The payload is normalized.
 //! // assert_eq!(canonical_record.normalized_payload, Some(ufp_ingest::CanonicalPayload::Text("Some text with extra whitespace.".into())));
 //! ```
-
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+//
 use std::time::Instant;
-use thiserror::Error;
+
 use tracing::{info, warn, Level};
-use uuid::Uuid;
 
-/// Runtime configuration for ingest behavior.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IngestConfig {
-    /// Semantic version of the ingest configuration.
-    pub version: u32,
-    /// Default tenant id to fall back on when metadata omits it.
-    pub default_tenant_id: String,
-    /// Namespace UUID used to deterministically derive doc ids when absent.
-    pub doc_id_namespace: Uuid,
-    /// Whether to strip ASCII control characters from metadata.
-    pub strip_control_chars: bool,
-    /// Additional metadata validation policies.
-    #[serde(default)]
-    pub metadata_policy: MetadataPolicy,
+mod config;
+mod error;
+mod metadata;
+mod payload;
+mod types;
+
+use crate::metadata::normalize_metadata;
+
+pub use crate::config::{ConfigError, IngestConfig, MetadataPolicy, RequiredField};
+pub use crate::error::IngestError;
+pub use crate::payload::{
+    normalize_payload_option, payload_kind, payload_length, validate_payload_requirements,
+};
+pub use crate::types::{
+    CanonicalIngestRecord, CanonicalPayload, IngestMetadata, IngestPayload, IngestSource,
+    RawIngestRecord,
+};
+
+/// Observer hook for ingest operations.
+///
+/// Implementors can use this trait to attach custom metrics or logging
+/// without having to wrap or fork the ingest logic. All callback methods
+/// have default no-op implementations so you can override only what you need.
+pub trait IngestObserver {
+    /// Called after a successful ingest.
+    ///
+    /// `elapsed_micros` measures the time spent in [`ingest_with_observer`],
+    /// including validation and normalization.
+    fn on_success(&self, _record: &CanonicalIngestRecord, _elapsed_micros: u128) {}
+
+    /// Called after a failed ingest.
+    ///
+    /// `elapsed_micros` measures the time spent in [`ingest_with_observer`]
+    /// up to the point of failure.
+    fn on_failure(&self, _error: &IngestError, _elapsed_micros: u128) {}
 }
 
-/// Controls which metadata fields must be present and how optional blobs are constrained.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct MetadataPolicy {
-    /// Metadata fields that must be provided by the caller (after sanitization).
-    pub required_fields: Vec<RequiredField>,
-    /// Maximum serialized byte length allowed for `metadata.attributes`.
-    pub max_attribute_bytes: Option<usize>,
-    /// Reject ingests with timestamps that lie in the future.
-    pub reject_future_timestamps: bool,
-}
+struct NoopObserver;
 
-/// Metadata identifiers that can be enforced via `MetadataPolicy`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RequiredField {
-    TenantId,
-    DocId,
-    ReceivedAt,
-    OriginalSource,
-}
+impl IngestObserver for NoopObserver {}
 
-impl Default for IngestConfig {
-    fn default() -> Self {
-        Self {
-            version: 1,
-            default_tenant_id: "default".into(),
-            doc_id_namespace: Uuid::NAMESPACE_OID,
-            strip_control_chars: true,
-            metadata_policy: MetadataPolicy::default(),
-        }
-    }
-}
-
-/// Source kinds we accept at ingest time.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum IngestSource {
-    RawText,
-    Url(String),
-    File {
-        filename: String,
-        content_type: Option<String>,
-    },
-    Api,
-}
-
-/// Metadata associated with an ingest request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct IngestMetadata {
-    /// Optional tenant id; defaults to config default when None/empty.
-    pub tenant_id: Option<String>,
-    /// Optional document id; deterministically generated when None/empty.
-    pub doc_id: Option<String>,
-    /// Optional timestamp supplied by client.
-    pub received_at: Option<DateTime<Utc>>,
-    /// Optional original source id (e.g., URL or external id)
-    pub original_source: Option<String>,
-    /// Arbitrary attributes for future use (signed map might live elsewhere)
-    pub attributes: Option<serde_json::Value>,
-}
-
-/// The inbound record for ingest.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RawIngestRecord {
-    pub id: String,
-    pub source: IngestSource,
-    pub metadata: IngestMetadata,
-    /// Raw payload when available. Text and binary variants are supported to enable multi-modal handling.
-    pub payload: Option<IngestPayload>,
-}
-
-/// Raw payload content provided during ingest.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum IngestPayload {
-    /// UTF-8 text payload for canonicalization.
-    Text(String),
-    /// Raw UTF-8 bytes that will be decoded during ingest.
-    TextBytes(Vec<u8>),
-    /// Arbitrary binary payload (e.g., images, audio, PDFs) that will bypass text canonicalization.
-    Binary(Vec<u8>),
-}
-
-/// Normalized record produced by ingest. This is what the canonicalizer will accept.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CanonicalIngestRecord {
-    pub id: String,
-    pub tenant_id: String,
-    pub doc_id: String,
-    pub received_at: DateTime<Utc>,
-    pub original_source: Option<String>,
-    pub source: IngestSource,
-    /// Normalized payload. Text inputs have whitespace collapsed; binary inputs pass through unchanged.
-    pub normalized_payload: Option<CanonicalPayload>,
-    /// Raw attributes JSON preserved
-    pub attributes: Option<serde_json::Value>,
-}
-
-/// Normalized payload ready for downstream stages.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum CanonicalPayload {
-    /// Normalized UTF-8 text payload.
-    Text(String),
-    /// Binary payload preserved for downstream perceptual/semantic stages.
-    Binary(Vec<u8>),
-}
-
-#[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum IngestError {
-    #[error("missing payload for source that requires payload")]
-    MissingPayload,
-    #[error("binary payload is empty")]
-    EmptyBinaryPayload,
-    #[error("invalid metadata: {0}")]
-    InvalidMetadata(String),
-    #[error("invalid utf-8 payload: {0}")]
-    InvalidUtf8(String),
-    #[error("text payload empty after normalization")]
-    EmptyNormalizedText,
-}
-
-/// Public ingest function. It validates metadata, normalizes payload (trims and collapses whitespace),
-/// and returns a canonical record for the canonicalizer stage.
+/// Public ingest function. It validates metadata, normalizes payload (trims and collapses
+/// whitespace), and returns a canonical record for the canonical stage.
+///
+/// This convenience wrapper delegates to [`ingest_with_observer`] with an internal
+/// no-op observer.
 pub fn ingest(
     raw: RawIngestRecord,
     cfg: &IngestConfig,
 ) -> Result<CanonicalIngestRecord, IngestError> {
+    ingest_with_observer(raw, cfg, &NoopObserver)
+}
+
+/// Ingest function with an explicit observer hook.
+///
+/// This variant behaves like [`ingest`], but additionally notifies the supplied
+/// [`IngestObserver`] of successes and failures, making it easy to integrate
+/// with metrics or custom logging.
+pub fn ingest_with_observer<O>(
+    raw: RawIngestRecord,
+    cfg: &IngestConfig,
+    observer: &O,
+) -> Result<CanonicalIngestRecord, IngestError>
+where
+    O: IngestObserver + ?Sized,
+{
     // Start timer for observability.
     let start = Instant::now();
     let RawIngestRecord {
@@ -220,10 +142,12 @@ pub fn ingest(
     let doc_hint = metadata.doc_id.clone();
 
     // The record ID is crucial for tracing, so it's sanitized and validated first.
-    let record_id = match sanitize_required_field("id", id, cfg.strip_control_chars) {
+    let record_id = match metadata::sanitize_required_field("id", id, cfg.strip_control_chars) {
         Ok(id) => id,
         Err(err) => {
-            warn!(error = %err, "ingest_failure");
+            let elapsed_micros = start.elapsed().as_micros();
+            warn!(error = %err, elapsed_micros, "ingest_failure");
+            observer.on_failure(&err, elapsed_micros);
             return Err(err);
         }
     };
@@ -236,26 +160,32 @@ pub fn ingest(
         source = ?source
     );
     let _guard = span.enter();
-    // The core logic is in a separate function to keep this one clean and focused on observability.
+
+    // The core logic is in a separate function to keep this one focused on observability.
     match ingest_inner(record_id.clone(), source, metadata, payload, cfg) {
         Ok(record) => {
+            let elapsed_micros = start.elapsed().as_micros();
             info!(
                 tenant_id = %record.tenant_id,
                 doc_id = %record.doc_id,
                 payload_kind = %payload_kind(record.normalized_payload.as_ref()),
                 normalized_len = payload_length(record.normalized_payload.as_ref()),
-                elapsed_micros = start.elapsed().as_micros(),
+                elapsed_micros,
                 "ingest_success"
             );
+            observer.on_success(&record, elapsed_micros);
             Ok(record)
         }
         Err(err) => {
+            let elapsed_micros = start.elapsed().as_micros();
             warn!(
                 tenant_id = ?tenant_hint,
                 doc_id = ?doc_hint,
                 error = %err,
+                elapsed_micros,
                 "ingest_failure"
             );
+            observer.on_failure(&err, elapsed_micros);
             Err(err)
         }
     }
@@ -272,10 +202,26 @@ fn ingest_inner(
     // Some sources require a payload, so we check for that first.
     validate_payload_requirements(&source, &payload)?;
 
+    // Reject oversized raw payloads before normalization.
+    if let Some(limit) = cfg.max_payload_bytes {
+        if let Some(ref p) = payload {
+            let len = match p {
+                IngestPayload::Text(s) => s.len(),
+                IngestPayload::TextBytes(b) => b.len(),
+                IngestPayload::Binary(b) => b.len(),
+            };
+            if len > limit {
+                return Err(IngestError::PayloadTooLarge(format!(
+                    "raw payload size {len} exceeds limit of {limit}"
+                )));
+            }
+        }
+    }
+
     // Metadata is normalized and validated against the configured policies.
     let normalized_metadata = normalize_metadata(metadata, cfg, &record_id)?;
     // The payload is normalized based on its type (text or binary).
-    let normalized_payload = normalize_payload_option(&source, payload)?;
+    let normalized_payload = normalize_payload_option(&source, payload, cfg)?;
 
     Ok(CanonicalIngestRecord {
         id: record_id,
@@ -287,244 +233,6 @@ fn ingest_inner(
         normalized_payload,
         attributes: normalized_metadata.attributes,
     })
-}
-
-/// Holds the result of metadata normalization.
-struct NormalizedMetadata {
-    tenant_id: String,
-    doc_id: String,
-    received_at: DateTime<Utc>,
-    original_source: Option<String>,
-    attributes: Option<serde_json::Value>,
-}
-
-/// Normalizes and validates metadata fields.
-fn normalize_metadata(
-    metadata: IngestMetadata,
-    cfg: &IngestConfig,
-    record_id: &str,
-) -> Result<NormalizedMetadata, IngestError> {
-    let IngestMetadata {
-        tenant_id,
-        doc_id,
-        received_at,
-        original_source,
-        attributes,
-    } = metadata;
-
-    let mut attributes = attributes;
-    // Enforce size limits on the attributes JSON blob to prevent abuse.
-    enforce_attribute_limit(&mut attributes, &cfg.metadata_policy)?;
-
-    // Sanitize and apply defaults to tenant ID.
-    let tenant_id_clean = sanitize_optional_string(tenant_id, cfg.strip_control_chars);
-    enforce_required_metadata(
-        &cfg.metadata_policy,
-        RequiredField::TenantId,
-        tenant_id_clean.is_some(),
-    )?;
-    let tenant_id = tenant_id_clean.unwrap_or_else(|| cfg.default_tenant_id.clone());
-
-    // Sanitize and derive doc ID if not present.
-    let doc_id_clean = sanitize_optional_string(doc_id, cfg.strip_control_chars);
-    enforce_required_metadata(
-        &cfg.metadata_policy,
-        RequiredField::DocId,
-        doc_id_clean.is_some(),
-    )?;
-    let doc_id = doc_id_clean.unwrap_or_else(|| derive_doc_id(cfg, &tenant_id, record_id));
-
-    // Validate and default the received timestamp.
-    let received_at_opt = received_at;
-    enforce_required_metadata(
-        &cfg.metadata_policy,
-        RequiredField::ReceivedAt,
-        received_at_opt.is_some(),
-    )?;
-    let now = Utc::now();
-    if cfg.metadata_policy.reject_future_timestamps
-        && matches!(received_at_opt.as_ref(), Some(ts) if *ts > now)
-    {
-        return Err(IngestError::InvalidMetadata(
-            "received_at lies in the future".into(),
-        ));
-    }
-    let received_at = received_at_opt.unwrap_or(now);
-
-    // Sanitize original source.
-    let original_source = sanitize_optional_string(original_source, cfg.strip_control_chars);
-    enforce_required_metadata(
-        &cfg.metadata_policy,
-        RequiredField::OriginalSource,
-        original_source.is_some(),
-    )?;
-
-    Ok(NormalizedMetadata {
-        tenant_id,
-        doc_id,
-        received_at,
-        original_source,
-        attributes,
-    })
-}
-
-/// Derives a deterministic doc ID from the tenant and record IDs.
-fn derive_doc_id(cfg: &IngestConfig, tenant_id: &str, record_id: &str) -> String {
-    // Use a UUIDv5 to create a deterministic ID based on the namespace and a name.
-    let mut material = Vec::with_capacity(tenant_id.len() + record_id.len() + 1);
-    material.extend_from_slice(tenant_id.as_bytes());
-    material.push(0); // Separator to prevent collisions.
-    material.extend_from_slice(record_id.as_bytes());
-    Uuid::new_v5(&cfg.doc_id_namespace, &material).to_string()
-}
-
-/// Checks if the serialized attributes exceed the configured limit.
-fn enforce_attribute_limit(
-    attributes: &mut Option<serde_json::Value>,
-    policy: &MetadataPolicy,
-) -> Result<(), IngestError> {
-    if let (Some(limit), Some(ref value)) = (policy.max_attribute_bytes, attributes.as_ref()) {
-        let serialized = serde_json::to_vec(value).map_err(|err| {
-            IngestError::InvalidMetadata(format!("attributes serialization failed: {err}"))
-        })?;
-        if serialized.len() > limit {
-            return Err(IngestError::InvalidMetadata(format!(
-                "attributes exceed {limit} bytes (got {})",
-                serialized.len()
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Enforces that a required metadata field is present.
-fn enforce_required_metadata(
-    policy: &MetadataPolicy,
-    field: RequiredField,
-    present: bool,
-) -> Result<(), IngestError> {
-    if policy.required_fields.contains(&field) && !present {
-        return Err(IngestError::InvalidMetadata(format!(
-            "{field:?} is required by ingest policy"
-        )));
-    }
-    Ok(())
-}
-
-/// Checks if the source requires a payload.
-fn validate_payload_requirements(
-    source: &IngestSource,
-    payload: &Option<IngestPayload>,
-) -> Result<(), IngestError> {
-    let has_payload = payload.is_some();
-    if source_requires_payload(source) && !has_payload {
-        return Err(IngestError::MissingPayload);
-    }
-    Ok(())
-}
-
-/// Determines if a source type requires a payload.
-fn source_requires_payload(source: &IngestSource) -> bool {
-    matches!(source, IngestSource::RawText | IngestSource::File { .. })
-}
-
-/// Normalizes the payload based on its type.
-fn normalize_payload_option(
-    source: &IngestSource,
-    payload: Option<IngestPayload>,
-) -> Result<Option<CanonicalPayload>, IngestError> {
-    let payload = match payload {
-        Some(value) => value,
-        None => return Ok(None),
-    };
-
-    let canonical = normalize_payload_value(payload)?;
-    // Some sources only make sense with a text payload.
-    if source_requires_text_payload(source) && !matches!(canonical, CanonicalPayload::Text(_)) {
-        return Err(IngestError::InvalidMetadata(
-            "text-based source requires text payload".into(),
-        ));
-    }
-    Ok(Some(canonical))
-}
-
-/// Determines if a source type requires a text payload.
-fn source_requires_text_payload(source: &IngestSource) -> bool {
-    matches!(source, IngestSource::RawText | IngestSource::Url(_))
-}
-
-/// Normalizes the payload value itself.
-fn normalize_payload_value(payload: IngestPayload) -> Result<CanonicalPayload, IngestError> {
-    match payload {
-        IngestPayload::Text(text) => normalize_text_payload(text),
-        IngestPayload::TextBytes(bytes) => {
-            let text = String::from_utf8(bytes)
-                .map_err(|err| IngestError::InvalidUtf8(err.to_string()))?;
-            normalize_text_payload(text)
-        }
-        IngestPayload::Binary(bytes) => {
-            if bytes.is_empty() {
-                Err(IngestError::EmptyBinaryPayload)
-            } else {
-                Ok(CanonicalPayload::Binary(bytes))
-            }
-        }
-    }
-}
-
-/// Normalizes a text payload by collapsing whitespace.
-fn normalize_text_payload(text: String) -> Result<CanonicalPayload, IngestError> {
-    let normalized = normalize_payload(&text);
-    if normalized.is_empty() {
-        Err(IngestError::EmptyNormalizedText)
-    } else {
-        Ok(CanonicalPayload::Text(normalized))
-    }
-}
-
-/// Sanitizes an optional string by stripping control characters and trimming whitespace.
-fn sanitize_optional_string(value: Option<String>, strip_control: bool) -> Option<String> {
-    value.and_then(|raw| {
-        let filtered = if strip_control {
-            raw.chars().filter(|c| !c.is_control()).collect::<String>()
-        } else {
-            raw
-        };
-        let trimmed = filtered.trim().to_string();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed)
-        }
-    })
-}
-
-/// Sanitizes a required string field.
-fn sanitize_required_field(
-    field: &str,
-    value: String,
-    strip_control: bool,
-) -> Result<String, IngestError> {
-    sanitize_optional_string(Some(value), strip_control)
-        .ok_or_else(|| IngestError::InvalidMetadata(format!("{field} empty")))
-}
-
-/// Returns a string representation of the payload kind for logging.
-fn payload_kind(payload: Option<&CanonicalPayload>) -> &'static str {
-    match payload {
-        Some(CanonicalPayload::Text(_)) => "text",
-        Some(CanonicalPayload::Binary(_)) => "binary",
-        None => "none",
-    }
-}
-
-/// Returns the length of the payload for logging.
-fn payload_length(payload: Option<&CanonicalPayload>) -> usize {
-    match payload {
-        Some(CanonicalPayload::Text(text)) => text.len(),
-        Some(CanonicalPayload::Binary(bytes)) => bytes.len(),
-        None => 0,
-    }
 }
 
 /// Collapses repeated whitespace, trims edges, and normalizes newlines to single ' '.
@@ -542,8 +250,9 @@ pub fn normalize_payload(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use chrono::{DateTime, Duration, NaiveDate, Utc};
+
+    use super::*;
 
     fn fixed_timestamp() -> DateTime<Utc> {
         let Some(date) = NaiveDate::from_ymd_opt(2024, 1, 1) else {
@@ -844,5 +553,114 @@ mod tests {
 
         let res = ingest(record, &IngestConfig::default());
         assert!(matches!(res, Err(IngestError::EmptyBinaryPayload)));
+    }
+
+    #[test]
+    fn max_payload_bytes_enforced_text() {
+        let record = RawIngestRecord {
+            id: "ingest-payload-limit".into(),
+            source: IngestSource::RawText,
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::Text("x".repeat(17))),
+        };
+
+        let cfg = IngestConfig {
+            max_payload_bytes: Some(16),
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(
+            matches!(res, Err(IngestError::PayloadTooLarge(msg)) if msg.contains("raw payload"))
+        );
+    }
+
+    #[test]
+    fn max_payload_bytes_enforced_bytes() {
+        let record = RawIngestRecord {
+            id: "ingest-payload-limit-bytes".into(),
+            source: IngestSource::RawText,
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::TextBytes(vec![b'x'; 17])),
+        };
+
+        let cfg = IngestConfig {
+            max_payload_bytes: Some(16),
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(
+            matches!(res, Err(IngestError::PayloadTooLarge(msg)) if msg.contains("raw payload"))
+        );
+    }
+
+    #[test]
+    fn max_payload_bytes_enforced_binary() {
+        let record = RawIngestRecord {
+            id: "ingest-payload-limit-binary".into(),
+            source: IngestSource::File {
+                filename: "large.bin".into(),
+                content_type: None,
+            },
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::Binary(vec![0; 17])),
+        };
+
+        let cfg = IngestConfig {
+            max_payload_bytes: Some(16),
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(
+            matches!(res, Err(IngestError::PayloadTooLarge(msg)) if msg.contains("raw payload"))
+        );
+    }
+
+    #[test]
+    fn max_normalized_bytes_enforced() {
+        let record = RawIngestRecord {
+            id: "ingest-norm-limit".into(),
+            source: IngestSource::RawText,
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::Text("a ".repeat(9))), // Raw: 18 bytes
+        };
+
+        let cfg = IngestConfig {
+            max_payload_bytes: Some(20),
+            max_normalized_bytes: Some(16),
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        // Normalizes to "a a a a a a a a a", which is 17 bytes long
+        assert!(
+            matches!(res, Err(IngestError::PayloadTooLarge(msg)) if msg.contains("normalized payload"))
+        );
+    }
+
+    #[test]
+    fn payload_size_limits_respected() {
+        let record = RawIngestRecord {
+            id: "ingest-limits-ok".into(),
+            source: IngestSource::RawText,
+            metadata: base_metadata(),
+            payload: Some(IngestPayload::Text(" data data ".into())), // Raw: 11, Normalized: 9
+        };
+
+        let cfg = IngestConfig {
+            max_payload_bytes: Some(12),
+            max_normalized_bytes: Some(10),
+            ..Default::default()
+        };
+
+        let res = ingest(record, &cfg);
+        assert!(res.is_ok());
+        let rec = res.unwrap();
+        assert_eq!(
+            rec.normalized_payload,
+            Some(CanonicalPayload::Text("data data".into()))
+        );
     }
 }
