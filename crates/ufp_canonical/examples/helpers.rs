@@ -19,6 +19,7 @@ fn main() {
         canonical_text,
         tokens: _tokens,
         sha256_hex,
+        ..
     } = canonicalize("demo-helper", &collapsed, &cfg).expect("canonicalization succeeds");
 
     println!("canonical text -> \"{canonical_text}\"");

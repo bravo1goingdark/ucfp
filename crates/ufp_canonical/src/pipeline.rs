@@ -1,0 +1,185 @@
+use unicode_categories::UnicodeCategories;
+use unicode_normalization::UnicodeNormalization;
+
+use crate::config::CanonicalizeConfig;
+use crate::document::CanonicalizedDocument;
+use crate::error::CanonicalError;
+use crate::hash::{hash_canonical_bytes, hash_token_bytes};
+use crate::token::Token;
+
+/// Main entry point. Takes an input payload and config and returns a
+/// canonicalized document.
+pub fn canonicalize(
+    doc_id: impl Into<String>,
+    input: &str,
+    cfg: &CanonicalizeConfig,
+) -> Result<CanonicalizedDocument, CanonicalError> {
+    // Config validation: version 0 is reserved and invalid.
+    if cfg.version == 0 {
+        return Err(CanonicalError::InvalidConfig(
+            "config version must be >= 1".into(),
+        ));
+    }
+
+    // A document ID is required for traceability.
+    let doc_id = doc_id.into();
+    let doc_id = doc_id.trim();
+    if doc_id.is_empty() {
+        return Err(CanonicalError::MissingDocId);
+    }
+    let doc_id = doc_id.to_string();
+
+    // Pre-allocate for efficiency, assuming canonical text is roughly the same size as input.
+    let mut canonical_text = String::with_capacity(input.len());
+    let mut tokens: Vec<Token> = Vec::new();
+    // State machine for tokenization and whitespace collapsing.
+    let mut pending_space = false;
+    let mut current_token_start: Option<usize> = None;
+
+    // Unicode normalization is the first step, as it can affect character boundaries.
+    if cfg.normalize_unicode {
+        process_chars(
+            input.nfkc(),
+            cfg,
+            &mut canonical_text,
+            &mut tokens,
+            &mut pending_space,
+            &mut current_token_start,
+        );
+    } else {
+        process_chars(
+            input.chars(),
+            cfg,
+            &mut canonical_text,
+            &mut tokens,
+            &mut pending_space,
+            &mut current_token_start,
+        );
+    }
+
+    // The last token needs to be finalized after the loop.
+    finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
+
+    // After all transformations, if the text is empty, it's an error.
+    if canonical_text.is_empty() {
+        return Err(CanonicalError::EmptyInput);
+    }
+
+    let canonical_version = cfg.version;
+    let token_hashes: Vec<String> = tokens
+        .iter()
+        .map(|t| hash_token_bytes(canonical_version, t.text.as_bytes()))
+        .collect();
+    let sha256_hex = hash_canonical_bytes(canonical_version, canonical_text.as_bytes());
+
+    Ok(CanonicalizedDocument {
+        doc_id,
+        canonical_text,
+        tokens,
+        token_hashes,
+        sha256_hex,
+        canonical_version,
+        config: cfg.clone(),
+    })
+}
+
+/// Helper to iterate over characters and dispatch them for processing.
+fn process_chars<I>(
+    iter: I,
+    cfg: &CanonicalizeConfig,
+    canonical_text: &mut String,
+    tokens: &mut Vec<Token>,
+    pending_space: &mut bool,
+    current_token_start: &mut Option<usize>,
+) where
+    I: Iterator<Item = char>,
+{
+    for ch in iter {
+        // Lowercasing can expand a single character into multiple (e.g., German ß -> ss).
+        if cfg.lowercase {
+            for lower in ch.to_lowercase() {
+                dispatch_char(
+                    lower,
+                    cfg,
+                    canonical_text,
+                    tokens,
+                    pending_space,
+                    current_token_start,
+                );
+            }
+        } else {
+            dispatch_char(
+                ch,
+                cfg,
+                canonical_text,
+                tokens,
+                pending_space,
+                current_token_start,
+            );
+        }
+    }
+}
+
+/// Decides whether a character is part of a token or a delimiter.
+fn dispatch_char(
+    ch: char,
+    cfg: &CanonicalizeConfig,
+    canonical_text: &mut String,
+    tokens: &mut Vec<Token>,
+    pending_space: &mut bool,
+    current_token_start: &mut Option<usize>,
+) {
+    let is_delim = ch.is_whitespace() || (cfg.strip_punctuation && ch.is_punctuation());
+    if is_delim {
+        // When a delimiter is found, the current token (if any) is finalized.
+        finalize_token(tokens, canonical_text, current_token_start);
+        // We note that a space should be added before the next token.
+        if !canonical_text.is_empty() {
+            *pending_space = true;
+        }
+    } else {
+        // If it's not a delimiter, it's part of a token.
+        append_char(ch, canonical_text, current_token_start, pending_space);
+    }
+}
+
+/// Appends a character to the canonical text.
+fn append_char(
+    ch: char,
+    canonical_text: &mut String,
+    current_token_start: &mut Option<usize>,
+    pending_space: &mut bool,
+) {
+    // If a space is pending, add it and mark the start of a new token.
+    if *pending_space {
+        canonical_text.push(' ');
+        *pending_space = false;
+        *current_token_start = Some(canonical_text.len());
+    } else if current_token_start.is_none() {
+        // If there's no token in progress, start a new one.
+        *current_token_start = Some(canonical_text.len());
+    }
+
+    // Append the character to the canonical text.
+    canonical_text.push(ch);
+}
+
+/// Creates a token from the current token start and adds it to the list.
+fn finalize_token(
+    tokens: &mut Vec<Token>,
+    canonical_text: &str,
+    current_token_start: &mut Option<usize>,
+) {
+    // `take()` removes the value from the Option, leaving `None`.
+    if let Some(start) = current_token_start.take() {
+        // Ensure the token has content before creating it.
+        if start < canonical_text.len() {
+            let end = canonical_text.len();
+            tokens.push(Token {
+                text: canonical_text[start..end].to_string(),
+                start,
+                end,
+            });
+        }
+    }
+}
