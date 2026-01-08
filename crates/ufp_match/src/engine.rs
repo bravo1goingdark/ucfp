@@ -191,8 +191,15 @@ impl DefaultMatcher {
         let mut hits = Vec::new();
 
         match req.config.mode {
-            MatchMode::Semantic => {
-                if let Some(results) = hits_semantic.take() {
+            MatchMode::Semantic | MatchMode::Perceptual => {
+                let is_semantic = matches!(req.config.mode, MatchMode::Semantic);
+                let results = if is_semantic {
+                    hits_semantic.take()
+                } else {
+                    hits_perceptual.take()
+                };
+
+                if let Some(results) = results {
                     for r in results.into_iter() {
                         if req.config.tenant_enforce
                             && r.metadata.get("tenant")
@@ -200,11 +207,19 @@ impl DefaultMatcher {
                         {
                             continue;
                         }
-                        let semantic_score = Some(r.score);
-                        let score = Self::combine_scores(&req.config.mode, semantic_score, None);
+
+                        let (semantic_score, perceptual_score) = if is_semantic {
+                            (Some(r.score), None)
+                        } else {
+                            (None, Some(r.score))
+                        };
+
+                        let score =
+                            Self::combine_scores(&req.config.mode, semantic_score, perceptual_score);
                         if score < req.config.min_score {
                             continue;
                         }
+
                         hits.push(MatchHit {
                             canonical_hash: r.canonical_hash,
                             score,
@@ -213,30 +228,6 @@ impl DefaultMatcher {
                             } else {
                                 None
                             },
-                            perceptual_score: None,
-                            metadata: r.metadata,
-                        });
-                    }
-                }
-            }
-            MatchMode::Perceptual => {
-                if let Some(results) = hits_perceptual.take() {
-                    for r in results.into_iter() {
-                        if req.config.tenant_enforce
-                            && r.metadata.get("tenant")
-                                != Some(&serde_json::Value::String(req.tenant_id.clone()))
-                        {
-                            continue;
-                        }
-                        let perceptual_score = Some(r.score);
-                        let score = Self::combine_scores(&req.config.mode, None, perceptual_score);
-                        if score < req.config.min_score {
-                            continue;
-                        }
-                        hits.push(MatchHit {
-                            canonical_hash: r.canonical_hash,
-                            score,
-                            semantic_score: None,
                             perceptual_score: if req.config.explain {
                                 perceptual_score
                             } else {
