@@ -214,8 +214,11 @@ impl DefaultMatcher {
                             (None, Some(r.score))
                         };
 
-                        let score =
-                            Self::combine_scores(&req.config.mode, semantic_score, perceptual_score);
+                        let score = Self::combine_scores(
+                            &req.config.mode,
+                            semantic_score,
+                            perceptual_score,
+                        );
                         if score < req.config.min_score {
                             continue;
                         }
