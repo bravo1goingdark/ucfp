@@ -115,7 +115,7 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 |----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
 | `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*` | v1, deterministic namespace UUID, strip-on, policies off |
 | `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
-| `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`   | v1, 9-token shingles, 16x8 MinHash, serial mode |
+|| `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`, `include_intermediates`   | v1, 9-token shingles, 16x8 MinHash, serial mode, intermediates included |
 | `IndexConfig` | `backend`, `compression`, `quantization` | v1, RocksDB backend, zstd compression, i8 quantization |
 
 ```rust

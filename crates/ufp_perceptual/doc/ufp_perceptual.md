@@ -2,25 +2,42 @@
 
 ## Purpose
 
-`ufp_perceptual` transforms canonicalized token streams into perceptual fingerprints that remain stable across small textual edits. The pipeline is deterministic and consists of three stages:
+`ufp_perceptual` transforms canonicalized token streams into perceptual fingerprints that remain stable across small textual edits. The pipeline is **perceptual-only**:
+
+- it *only* consumes canonical tokens and never sees raw payloads or ingest metadata;
+- it performs no normalization or tokenization; and
+- for a given canonical token stream and `PerceptualConfig`, it is a pure, deterministic function with no I/O.
+
+The pipeline consists of three stages:
 
 1. rolling-hash shingles built from contiguous token windows
 2. winnowing to retain rightmost minimum hashes per window
 3. MinHash signatures that enable locality-sensitive similarity search
 
-All behavior is configured at runtime through `PerceptualConfig` (no Cargo features required).
+All behavior is configured at runtime through `PerceptualConfig` (no Cargo features required), and the resulting `PerceptualFingerprint` records its `perceptual_version` and algorithm identifier so that changes remain auditable.
 
 ## Key Types
 
 ```rust
 pub struct PerceptualConfig {
+    /// Configuration schema version (>= 1). Any behavior change that can alter
+    /// fingerprints must bump this value.
     pub version: u32,
+    /// Tokens per shingle window.
     pub k: usize,
+    /// Winnowing window size in shingles.
     pub w: usize,
+    /// Number of MinHash bands.
     pub minhash_bands: usize,
+    /// Number of rows per band.
     pub minhash_rows_per_band: usize,
+    /// Master seed for rolling hash and MinHash permutations.
     pub seed: u64,
+    /// Enable Rayon-backed parallel MinHash when true.
     pub use_parallel: bool,
+    /// When false, shingles and winnowed shingles are computed internally but
+    /// cleared from the returned fingerprint to reduce storage and bandwidth.
+    pub include_intermediates: bool,
 }
 
 pub struct PerceptualFingerprint {
@@ -36,13 +53,26 @@ pub struct WinnowedShingle {
 }
 
 pub struct PerceptualMeta {
+    /// Perceptual algorithm version managed by this crate.
+    pub perceptual_version: u16,
+    /// Human-readable algorithm identifier (e.g. "rolling+minq+minhash_v1").
+    /// Stored as an owned `String` for straightforward serialization.
+    pub algorithm_name: String,
+    /// Shingle length in tokens.
     pub k: usize,
+    /// Winnowing window size.
     pub w: usize,
+    /// Total MinHash length (bands × rows).
     pub minhash_len: usize,
+    /// Number of MinHash bands.
     pub minhash_bands: usize,
+    /// Number of rows per band.
     pub minhash_rows_per_band: usize,
+    /// Hash seed used for both shingling and MinHash.
     pub seed: u64,
+    /// Whether MinHash was computed using the parallel implementation.
     pub use_parallel: bool,
+    /// Schema/configuration version supplied at computation time.
     pub config_version: u32,
 }
 ```
@@ -57,8 +87,11 @@ pub fn perceptualize_tokens<T: AsRef<str>>(
     cfg: &PerceptualConfig,
 ) -> Result<PerceptualFingerprint, PerceptualError>;
 
+// From the `shingles` module:
 pub fn make_shingles_rolling<T: AsRef<str>>(tokens: &[T], k: usize, seed: u64) -> Vec<u64>;
 pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle>;
+
+// From the `minhash` module:
 pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConfig) -> Vec<u64>;
 ```
 
@@ -79,13 +112,14 @@ This mirrors the classic winnowing algorithm and produces deterministic fingerpr
 
 ### Configuration Fields
 
-- `version` - Semantic version of the configuration; must be >= 1.
+- `version` - Semantic version of the configuration; must be >= 1. Any change that affects fingerprints requires a bump.
 - `k` - Tokens per shingle window. Larger values capture longer phrases while reducing the number of shingles; defaults to 9.
 - `w` - Winnowing window size (in shingles). Smaller windows retain more fingerprints; defaults to 4. When `w` exceeds the number of shingles we treat the entire document as a single window so at least one fingerprint is emitted.
 - `minhash_bands` - Number of MinHash bands. Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
 - `minhash_rows_per_band` - Rows per band. Defaults to 8, producing 128 MinHash values with the default band count.
 - `seed` - Master seed feeding both rolling hash and MinHash permutations for deterministic output.
 - `use_parallel` - Enables Rayon-backed parallel MinHash computation when `true`.
+- `include_intermediates` - When `false`, the returned `PerceptualFingerprint` omits `shingles` and `winnowed` content (they are computed internally but cleared before return) to reduce memory and storage. This does not change the MinHash result.
 
 ## Example
 
