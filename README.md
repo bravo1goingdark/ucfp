@@ -77,8 +77,10 @@ UCFP is a layered pipeline:
    MinHash fingerprints tuned by `PerceptualConfig`.
 4. **Semantic (`ufp_semantic`)** – turns canonical text into dense embeddings via ONNX Runtime or
    remote HTTP APIs, then normalizes/stubs vectors based on the configured tier.
-5. **Index (`ufp_index`)** - stores, retrieves, and searches fingerprints and embeddings using a
+5. **Index (`ufp_index`) - stores, retrieves, and searches fingerprints and embeddings using a
    pluggable backend (e.g., RocksDB, in-memory).
+6. **Match (`ufp_match`)** – executes query-time matching over `ufp_index` using semantic,
+   perceptual, or hybrid scoring modes.
 
 The root `ucfp` crate re-exports all public types and orchestrates the stages through:
 
@@ -108,16 +110,18 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 - [`crates/ufp_perceptual/doc/ufp_perceptual.md`](crates/ufp_perceptual/doc/ufp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
 - [`crates/ufp_semantic/doc/ufp_semantic.md`](crates/ufp_semantic/doc/ufp_semantic.md) – ONNX/API setup, deterministic stub tiers, and embedding configuration tips.
 - [`crates/ufp_index/doc/ufp_index.md`](crates/ufp_index/doc/ufp_index.md) – backend configuration, query modes, and indexing strategies.
+- [`crates/ufp_match/doc/ufp_match.md`](crates/ufp_match/doc/ufp_match.md) – query-time matching over `ufp_index` and multi-tenant policies.
 
 ### Config quick reference
-
-| Config type          | Knobs you probably care about                                                | Default highlights                              |
-|----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
-| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*` | v1, deterministic namespace UUID, strip-on, policies off |
-| `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
+|| Config type          | Knobs you probably care about                                                | Default highlights                              |
+||----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
+|| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*` | v1, deterministic namespace UUID, strip-on, policies off |
+|| `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
 || `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`, `include_intermediates`   | v1, 9-token shingles, 16x8 MinHash, serial mode, intermediates included |
-| `IndexConfig` | `backend`, `compression`, `quantization` | v1, RocksDB backend, zstd compression, i8 quantization |
+|| `IndexConfig`        | `backend`, `compression`, `quantization`                                    | v1, RocksDB backend, zstd compression, i8 quantization |
+|| `MatchConfig`        | `mode`, `max_results`, `min_score`, `tenant_enforce`, `oversample_factor`, `explain` | semantic mode, 10 results, tenant isolation on, oversample x2, no explanation |
 
+```rust
 ```rust
 use ucfp::{
     CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
@@ -213,6 +217,45 @@ assert_eq!(embedding.doc_id, doc.doc_id);
 Call `process_record_with_semantic(...)` to obtain the document and embedding together, or
 `semanticize_document(...)` when you already have a canonical document on hand. Once you have a
 fingerprint and/or embedding, use `ufp_index::UfpIndex` to store and search them.
+
+### Query-time matching (`ufp_match`)
+
+Once you are writing `IndexRecord` values into `ufp_index`, use `ufp_match::DefaultMatcher` at
+query time to turn free-text searches into ranked hits:
+
+```rust
+use std::sync::Arc;
+use ucfp::{CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig};
+use ufp_index::{BackendConfig, IndexConfig, UfpIndex};
+use ufp_match::{DefaultMatcher, MatchConfig, MatchMode, MatchRequest, Matcher};
+
+let index_cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
+let index = UfpIndex::new(index_cfg)?;
+
+let matcher = DefaultMatcher::new(
+    index,
+    IngestConfig::default(),
+    CanonicalizeConfig::default(),
+    PerceptualConfig::default(),
+    SemanticConfig::default(),
+);
+
+let req = MatchRequest {
+    tenant_id: "tenant-a".into(),
+    query_text: "Rust memory safety".into(),
+    config: MatchConfig {
+        mode: MatchMode::Hybrid { semantic_weight: 0.7 },
+        max_results: 10,
+        min_score: 0.3,
+        tenant_enforce: true,
+        oversample_factor: 2.0,
+        explain: true,
+    },
+    attributes: None,
+};
+
+let hits = matcher.match_document(&req)?;
+assert!(hits.len() <= req.config.max_results);
 
 Failures bubble up as `PipelineError::Ingest(_)`, `PipelineError::Canonical(_)`,
 `PipelineError::Perceptual(_)`, `PipelineError::Semantic(_)`, `PipelineError::Index(_)`,

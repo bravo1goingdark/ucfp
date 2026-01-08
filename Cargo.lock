@@ -1858,6 +1858,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ufp_match"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "ucfp",
+ "ufp_index",
+]
+
+[[package]]
 name = "ufp_perceptual"
 version = "0.1.0"
 dependencies = [

@@ -28,5 +28,6 @@ members = [
     "crates/ufp_ingest",
     "crates/ufp_perceptual",
     "crates/ufp_semantic",
-    "crates/ufp_index"
+    "crates/ufp_index",
+    "crates/ufp_match"
 ]
