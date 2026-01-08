@@ -75,12 +75,12 @@ impl MatchConfig {
         if self.min_score < 0.0 {
             return Err(MatchError::InvalidConfig("min_score must be >= 0.0".into()));
         }
-        if let MatchMode::Hybrid { semantic_weight } = self.mode {
-            if !(0.0..=1.0).contains(&semantic_weight) {
-                return Err(MatchError::InvalidConfig(
-                    "semantic_weight must be between 0.0 and 1.0".into(),
-                ));
-            }
+        if let MatchMode::Hybrid { semantic_weight } = self.mode
+            && !(0.0..=1.0).contains(&semantic_weight)
+        {
+            return Err(MatchError::InvalidConfig(
+                "semantic_weight must be between 0.0 and 1.0".into(),
+            ));
         }
         Ok(())
     }

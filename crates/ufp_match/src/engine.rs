@@ -638,7 +638,7 @@ mod tests {
         // We expect at least one metrics event for the match; implementations
         // may emit additional observations, so assert on a lower bound.
         assert!(!events.is_empty());
-        assert_eq!(events[0].0, "tenant-a".to_string());
+        assert!(events.iter().any(|(tenant, _, _)| tenant == "tenant-a"));
 
         set_match_metrics(None);
         Ok(())
