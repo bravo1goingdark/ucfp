@@ -60,6 +60,7 @@ cargo run --package ufp_canonical --example helpers
 cargo run --package ufp_perceptual --example fingerprint_demo
 cargo run --package ufp_semantic --example embed "Doc Title" "Some text to embed"
 cargo run --package ufp_index --example index_demo
+cargo run --package ufp_match --example match_demo
 cargo run --example full_pipeline              # ingest + semantic + perceptual + index
 cargo run                              # end-to-end demo on big_text.txt
 cargo run --example pipeline_metrics   # observe metrics events
@@ -104,7 +105,6 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 ### Documentation map
 
-- [`docs/index.html`](docs/index.html) – workspace-wide architecture overview, diagrams, and glossary.
 - [`crates/ufp_ingest/doc/ucfp_ingest.md`](crates/ufp_ingest/doc/ucfp_ingest.md) – ingest invariants, metadata normalization flow, and error taxonomy.
 - [`crates/ufp_canonical/doc/ufp_canonical.md`](crates/ufp_canonical/doc/ufp_canonical.md) – canonical transforms, token semantics, and checksum derivation.
 - [`crates/ufp_perceptual/doc/ufp_perceptual.md`](crates/ufp_perceptual/doc/ufp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
@@ -113,13 +113,13 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 - [`crates/ufp_match/doc/ufp_match.md`](crates/ufp_match/doc/ufp_match.md) – query-time matching over `ufp_index` and multi-tenant policies.
 
 ### Config quick reference
-|| Config type          | Knobs you probably care about                                                | Default highlights                              |
-||----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
-|| `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*` | v1, deterministic namespace UUID, strip-on, policies off |
-|| `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
-|| `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`, `include_intermediates`   | v1, 9-token shingles, 16x8 MinHash, serial mode, intermediates included |
-|| `IndexConfig`        | `backend`, `compression`, `quantization`                                    | v1, RocksDB backend, zstd compression, i8 quantization |
-|| `MatchConfig`        | `mode`, `max_results`, `min_score`, `tenant_enforce`, `oversample_factor`, `explain` | semantic mode, 10 results, tenant isolation on, oversample x2, no explanation |
+| | Config type          | Knobs you probably care about                                                | Default highlights                              |
+|---|----------------------|------------------------------------------------------------------------------|-------------------------------------------------|
+| | `IngestConfig`       | `default_tenant_id`, `doc_id_namespace`, `strip_control_chars`, `metadata_policy.*`, `max_payload_bytes`, `max_normalized_bytes` | v1, default_tenant_id="default", doc_id_namespace=NAMESPACE_OID, strip-on, policies off |
+| | `CanonicalizeConfig` | `normalize_unicode`, `strip_punctuation`, `lowercase`                        | v1, Unicode NFKC + lowercase, punctuation kept  |
+| | `PerceptualConfig`   | `k`, `w`, `minhash_bands`, `minhash_rows_per_band`, `seed`, `use_parallel`, `include_intermediates`   | v1, 9-token shingles, 4-window winnowing, 16x8 MinHash, serial mode, intermediates included |
+| | `IndexConfig`        | `backend`, `compression`, `quantization`                                    | v1, InMemory backend, zstd compression, i8 quantization |
+| | `MatchConfig`        | `version`, `policy_id`, `policy_version`, `mode`, `strategy`, `max_results`, `tenant_enforce`, `oversample_factor`, `explain` | v1, policy_id="default-policy", policy_version="v1", semantic mode, 10 results, tenant isolation on, oversample x2, no explanation, strategy=Semantic(min_score=0.0) |
 
 ```rust
 ```rust
@@ -191,9 +191,9 @@ let record = RawIngestRecord {
     id: "ingest-1".into(),
     source: IngestSource::RawText,
     metadata: IngestMetadata {
-        tenant_id: "tenant".into(),
-        doc_id: "doc".into(),
-        received_at: Utc::UNIX_EPOCH + Duration::seconds(1_700_000_000),
+        tenant_id: Some("tenant".to_string()),
+        doc_id: Some("doc".to_string()),
+        received_at: Some(Utc::UNIX_EPOCH + Duration::days(1_700_000_000 / 86400)),
         original_source: None,
         attributes: None,
     },
@@ -227,10 +227,10 @@ query time to turn free-text searches into ranked hits:
 use std::sync::Arc;
 use ucfp::{CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig};
 use ufp_index::{BackendConfig, IndexConfig, UfpIndex};
-use ufp_match::{DefaultMatcher, MatchConfig, MatchMode, MatchRequest, Matcher};
+use ufp_match::{DefaultMatcher, MatchConfig, MatchExpr, MatchRequest, Matcher};
 
 let index_cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
-let index = UfpIndex::new(index_cfg)?;
+let index = UfpIndex::new(index_cfg).unwrap();
 
 let matcher = DefaultMatcher::new(
     index,
@@ -241,27 +241,31 @@ let matcher = DefaultMatcher::new(
 );
 
 let req = MatchRequest {
-    tenant_id: "tenant-a".into(),
-    query_text: "Rust memory safety".into(),
+    tenant_id: "tenant-a".to_string(),
+    query_text: "Rust memory safety".to_string(),
     config: MatchConfig {
-        mode: MatchMode::Hybrid { semantic_weight: 0.7 },
+        strategy: MatchExpr::Weighted {
+            semantic_weight: 0.7,
+            min_overall: 0.3,
+        },
         max_results: 10,
-        min_score: 0.3,
         tenant_enforce: true,
         oversample_factor: 2.0,
         explain: true,
+        ..Default::default()
     },
     attributes: None,
+    pipeline_version: None,
+    fingerprint_versions: None,
+    query_canonical_hash: None,
 };
 
 let hits = matcher.match_document(&req)?;
 assert!(hits.len() <= req.config.max_results);
 
-Failures bubble up as `PipelineError::Ingest(_)`, `PipelineError::Canonical(_)`,
-`PipelineError::Perceptual(_)`, `PipelineError::Semantic(_)`, `PipelineError::Index(_)`,
-or `PipelineError::NonTextPayload`. The CLI binary in `src/main.rs`
-invokes `big_text_demo` and prints the final MinHash signature generated from
-`crates/ufp_canonical/examples/big_text.txt`.
+Failures bubble up as `MatchError::InvalidConfig(_)`, `MatchError::Pipeline(_)`, or
+`MatchError::Index(_)`. The CLI binary in `src/main.rs` invokes `big_text_demo`
+and prints the final MinHash signature generated from `crates/ufp_canonical/examples/big_text.txt`.
 
 ## Metrics & Observability
 

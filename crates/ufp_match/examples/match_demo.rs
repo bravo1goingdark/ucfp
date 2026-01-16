@@ -1,47 +1,18 @@
 use std::error::Error;
 
-use chrono::{NaiveDate, Utc};
 use serde_json::json;
 use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, SemanticConfig, SemanticEmbedding,
+    CanonicalizeConfig, IngestConfig, PerceptualConfig, RawIngestRecord, SemanticConfig,
     process_record_with_perceptual_configs, process_record_with_semantic_configs,
 };
 use ufp_index::{BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, UfpIndex};
-use ufp_match::{DefaultMatcher, MatchConfig, MatchHit, MatchMode, MatchRequest, Matcher};
-
-fn demo_timestamp() -> chrono::DateTime<Utc> {
-    // Fixed wall-clock timestamp so the example is fully deterministic.
-    let Some(date) = NaiveDate::from_ymd_opt(2025, 1, 1) else {
-        panic!("invalid demo date components");
-    };
-    let Some(date_time) = date.and_hms_opt(0, 0, 0) else {
-        panic!("invalid demo time components");
-    };
-    chrono::DateTime::<Utc>::from_naive_utc_and_offset(date_time, Utc)
-}
+use ufp_match::{
+    DefaultMatcher, MatchConfig, MatchExpr, MatchHit, MatchMode, MatchRequest, Matcher,
+    demo_utils::{demo_base_record, quantize_with_scale},
+};
 
 fn base_record(doc_id: &str, text: &str) -> RawIngestRecord {
-    RawIngestRecord {
-        id: format!("demo-{doc_id}"),
-        source: IngestSource::RawText,
-        metadata: IngestMetadata {
-            tenant_id: Some("tenant-a".into()),
-            doc_id: Some(doc_id.into()),
-            received_at: Some(demo_timestamp()),
-            original_source: Some("examples/match_demo.rs".into()),
-            attributes: None,
-        },
-        payload: Some(IngestPayload::Text(text.into())),
-    }
-}
-
-fn quantize(embedding: &SemanticEmbedding, scale: f32) -> Vec<i8> {
-    embedding
-        .vector
-        .iter()
-        .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
-        .collect()
+    demo_base_record(doc_id, text, "examples/match_demo.rs")
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -49,7 +20,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     // the "fast" semantic tier which produces stable stub embeddings.
     let ingest_cfg = IngestConfig::default();
     let canonical_cfg = CanonicalizeConfig::default();
-    let perceptual_cfg = PerceptualConfig::default();
+    // Use a smaller k so that short demo texts still produce perceptual fingerprints.
+    let perceptual_cfg = PerceptualConfig {
+        k: 3,
+        ..Default::default()
+    };
     let semantic_cfg = SemanticConfig {
         mode: "fast".into(),
         tier: "fast".into(),
@@ -93,7 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: doc_a.sha256_hex.clone(),
         perceptual: Some(fp_a.minhash.clone()),
-        embedding: Some(quantize(&emb_a, scale)),
+        embedding: Some(quantize_with_scale(&emb_a, scale)),
         metadata: json!({
             "tenant": "tenant-a",
             "doc_id": "doc-alpha",
@@ -103,7 +78,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: doc_b.sha256_hex.clone(),
         perceptual: Some(fp_b.minhash.clone()),
-        embedding: Some(quantize(&emb_b, scale)),
+        embedding: Some(quantize_with_scale(&emb_b, scale)),
         metadata: json!({
             "tenant": "tenant-a",
             "doc_id": "doc-bravo",
@@ -130,12 +105,19 @@ fn main() -> Result<(), Box<dyn Error>> {
         config: MatchConfig {
             mode: MatchMode::Semantic,
             max_results: 5,
-            min_score: 0.0,
             tenant_enforce: true,
             oversample_factor: 2.0,
             explain: true,
+            strategy: MatchExpr::Semantic {
+                metric: ufp_match::types::MetricId::Cosine,
+                min_score: 0.0,
+            },
+            ..Default::default()
         },
         attributes: None,
+        pipeline_version: None,
+        fingerprint_versions: None,
+        query_canonical_hash: None,
     };
 
     let hits: Vec<MatchHit> = matcher.match_document(&req)?;

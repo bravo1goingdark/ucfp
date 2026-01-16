@@ -19,9 +19,10 @@
 //! - [`MatchMode`]: selects the matching strategy:
 //!   - `Semantic` — cosine similarity over quantized embeddings.
 //!   - `Perceptual` — Jaccard similarity over MinHash fingerprints.
-//!   - `Hybrid { semantic_weight }` — weighted combination of both scores.
+//!   - `Hybrid` — weighted combination of both scores.
 //! - [`MatchConfig`]: per-request tuning knobs such as `max_results`,
-//!   `min_score`, `oversample_factor`, and `tenant_enforce`.
+//!   `oversample_factor`, and `tenant_enforce`.
+//! - [`MatchExpr`]: declarative expression of the matching strategy.
 //! - [`MatchRequest`]: tenant id + query text + configuration.
 //! - [`MatchHit`]: canonical hash, final score, optional per-mode scores,
 //!   and stored metadata.
@@ -35,7 +36,7 @@
 //! use ucfp::{CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig};
 //! use ufp_index::{BackendConfig, IndexConfig, UfpIndex};
 //! use ufp_match::{
-//!     DefaultMatcher, MatchConfig, MatchMode, MatchRequest, Matcher,
+//!     DefaultMatcher, MatchConfig, MatchExpr, MatchMode, MatchRequest, Matcher,
 //! };
 //!
 //! // Build or open the index
@@ -53,14 +54,21 @@
 //!     tenant_id: "tenant-a".into(),
 //!     query_text: "Rust memory safety".into(),
 //!     config: MatchConfig {
-//!         mode: MatchMode::Hybrid { semantic_weight: 0.7 },
+//!         mode: MatchMode::Hybrid,
 //!         max_results: 10,
-//!         min_score: 0.3,
 //!         tenant_enforce: true,
 //!         oversample_factor: 2.0,
 //!         explain: true,
+//!         strategy: MatchExpr::Weighted {
+//!             semantic_weight: 0.7,
+//!             min_overall: 0.3,
+//!         },
+//!         ..Default::default()
 //!     },
 //!     attributes: None,
+//!     pipeline_version: None,
+//!     fingerprint_versions: None,
+//!     query_canonical_hash: None,
 //! };
 //!
 //! let hits = matcher.match_document(&req).expect("match");
@@ -80,6 +88,9 @@ pub mod engine;
 pub mod metrics;
 pub mod types;
 
+#[doc(hidden)]
+pub mod demo_utils;
+
 pub use crate::engine::{DefaultMatcher, Matcher};
 pub use crate::metrics::{MatchMetrics, set_match_metrics};
-pub use crate::types::{MatchConfig, MatchError, MatchHit, MatchMode, MatchRequest};
+pub use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, MatchRequest};
