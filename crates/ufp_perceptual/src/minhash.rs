@@ -18,16 +18,19 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
         return Vec::new();
     }
 
+    // Pre-allocate the result vector to avoid multiple allocations
+    let mut result = Vec::with_capacity(m);
+
     if cfg.use_parallel {
         (0..m)
             .into_par_iter()
             .map(|j| compute_slot(unique_shingles, j, cfg.seed))
-            .collect()
+            .collect_into_vec(&mut result);
     } else {
-        (0..m)
-            .map(|j| compute_slot(unique_shingles, j, cfg.seed))
-            .collect()
+        result.extend((0..m).map(|j| compute_slot(unique_shingles, j, cfg.seed)));
     }
+
+    result
 }
 
 /// Computes a single slot in the MinHash signature.

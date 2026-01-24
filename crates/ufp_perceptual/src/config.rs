@@ -50,6 +50,98 @@ pub struct PerceptualConfig {
     pub include_intermediates: bool,
 }
 
+impl PerceptualConfig {
+    /// Create a new configuration with sensible defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the shingle size (k). Typical values: 5-15.
+    /// Larger k = more context, less noise tolerant. Smaller k = more noise tolerant.
+    pub fn with_k(mut self, k: usize) -> Self {
+        self.k = k;
+        self
+    }
+
+    /// Set the winnowing window size (w). Typical values: 2-10.
+    /// Larger w = fewer shingles, more selective. Smaller w = more shingles, less selective.
+    pub fn with_w(mut self, w: usize) -> Self {
+        self.w = w;
+        self
+    }
+
+    /// Set the number of MinHash bands. Typical values: 8-32.
+    /// More bands = higher recall, lower precision. Fewer bands = lower recall, higher precision.
+    pub fn with_minhash_bands(mut self, bands: usize) -> Self {
+        self.minhash_bands = bands;
+        self
+    }
+
+    /// Set the number of rows per MinHash band. Typical values: 4-16.
+    /// Affects false positive probability in LSH.
+    pub fn with_minhash_rows_per_band(mut self, rows: usize) -> Self {
+        self.minhash_rows_per_band = rows;
+        self
+    }
+
+    /// Set the random seed for reproducible results.
+    /// Default uses a well-known seed for consistency.
+    pub fn with_seed(mut self, seed: u64) -> Self {
+        self.seed = seed;
+        self
+    }
+
+    /// Enable or disable parallel processing.
+    /// Parallel is faster for large datasets but uses more CPU.
+    pub fn with_parallel(mut self, use_parallel: bool) -> Self {
+        self.use_parallel = use_parallel;
+        self
+    }
+
+    /// Include or exclude intermediate processing results.
+    /// Useful for debugging and analysis of the fingerprinting process.
+    pub fn with_intermediates(mut self, include_intermediates: bool) -> Self {
+        self.include_intermediates = include_intermediates;
+        self
+    }
+
+    /// Validate configuration parameters.
+    pub fn validate(&self) -> Result<(), PerceptualError> {
+        if self.k < 1 {
+            return Err(PerceptualError::InvalidConfigK { k: self.k });
+        }
+        if self.w < 1 {
+            return Err(PerceptualError::InvalidConfigW { w: self.w });
+        }
+        if self.minhash_bands < 1 {
+            return Err(PerceptualError::InvalidConfigBands {
+                bands: self.minhash_bands,
+            });
+        }
+        if self.minhash_rows_per_band < 1 {
+            return Err(PerceptualError::InvalidConfigRows {
+                rows: self.minhash_rows_per_band,
+            });
+        }
+        if self.version < 1 {
+            return Err(PerceptualError::InvalidConfigVersion {
+                version: self.version,
+            });
+        }
+
+        // Check for minhash length overflow
+        let expected_length = self.minhash_bands * self.minhash_rows_per_band;
+        if expected_length < self.k {
+            return Err(PerceptualError::InvalidConfigMinhashLength {
+                bands: self.minhash_bands,
+                rows: self.minhash_rows_per_band,
+            });
+        }
+
+        Ok(())
+    }
+}
+
 impl Default for PerceptualConfig {
     fn default() -> Self {
         Self {

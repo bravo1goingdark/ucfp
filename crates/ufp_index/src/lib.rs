@@ -71,6 +71,8 @@
 mod backend;
 mod query;
 
+use std::sync::RwLock;
+
 mod metadata_serde {
     use serde::de::Error as DeError;
     use serde::ser::Error as SerError;
@@ -262,8 +264,12 @@ impl IndexError {
 pub struct UfpIndex {
     /// The backend used for storage, abstracted behind a trait.
     backend: Box<dyn IndexBackend>,
-    /// The configuration for the index.
+    /// The configuration for index.
     cfg: IndexConfig,
+    /// Inverted index for MinHash signatures to enable O(log n) lookup instead of O(n) scan
+    perceptual_index: RwLock<hashbrown::HashMap<u64, Vec<String>>>,
+    /// Simple vector index for semantic embeddings to reduce full scans
+    semantic_index: RwLock<Vec<(String, QuantizedVec)>>,
 }
 
 impl UfpIndex {
@@ -277,7 +283,12 @@ impl UfpIndex {
     /// Build an index with a custom backend (e.g., in-memory for tests).
     /// This is useful for dependency injection and testing.
     pub fn with_backend(cfg: IndexConfig, backend: Box<dyn IndexBackend>) -> Self {
-        Self { backend, cfg }
+        Self {
+            backend,
+            cfg,
+            perceptual_index: RwLock::new(hashbrown::HashMap::new()),
+            semantic_index: RwLock::new(Vec::new()),
+        }
     }
 
     /// Quantize float embeddings -> i8 using a raw scale.
@@ -298,6 +309,23 @@ impl UfpIndex {
     /// The record is encoded and compressed before being sent to the backend.
     pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError> {
         let payload = self.encode_record(rec)?;
+
+        // Update auxiliary indexes for faster queries
+        if let Some(ref perceptual) = rec.perceptual {
+            let mut p_index = self.perceptual_index.write().unwrap();
+            for &hash_val in perceptual {
+                p_index
+                    .entry(hash_val)
+                    .or_insert_with(Vec::new)
+                    .push(rec.canonical_hash.clone());
+            }
+        }
+
+        if let Some(ref embedding) = rec.embedding {
+            let mut s_index = self.semantic_index.write().unwrap();
+            s_index.push((rec.canonical_hash.clone(), embedding.clone()));
+        }
+
         self.backend.put(&rec.canonical_hash, &payload)
     }
 

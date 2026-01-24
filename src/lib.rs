@@ -141,7 +141,7 @@ pub enum PipelineError {
     NonTextPayload,
     MissingCanonicalPayload,
     Perceptual(PerceptualError),
-    Semantic(Arc<SemanticError>),
+    Semantic(SemanticError),
 }
 
 impl fmt::Display for PipelineError {
@@ -157,7 +157,7 @@ impl fmt::Display for PipelineError {
                 write!(f, "perceptual fingerprinting failed: {err}")
             }
             PipelineError::Semantic(err) => {
-                write!(f, "semantic embedding failed: {}", err.as_ref())
+                write!(f, "semantic embedding failed: {err}")
             }
         }
     }
@@ -169,7 +169,7 @@ impl Error for PipelineError {
             PipelineError::Ingest(err) => Some(err),
             PipelineError::Canonical(err) => Some(err),
             PipelineError::Perceptual(err) => Some(err),
-            PipelineError::Semantic(err) => Some(err.as_ref()),
+            PipelineError::Semantic(err) => Some(err),
             PipelineError::NonTextPayload | PipelineError::MissingCanonicalPayload => None,
         }
     }
@@ -195,7 +195,7 @@ impl From<PerceptualError> for PipelineError {
 
 impl From<SemanticError> for PipelineError {
     fn from(value: SemanticError) -> Self {
-        PipelineError::Semantic(Arc::new(value))
+        PipelineError::Semantic(value)
     }
 }
 
@@ -204,7 +204,7 @@ pub trait PipelineMetrics: Send + Sync {
     fn record_ingest(&self, latency: Duration, result: Result<(), IngestError>);
     fn record_canonical(&self, latency: Duration, result: Result<(), PipelineError>);
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>);
-    fn record_semantic(&self, latency: Duration, result: Result<(), Arc<SemanticError>>);
+    fn record_semantic(&self, latency: Duration, result: Result<(), SemanticError>);
 }
 
 /// Processing stage captured in observability events.
@@ -491,12 +491,9 @@ impl MetricsSpan {
         }
     }
 
-    fn record_semantic(self, result: Result<(), Arc<SemanticError>>) {
+    fn record_semantic(self, result: Result<(), SemanticError>) {
         let latency = self.start.elapsed();
-        self.emit_event(
-            latency,
-            result.as_ref().err().map(|e| e.as_ref().to_string()),
-        );
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
         if let Some(recorder) = self.recorder {
             recorder.record_semantic(latency, result);
         }
@@ -585,7 +582,13 @@ pub fn process_record_with_configs(
             }
             Err(err)
         }
-        &_ => todo!(),
+        _ => {
+            let err = PipelineError::NonTextPayload;
+            if let Some(span) = canonical_metrics.take() {
+                span.record_canonical(Err(err.clone()));
+            }
+            Err(err)
+        }
     }
 }
 
@@ -714,11 +717,10 @@ pub fn semanticize_document(
             Ok(embedding)
         }
         Err(err) => {
-            let arc_err = Arc::new(err);
             if let Some(span) = span {
-                span.record_semantic(Err(arc_err.clone()));
+                span.record_semantic(Err(err.clone()));
             }
-            Err(PipelineError::Semantic(arc_err))
+            Err(PipelineError::Semantic(err))
         }
     }
 }
@@ -962,7 +964,7 @@ mod tests {
             self.events.write().unwrap().push(label);
         }
 
-        fn record_semantic(&self, _latency: Duration, result: Result<(), Arc<SemanticError>>) {
+        fn record_semantic(&self, _latency: Duration, result: Result<(), SemanticError>) {
             let label = if result.is_ok() {
                 "semantic_ok"
             } else {

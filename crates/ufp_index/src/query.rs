@@ -107,34 +107,71 @@ impl UfpIndex {
 
         let mut results = Vec::new();
         let mut scratch = HashSet::new();
+        let mut processed_hashes = std::collections::HashSet::new();
 
-        // This is a full scan of the index. It can be optimized with an ANN index in the future.
-        self.backend.scan(&mut |value| {
-            let rec = self.decode_record(value)?;
+        match mode {
+            QueryMode::Perceptual => {
+                if let (Some(query_set), Some(_)) = (perceptual_set.as_ref(), query_perceptual) {
+                    let p_index = self.perceptual_index.read().unwrap();
 
-            let score = match mode {
-                QueryMode::Semantic => match (query_embedding, &rec.embedding) {
-                    (Some(qe), Some(re)) => Self::cosine_similarity(qe, re),
-                    _ => 0.0,
-                },
-                QueryMode::Perceptual => match (perceptual_set.as_ref(), &rec.perceptual) {
-                    (Some(query_set), Some(rp)) => {
-                        Self::jaccard_similarity(query_set, rp, &mut scratch)
+                    // Count candidate frequencies using the inverted index
+                    let mut candidate_counts = std::collections::HashMap::new();
+                    for &hash_val in query_set {
+                        if let Some(candidates) = p_index.get(&hash_val) {
+                            for candidate_hash in candidates {
+                                *candidate_counts.entry(candidate_hash.clone()).or_insert(0) += 1;
+                            }
+                        }
                     }
-                    _ => 0.0,
-                },
-            };
 
-            // Only keep results with a positive score.
-            if score > 0.0 {
-                results.push(QueryResult {
-                    canonical_hash: rec.canonical_hash.clone(),
-                    score,
-                    metadata: rec.metadata.clone(),
-                });
+                    // Calculate Jaccard similarity for candidates
+                    for (candidate_hash, intersection_size) in candidate_counts {
+                        if intersection_size > 0 {
+                            if let Some(rec_data) = self.backend.get(&candidate_hash)? {
+                                let rec = self.decode_record(&rec_data);
+                                if let Ok(record) = rec {
+                                    if let Some(rp) = &record.perceptual {
+                                        let score =
+                                            Self::jaccard_similarity(query_set, rp, &mut scratch);
+                                        if score > 0.0 {
+                                            results.push(QueryResult {
+                                                canonical_hash: candidate_hash.clone(),
+                                                score,
+                                                metadata: record.metadata.clone(),
+                                            });
+                                            processed_hashes.insert(candidate_hash);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Ok(())
-        })?;
+            QueryMode::Semantic => {
+                if let Some(query_embedding) = query_embedding {
+                    let s_index = self.semantic_index.read().unwrap();
+
+                    // Simple vector search - in a real implementation this would use ANN
+                    for (candidate_hash, candidate_embedding) in s_index.iter() {
+                        let score = Self::cosine_similarity(query_embedding, candidate_embedding);
+                        if score > 0.0 {
+                            if let Some(rec_data) = self.backend.get(candidate_hash)? {
+                                let rec = self.decode_record(&rec_data);
+                                if let Ok(record) = rec {
+                                    results.push(QueryResult {
+                                        canonical_hash: candidate_hash.clone(),
+                                        score,
+                                        metadata: record.metadata.clone(),
+                                    });
+                                    processed_hashes.insert(candidate_hash.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Sort results by score in descending order.
         // Ties are broken by the canonical hash to ensure deterministic ordering.

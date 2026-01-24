@@ -90,8 +90,8 @@ impl PipelineMetrics for RecordingMetrics {
         self.push(format_stage("perceptual", latency, result));
     }
 
-    fn record_semantic(&self, latency: Duration, result: Result<(), Arc<SemanticError>>) {
-        let result = result.map_err(|err| err.as_ref().to_string());
+    fn record_semantic(&self, latency: Duration, result: Result<(), SemanticError>) {
+        let result = result.map_err(|err| err.to_string());
         self.push(format_stage("semantic", latency, result));
     }
 }

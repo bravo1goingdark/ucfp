@@ -66,10 +66,62 @@ pub(crate) fn normalize_payload_value(
             if bytes.is_empty() {
                 Err(IngestError::EmptyBinaryPayload)
             } else {
+                // Validate binary payload size
+                if let Some(max_bytes) = cfg.max_payload_bytes {
+                    if bytes.len() > max_bytes {
+                        return Err(IngestError::PayloadTooLarge(format!(
+                            "binary payload too large: {} bytes",
+                            bytes.len()
+                        )));
+                    }
+                }
+
+                // Scan for suspicious patterns in binary data
+                if bytes.len() > 1024 {
+                    let suspicious_patterns = [b'\x00', b'\xFF', b'\xFE'];
+                    let pattern_count = bytes
+                        .iter()
+                        .filter(|&&b| suspicious_patterns.contains(&b))
+                        .count();
+                    if pattern_count > bytes.len() / 4 {
+                        return Err(IngestError::InvalidMetadata(
+                            "binary payload contains suspicious patterns".into(),
+                        ));
+                    }
+                }
+
                 Ok(CanonicalPayload::Binary(bytes))
             }
         }
     }
+}
+
+/// Validates text content for potential issues before normalization
+fn validate_text_content(text: &str, cfg: &IngestConfig) -> Result<(), IngestError> {
+    // Check for null bytes
+    if text.contains('\0') {
+        return Err(IngestError::InvalidMetadata(
+            "text contains null bytes".into(),
+        ));
+    }
+
+    // Check for excessive control characters
+    let control_count = text
+        .chars()
+        .filter(|c| c.is_control() && *c != '\t' && *c != '\n' && *c != '\r')
+        .count();
+    if cfg.strip_control_chars && control_count > text.len() / 10 {
+        return Err(IngestError::InvalidMetadata(
+            "text contains too many control characters".into(),
+        ));
+    }
+
+    // Check minimum content length
+    if text.trim().is_empty() {
+        return Err(IngestError::EmptyNormalizedText);
+    }
+
+    Ok(())
 }
 
 /// Normalizes a text payload by collapsing whitespace.
@@ -77,6 +129,9 @@ pub(crate) fn normalize_text_payload(
     text: String,
     cfg: &IngestConfig,
 ) -> Result<CanonicalPayload, IngestError> {
+    // Validate content first
+    validate_text_content(&text, cfg)?;
+
     let normalized = crate::normalize_payload(&text);
     if let Some(limit) = cfg.max_normalized_bytes {
         if normalized.len() > limit {

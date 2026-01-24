@@ -1,5 +1,6 @@
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::config::CanonicalizeConfig;
 use crate::document::CanonicalizedDocument;
@@ -37,25 +38,21 @@ pub fn canonicalize(
     let mut current_token_start: Option<usize> = None;
 
     // Unicode normalization is the first step, as it can affect character boundaries.
-    if cfg.normalize_unicode {
-        process_chars(
-            input.nfkc(),
-            cfg,
-            &mut canonical_text,
-            &mut tokens,
-            &mut pending_space,
-            &mut current_token_start,
-        );
+    // Apply Unicode normalization first
+    let normalized_text = if cfg.normalize_unicode {
+        input.nfkc().collect::<String>()
     } else {
-        process_chars(
-            input.chars(),
-            cfg,
-            &mut canonical_text,
-            &mut tokens,
-            &mut pending_space,
-            &mut current_token_start,
-        );
-    }
+        input.to_string()
+    };
+
+    process_chars(
+        normalized_text.chars(),
+        cfg,
+        &mut canonical_text,
+        &mut tokens,
+        &mut pending_space,
+        &mut current_token_start,
+    );
 
     // The last token needs to be finalized after the loop.
     finalize_token(&mut tokens, &canonical_text, &mut current_token_start);
@@ -94,10 +91,14 @@ fn process_chars<I>(
 ) where
     I: Iterator<Item = char>,
 {
-    for ch in iter {
+    // Convert iterator to string for proper Unicode grapheme handling
+    let text: String = iter.collect();
+
+    // Process Unicode grapheme clusters properly to handle multi-character emojis and complex scripts
+    for grapheme in text.graphemes(true) {
         // Lowercasing can expand a single character into multiple (e.g., German ß -> ss).
         if cfg.lowercase {
-            for lower in ch.to_lowercase() {
+            for lower in grapheme.to_lowercase().chars() {
                 dispatch_char(
                     lower,
                     cfg,
@@ -108,14 +109,16 @@ fn process_chars<I>(
                 );
             }
         } else {
-            dispatch_char(
-                ch,
-                cfg,
-                canonical_text,
-                tokens,
-                pending_space,
-                current_token_start,
-            );
+            for ch in grapheme.chars() {
+                dispatch_char(
+                    ch,
+                    cfg,
+                    canonical_text,
+                    tokens,
+                    pending_space,
+                    current_token_start,
+                );
+            }
         }
     }
 }

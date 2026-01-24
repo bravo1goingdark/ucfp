@@ -179,12 +179,11 @@ impl DefaultMatcher {
         let mut map: std::collections::HashMap<String, (Option<QueryResult>, Option<QueryResult>)> =
             std::collections::HashMap::new();
 
+        let tenant_value = serde_json::Value::String(req.tenant_id.clone());
+
         if let Some(results) = hits_semantic.take() {
             for r in results {
-                if req.config.tenant_enforce
-                    && r.metadata.get("tenant")
-                        != Some(&serde_json::Value::String(req.tenant_id.clone()))
-                {
+                if req.config.tenant_enforce && r.metadata.get("tenant") != Some(&tenant_value) {
                     continue;
                 }
                 let hash = r.canonical_hash.clone();
@@ -194,10 +193,7 @@ impl DefaultMatcher {
 
         if let Some(results) = hits_perceptual.take() {
             for r in results {
-                if req.config.tenant_enforce
-                    && r.metadata.get("tenant")
-                        != Some(&serde_json::Value::String(req.tenant_id.clone()))
-                {
+                if req.config.tenant_enforce && r.metadata.get("tenant") != Some(&tenant_value) {
                     continue;
                 }
                 let hash = r.canonical_hash.clone();

@@ -78,7 +78,6 @@ use ureq::AgentBuilder;
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fs::{self, File},
     io,
     path::{Path, PathBuf},
@@ -90,8 +89,10 @@ static ORT_ENV: OnceCell<Environment> = OnceCell::new();
 const ORT_NAME: &str = "ufp_semantic";
 
 thread_local! {
-    static MODEL_CACHE: RefCell<HashMap<ModelCacheKey, Rc<CachedModel>>> =
-        RefCell::new(HashMap::new());
+    static MODEL_CACHE: RefCell<lru::LruCache<ModelCacheKey, Rc<CachedModel>>> =
+        RefCell::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(8).expect("Non-zero cache size")
+        ));
 }
 
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -239,6 +240,19 @@ pub enum SemanticError {
     /// ONNX Runtime, tokenizer, or normalization errors.
     #[error("inference failure: {0}")]
     Inference(String),
+}
+
+impl Clone for SemanticError {
+    fn clone(&self) -> Self {
+        match self {
+            SemanticError::ModelNotFound(s) => SemanticError::ModelNotFound(s.clone()),
+            SemanticError::TokenizerMissing(s) => SemanticError::TokenizerMissing(s.clone()),
+            SemanticError::InvalidConfig(s) => SemanticError::InvalidConfig(s.clone()),
+            SemanticError::Download(s) => SemanticError::Download(s.clone()),
+            SemanticError::Io(_) => SemanticError::Inference("IO error occurred".to_string()),
+            SemanticError::Inference(s) => SemanticError::Inference(s.clone()),
+        }
+    }
 }
 
 /// Converts the provided `text` into a [`SemanticEmbedding`] using the supplied [`SemanticConfig`].
@@ -542,12 +556,14 @@ fn get_or_load_model_handle(assets: &ModelAssets) -> Result<Rc<CachedModel>, Sem
     };
 
     MODEL_CACHE.with(|cache| {
-        if let Some(handle) = cache.borrow().get(&key).cloned() {
+        // Check cache first
+        if let Some(handle) = cache.borrow_mut().get(&key).cloned() {
             return Ok(handle);
         }
 
+        // Load new model and add to cache
         let handle = Rc::new(CachedModel::load(assets)?);
-        cache.borrow_mut().insert(key.clone(), handle.clone());
+        cache.borrow_mut().put(key.clone(), handle.clone());
         Ok(handle)
     })
 }
