@@ -1846,6 +1846,7 @@ dependencies = [
 name = "ufp_canonical"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hex",
  "serde",
  "sha2",
@@ -1861,6 +1862,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "criterion",
  "hashbrown 0.16.0",
  "log",
  "ndarray 0.17.1",
@@ -1901,6 +1903,7 @@ dependencies = [
 name = "ufp_perceptual"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "rayon",
  "serde",
  "thiserror 2.0.17",

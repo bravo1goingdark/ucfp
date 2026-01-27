@@ -71,12 +71,31 @@ pub fn semanticize(
     text: &str,
     cfg: &SemanticConfig,
 ) -> Result<SemanticEmbedding, SemanticError>;
+
+pub fn semanticize_batch<D, T>(
+    docs: &[(D, T)],
+    cfg: &SemanticConfig,
+) -> Result<Vec<SemanticEmbedding>, SemanticError>;
 ```
 
 - `semanticize` orchestrates tokenizer resolution, cached ONNX session creation/reuse, inference,
   and optional normalization. Unknown ONNX inputs still produce a descriptive `SemanticError`.
+- `semanticize_batch` runs a single batched ONNX request or batch-capable API call for higher
+  throughput. The outputs are normalized and labeled in the same way as the single-call API.
 - The fallback generator used by the `"fast"` tier is exposed internally through `make_stub_embedding`
   (useful for deterministic fixtures and integration tests).
+
+## Module Layout
+
+- `config.rs`: `SemanticConfig` defaults and configuration fields.
+- `types.rs`: `SemanticEmbedding` metadata payload.
+- `error.rs`: `SemanticError` error taxonomy.
+- `api.rs`: API payload shaping and response parsing.
+- `assets.rs`: model/tokenizer resolution and downloads.
+- `cache.rs`: thread-local tokenizer + ONNX session caching.
+- `onnx.rs`: tokenization + ONNX runtime execution.
+- `normalize.rs`: L2 normalization helpers.
+- `stub.rs`: deterministic stub vector generation.
 
 ## Configuration & Model Assets
 

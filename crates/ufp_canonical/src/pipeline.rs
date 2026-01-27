@@ -30,23 +30,22 @@ pub fn canonicalize(
     }
     let doc_id = doc_id.to_string();
 
-    // Pre-allocate for efficiency, assuming canonical text is roughly the same size as input.
-    let mut canonical_text = String::with_capacity(input.len());
-    let mut tokens: Vec<Token> = Vec::new();
-    // State machine for tokenization and whitespace collapsing.
-    let mut pending_space = false;
-    let mut current_token_start: Option<usize> = None;
-
     // Unicode normalization is the first step, as it can affect character boundaries.
-    // Apply Unicode normalization first
     let normalized_text = if cfg.normalize_unicode {
         input.nfkc().collect::<String>()
     } else {
         input.to_string()
     };
 
+    // Pre-allocate for efficiency, assuming canonical text is roughly the same size as normalized input.
+    let mut canonical_text = String::with_capacity(normalized_text.len());
+    let mut tokens: Vec<Token> = Vec::with_capacity((normalized_text.len() / 4).saturating_add(1));
+    // State machine for tokenization and whitespace collapsing.
+    let mut pending_space = false;
+    let mut current_token_start: Option<usize> = None;
+
     process_chars(
-        normalized_text.chars(),
+        &normalized_text,
         cfg,
         &mut canonical_text,
         &mut tokens,
@@ -63,10 +62,12 @@ pub fn canonicalize(
     }
 
     let canonical_version = cfg.version;
-    let token_hashes: Vec<String> = tokens
-        .iter()
-        .map(|t| hash_token_bytes(canonical_version, t.text.as_bytes()))
-        .collect();
+    let mut token_hashes: Vec<String> = Vec::with_capacity(tokens.len());
+    token_hashes.extend(
+        tokens
+            .iter()
+            .map(|t| hash_token_bytes(canonical_version, t.text.as_bytes())),
+    );
     let sha256_hex = hash_canonical_bytes(canonical_version, canonical_text.as_bytes());
 
     Ok(CanonicalizedDocument {
@@ -81,19 +82,14 @@ pub fn canonicalize(
 }
 
 /// Helper to iterate over characters and dispatch them for processing.
-fn process_chars<I>(
-    iter: I,
+fn process_chars(
+    text: &str,
     cfg: &CanonicalizeConfig,
     canonical_text: &mut String,
     tokens: &mut Vec<Token>,
     pending_space: &mut bool,
     current_token_start: &mut Option<usize>,
-) where
-    I: Iterator<Item = char>,
-{
-    // Convert iterator to string for proper Unicode grapheme handling
-    let text: String = iter.collect();
-
+) {
     // Process Unicode grapheme clusters properly to handle multi-character emojis and complex scripts
     for grapheme in text.graphemes(true) {
         // Lowercasing can expand a single character into multiple (e.g., German ß -> ss).

@@ -294,9 +294,9 @@ impl UfpIndex {
     /// Quantize float embeddings -> i8 using a raw scale.
     /// This is a simple linear quantization with clamping.
     pub fn quantize(vec: &Array1<f32>, scale: f32) -> QuantizedVec {
-        vec.iter()
-            .map(|&v| (v * scale).clamp(-128.0, 127.0) as i8)
-            .collect()
+        let mut out = Vec::with_capacity(vec.len());
+        out.extend(vec.iter().map(|&v| (v * scale).clamp(-128.0, 127.0) as i8));
+        out
     }
 
     /// Quantize using a configured strategy.
@@ -355,9 +355,39 @@ impl UfpIndex {
     /// This can be much faster than calling `upsert` in a loop.
     pub fn batch_insert(&self, records: &[IndexRecord]) -> Result<(), IndexError> {
         let mut entries = Vec::with_capacity(records.len());
+        let mut perceptual_updates: Vec<(u64, &str)> = Vec::new();
+        let mut semantic_updates: Vec<(&str, &QuantizedVec)> = Vec::new();
+
         for rec in records {
             entries.push((rec.canonical_hash.clone(), self.encode_record(rec)?));
+            if let Some(ref perceptual) = rec.perceptual {
+                for &hash_val in perceptual {
+                    perceptual_updates.push((hash_val, rec.canonical_hash.as_str()));
+                }
+            }
+            if let Some(ref embedding) = rec.embedding {
+                semantic_updates.push((rec.canonical_hash.as_str(), embedding));
+            }
         }
+
+        if !perceptual_updates.is_empty() {
+            let mut p_index = self.perceptual_index.write().unwrap();
+            for (hash_val, canonical_hash) in perceptual_updates {
+                p_index
+                    .entry(hash_val)
+                    .or_insert_with(Vec::new)
+                    .push(canonical_hash.to_string());
+            }
+        }
+
+        if !semantic_updates.is_empty() {
+            let mut s_index = self.semantic_index.write().unwrap();
+            s_index.reserve(semantic_updates.len());
+            for (canonical_hash, embedding) in semantic_updates {
+                s_index.push((canonical_hash.to_string(), embedding.clone()));
+            }
+        }
+
         self.backend.batch_put(entries)
     }
 

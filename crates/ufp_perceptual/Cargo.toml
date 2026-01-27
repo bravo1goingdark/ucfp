@@ -21,3 +21,8 @@ rayon = "1.10"
 ufp_canonical = { path = "../ufp_canonical", optional = true }
 
 [dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "perceptual_bench"
+harness = false

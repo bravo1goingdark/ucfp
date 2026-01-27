@@ -18,6 +18,10 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
         return Vec::new();
     }
 
+    if unique_shingles.is_empty() {
+        return vec![u64::MAX; m];
+    }
+
     // Pre-allocate the result vector to avoid multiple allocations
     let mut result = Vec::with_capacity(m);
 
@@ -27,7 +31,9 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
             .map(|j| compute_slot(unique_shingles, j, cfg.seed))
             .collect_into_vec(&mut result);
     } else {
-        result.extend((0..m).map(|j| compute_slot(unique_shingles, j, cfg.seed)));
+        for j in 0..m {
+            result.push(compute_slot(unique_shingles, j, cfg.seed));
+        }
     }
 
     result

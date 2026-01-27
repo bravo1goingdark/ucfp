@@ -11,8 +11,7 @@ use thiserror::Error;
 /// Semantic configuration for the perceptual fingerprinting pipeline.
 ///
 /// The perceptual layer **only** works over canonical token streams produced
-/// by upstream components. It must never perform normalization, tokenization,
-/// or read ingest metadata.
+/// by upstream components.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PerceptualConfig {
     /// Configuration schema version.

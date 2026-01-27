@@ -21,10 +21,12 @@ pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -
         return Vec::new();
     }
     // Hash each token individually first.
-    let th: Vec<u64> = tokens
-        .iter()
-        .map(|t| xxh3_64_with_seed(t.as_ref().as_bytes(), seed))
-        .collect();
+    let mut th: Vec<u64> = Vec::with_capacity(n);
+    th.extend(
+        tokens
+            .iter()
+            .map(|t| xxh3_64_with_seed(t.as_ref().as_bytes(), seed)),
+    );
 
     // A large prime used as the base for the polynomial hash.
     // It's XORed with a seed-derived value to make the base unpredictable.
@@ -67,8 +69,23 @@ pub fn winnow_minq(shingles: &[u64], w: usize) -> Vec<WinnowedShingle> {
 
     // Ensure the window size is at least 1 and not larger than the number of shingles.
     let window = w.max(1);
-    let window_span = window.min(n);
-    let window_count = if window >= n { 1 } else { n - window + 1 };
+    if window >= n {
+        let mut min_idx = 0;
+        let mut min_val = shingles[0];
+        for (idx, &val) in shingles.iter().enumerate().skip(1) {
+            if val <= min_val {
+                min_val = val;
+                min_idx = idx;
+            }
+        }
+        return vec![WinnowedShingle {
+            hash: min_val,
+            start_idx: min_idx,
+        }];
+    }
+
+    let window_span = window;
+    let window_count = n - window + 1;
     let mut out = Vec::with_capacity(window_count);
     // The deque stores indices of shingles in the current window, in increasing order of their hash values.
     let mut dq: VecDeque<usize> = VecDeque::with_capacity(window_span);
