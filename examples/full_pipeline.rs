@@ -2,16 +2,15 @@
 //! Requires the `models/bge-small-en-v1.5` assets checked into the repo.
 
 use anyhow::Context;
+use index::{
+    BackendConfig, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex, INDEX_SCHEMA_VERSION,
+};
 use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, SemanticConfig, process_record_with_perceptual_configs,
-    semanticize_document,
-};
-use index::{
-    BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex,
+    process_record_with_perceptual_configs, semanticize_document, CanonicalizeConfig, IngestConfig,
+    IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord, SemanticConfig,
 };
 
 fn main() -> anyhow::Result<()> {

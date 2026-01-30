@@ -1,5 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use canonical::{canonicalize, CanonicalizeConfig};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 
 fn bench_canonicalize(c: &mut Criterion) {
     let config = CanonicalizeConfig::default();

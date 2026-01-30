@@ -1,7 +1,5 @@
+use index::{BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION};
 use serde_json::json;
-use index::{
-    BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION,
-};
 
 fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("data")?;

@@ -1,4 +1,4 @@
-use ucfp::{PerceptualConfig, PipelineError, big_text_demo};
+use ucfp::{big_text_demo, PerceptualConfig, PipelineError};
 
 #[test]
 fn big_text_demo_integration() -> Result<(), PipelineError> {

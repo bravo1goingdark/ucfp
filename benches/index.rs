@@ -1,8 +1,6 @@
-use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
+use index::{BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION};
 use serde_json::json;
-use index::{
-    BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, QueryMode, UfpIndex,
-};
 
 fn bench_index_upserts(c: &mut Criterion) {
     let records = build_semantic_records(1_000);

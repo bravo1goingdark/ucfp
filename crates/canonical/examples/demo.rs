@@ -1,5 +1,5 @@
-use std::fs;
 use canonical::{canonicalize, CanonicalizeConfig, CanonicalizedDocument};
+use std::fs;
 
 fn main() {
     let file_path = "crates/canonical/examples/big_text.txt";

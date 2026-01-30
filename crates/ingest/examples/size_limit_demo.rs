@@ -1,6 +1,4 @@
-use ingest::{
-    ingest, IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord,
-};
+use ingest::{ingest, IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
 
 fn main() {
     println!("--- Demonstrating Payload Size Limit Policies ---");

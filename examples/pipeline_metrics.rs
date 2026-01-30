@@ -3,10 +3,10 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ucfp::{
-    CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, KeyValueLogger,
-    PerceptualConfig, PerceptualError, PipelineError, PipelineEventLogger, PipelineMetrics,
-    RawIngestRecord, SemanticConfig, SemanticError, process_record_with_perceptual,
-    semanticize_document, set_pipeline_logger, set_pipeline_metrics,
+    process_record_with_perceptual, semanticize_document, set_pipeline_logger,
+    set_pipeline_metrics, CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload,
+    IngestSource, KeyValueLogger, PerceptualConfig, PerceptualError, PipelineError,
+    PipelineEventLogger, PipelineMetrics, RawIngestRecord, SemanticConfig, SemanticError,
 };
 
 fn main() -> Result<(), PipelineError> {

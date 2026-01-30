@@ -1,6 +1,6 @@
 use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, PipelineError, RawIngestRecord, process_record_with_perceptual_configs,
+    process_record_with_perceptual_configs, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PipelineError, RawIngestRecord,
 };
 
 #[test]

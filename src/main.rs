@@ -6,7 +6,7 @@
 
 use std::error::Error;
 
-use ucfp::{PerceptualConfig, big_text_demo};
+use ucfp::{big_text_demo, PerceptualConfig};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Configure the perceptual fingerprinting pipeline to use parallelism.
