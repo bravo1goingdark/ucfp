@@ -4,3 +4,6 @@ AGENTS.md
 models
 data
 architecture.md
+nul
+web/node_modules
+web/dist

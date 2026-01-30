@@ -1,0 +1,124 @@
+.pipeline {
+  padding: 120px 24px;
+}
+
+.pipeline-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.pipeline-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pipeline-card:hover {
+  border-color: var(--border-default);
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-3px);
+}
+
+.pipeline-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.pipeline-icon {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.1) 0%, rgba(167, 139, 250, 0.1) 100%);
+  border-radius: var(--radius-md);
+  color: var(--primary);
+}
+
+.pipeline-step {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary);
+  font-family: var(--font-mono);
+}
+
+.pipeline-card-body {
+  flex: 1;
+}
+
+.pipeline-card-body h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.pipeline-description {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 16px;
+}
+
+.pipeline-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pipeline-features li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--text-tertiary);
+}
+
+.pipeline-features li svg {
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.pipeline-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pipeline-metric {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.pipeline-metric-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 900px) {
+  .pipeline-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .pipeline-grid {
+    grid-template-columns: 1fr;
+  }
+}
