@@ -24,6 +24,58 @@ checks as CI, and contribute new functionality (including future modalities) wit
   - `protoc` 3.21+ if you need to regenerate files under `proto/`.
 - Ensure git can use long filenames on Windows (`git config core.longpaths true`) to avoid checkout issues.
 
+## Architecture Guidelines
+
+### Linear Dependency Chain
+
+UCFP follows a strict **linear dependency architecture** to maintain clean separation of concerns:
+
+```
+ufp_ingest → ufp_canonical → ufp_perceptual/semantic → ufp_index → ufp_match
+```
+
+**Rules:**
+
+1. **No circular dependencies**: Crates can only depend on earlier stages in the chain
+2. **No umbrella crate dependencies**: Individual crates should not depend on the root `ucfp` crate
+3. **Direct dependencies only**: Use explicit crate dependencies (e.g., `ufp_ingest = { path = "../ufp_ingest" }`)
+4. **Independence**: Each crate should be usable independently
+
+**Example - Correct dependency in ufp_match:**
+```toml
+[dependencies]
+ufp_ingest = { path = "../ufp_ingest" }
+ufp_canonical = { path = "../ufp_canonical" }
+ufp_perceptual = { path = "../ufp_perceptual" }
+ufp_semantic = { path = "../ufp_semantic" }
+ufp_index = { path = "../ufp_index" }
+```
+
+**Example - Incorrect (circular):**
+```toml
+[dependencies]
+ucfp = { path = "../../" }  # DON'T DO THIS - creates circular dependency
+```
+
+### Dependency Version Consistency
+
+Keep dependency versions consistent across all crates:
+
+- **Rust edition**: All crates use `"2021"`
+- **Common dependencies** (thiserror, serde, etc.): Use the same version across all crates
+- Check `Cargo.lock` after changes to ensure consistency
+
+### Adding New Crates
+
+When adding new modality crates (image, audio, video, document):
+
+1. Place them in the `crates/` directory
+2. Follow the naming convention: `ufp_<modality>`
+3. Add to the workspace `Cargo.toml`
+4. Position them appropriately in the dependency chain
+5. Update `README.md` architecture diagrams
+6. Add comprehensive documentation in `crates/ufp_<modality>/doc/`
+
 ## Local development workflow
 
 - **Start with an issue**: comment on or create an issue so others know you are working on a change.
@@ -60,6 +112,8 @@ exact triplet defined in `.github/workflows/ci.yml`.
 - Keep public APIs documented with `///` comments and include examples or tests when behavior changes.
 - When touching `proto/` definitions, regenerate the artifacts and commit the updated files as part
   of the same change.
+- **Document all public items**: Every `pub struct`, `pub enum`, `pub fn`, and `pub trait` must have
+  a doc comment explaining its purpose and usage.
 
 ## Tests and benchmarks
 
@@ -73,6 +127,15 @@ exact triplet defined in `.github/workflows/ci.yml`.
   when you change hot paths and paste results into the PR if they inform the review.
 - If you add a new feature flag, add tests for both enabled and disabled states so CI validates both.
 
+### Testing Checklist
+
+Before submitting a PR:
+
+- [ ] `cargo test --all` passes
+- [ ] New tests added for new functionality
+- [ ] Documentation tests pass (`cargo test --doc`)
+- [ ] Examples run successfully
+
 ## Documentation and diagrams
 
 - Update the architecture diagram (`docs/architecture.svg`) whenever you add or remove a stage or a
@@ -83,18 +146,78 @@ exact triplet defined in `.github/workflows/ci.yml`.
 - When adding metrics, include a short explanation in the relevant crate doc so dashboards remain
   self-explanatory.
 
+### Documentation Standards
+
+All crate documentation should include:
+
+1. **Purpose statement** - What the crate does
+2. **Architecture position** - Where it fits in the pipeline
+3. **Core types** - Main structs and enums with field explanations
+4. **Public API** - All public functions with examples
+5. **Configuration** - Detailed config options
+6. **Error handling** - Error types and when they're raised
+7. **Examples** - Practical code examples
+8. **Best practices** - Recommended usage patterns
+9. **Troubleshooting** - Common issues and solutions
+10. **Integration** - How to use with other crates
+
+See `crates/ufp_ingest/doc/ucfp_ingest.md` and `crates/ufp_canonical/doc/ufp_canonical.md` as examples.
+
 ## Future modalities
 
 The roadmap includes image, audio, video, and document canonicalizers plus modality-specific
 fingerprints/embeddings. If you prototype any of these:
 
-- Describe the data contract and configuration knobs in a new doc (for example
-  `crates/ufp_image/doc/ufp_image.md`).
-- Explain how the modality feeds the canonical, perceptual, and semantic layers so other contributors
-  can understand the integration points.
-- Enumerate any dependencies (FFmpeg, image libraries, etc.) and how to obtain reproducible test
-  fixtures.
-- Update the architecture diagram to highlight the new flow and reference the doc from `README.md`.
+### Creating a New Modality Crate
+
+1. **Scaffold the crate**:
+   ```bash
+   cargo new --lib crates/ufp_<modality>
+   ```
+
+2. **Configure Cargo.toml**:
+   ```toml
+   [package]
+   name = "ufp_<modality>"
+   version = "0.1.0"
+   edition = "2021"
+   
+   [dependencies]
+   # Add dependencies on earlier stages only
+   ufp_ingest = { path = "../ufp_ingest" }
+   ufp_canonical = { path = "../ufp_canonical" }
+   # ... other dependencies
+   ```
+
+3. **Create documentation** at `crates/ufp_<modality>/doc/ufp_<modality>.md`:
+   - Describe the data contract
+   - Explain configuration knobs
+   - Show integration points
+   - Document dependencies (FFmpeg, image libraries, etc.)
+   - Provide reproducible test fixtures
+
+4. **Update workspace**:
+   - Add to root `Cargo.toml` workspace members
+   - Update `README.md` architecture section
+   - Update `docs/architecture.svg`
+
+5. **Follow existing patterns**:
+   - Mirror the structure of `ufp_perceptual` or `ufp_semantic`
+   - Use the same error handling patterns
+   - Provide deterministic fallbacks
+   - Include comprehensive tests
+
+### Modality Requirements
+
+Each new modality should provide:
+
+- **Canonicalization strategy**: How to normalize the content (e.g., image DCT normalization, audio Mel-spectrogram)
+- **Fingerprinting**: Perceptual fingerprints (e.g., pHash, audio shingling)
+- **Embedding**: Dense vector representations (e.g., CLIP, Whisper)
+- **Configuration**: Config struct mirroring `PerceptualConfig` style
+- **Error handling**: Descriptive error types
+- **Determinism**: Reproducible outputs for same input + config
+- **Documentation**: Comprehensive guide following the standards above
 
 ## Opening a pull request
 
@@ -107,9 +230,35 @@ Include the following in every PR description:
 - Screenshots or SVG diffs when touching docs/diagrams so reviewers can see the change without
   rebuilding assets locally.
 - Rollout or migration notes if the change requires operational follow-up.
+- Architecture impact: If changing dependencies, explain why and show the new dependency graph.
+
+### PR Checklist
+
+- [ ] Code formatted with `cargo fmt --all`
+- [ ] No clippy warnings: `cargo clippy --all --all-targets -- -D warnings`
+- [ ] All tests pass: `cargo test --all`
+- [ ] Documentation updated (crate docs, README.md if needed)
+- [ ] Architecture diagram updated if adding/removing crates
+- [ ] No circular dependencies introduced
+- [ ] Dependency versions consistent across crates
 
 ## Need help?
 
 If you get stuck, open a discussion thread or draft PR and call it out in Discord. Mentions are
 welcome for reviewers listed in `CODEOWNERS`, and we are happy to pair on tricky canonicalizer or
-metrics changes. Thanks again for contributing to UCFP!
+metrics changes. 
+
+### Common Issues
+
+**Circular dependency errors**: If you see errors about circular dependencies, check that you're
+not importing from the `ucfp` umbrella crate in individual crates. Use direct crate dependencies
+instead.
+
+**Documentation warnings**: Run `cargo doc --all` to check for broken links or missing docs.
+
+**Test failures**: If tests fail after your changes, check:
+- Are you preserving determinism? Same input + config should produce same output
+- Did you update golden/snapshot tests if behavior intentionally changed?
+- Are tests isolated? They shouldn't depend on external services or files.
+
+Thanks again for contributing to UCFP!
