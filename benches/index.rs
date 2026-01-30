@@ -1,13 +1,13 @@
 use criterion::{BatchSize, Criterion, black_box, criterion_group, criterion_main};
 use serde_json::json;
-use ufp_index::{
+use index::{
     BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, QueryMode, UfpIndex,
 };
 
 fn bench_index_upserts(c: &mut Criterion) {
     let records = build_semantic_records(1_000);
 
-    c.bench_function("ufp_index_upsert_1000_records", |b| {
+    c.bench_function("index_upsert_1000_records", |b| {
         b.iter_batched(
             || records.clone(),
             |records| {
@@ -25,7 +25,7 @@ fn bench_index_upserts(c: &mut Criterion) {
 fn bench_semantic_search(c: &mut Criterion) {
     let (index, query) = build_semantic_index(2_000);
 
-    c.bench_function("ufp_index_semantic_search_top10", |b| {
+    c.bench_function("index_semantic_search_top10", |b| {
         b.iter(|| {
             let hits = index
                 .search(&query, QueryMode::Semantic, 10)
@@ -38,7 +38,7 @@ fn bench_semantic_search(c: &mut Criterion) {
 fn bench_perceptual_search(c: &mut Criterion) {
     let (index, query) = build_perceptual_index(2_000);
 
-    c.bench_function("ufp_index_perceptual_search_top10", |b| {
+    c.bench_function("index_perceptual_search_top10", |b| {
         b.iter(|| {
             let hits = index
                 .search(&query, QueryMode::Perceptual, 10)

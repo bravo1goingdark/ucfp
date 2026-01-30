@@ -16,11 +16,11 @@ content provenance, and multimodal search.
   and SHA-256 digests are exposed as standalone helpers.
 - **Perceptual fingerprints** – rolling-hash shingles, winnowing, and MinHash signatures make
   similarity search and near-duplicate detection straightforward.
-- **Semantic embeddings** – `ufp_semantic` turns canonical text into ONNX/API-backed dense vectors
+- **Semantic embeddings** – `semantic` turns canonical text into ONNX/API-backed dense vectors
   with deterministic fallbacks for offline tiers.
-- **Pluggable indexing** - `ufp_index` provides a backend-agnostic index for storing and searching
+- **Pluggable indexing** - `index` provides a backend-agnostic index for storing and searching
   canonical hashes, perceptual fingerprints, and quantized semantic embeddings.
-- **Clean architecture** – Linear dependency chain (`ufp_ingest → ufp_canonical → ufp_perceptual/semantic → ufp_index → ufp_match`) 
+- **Clean architecture** – Linear dependency chain (`ingest → canonical → perceptual/semantic → index → match`) 
   ensures no circular dependencies and clear separation of concerns. Each crate can be used independently.
 - **Single entry point** – the root `ucfp` crate wires every stage into `process_record`,
   `process_record_with_perceptual`, and `process_record_with_semantic`, so applications can adopt the
@@ -32,10 +32,10 @@ content provenance, and multimodal search.
 
 | Use case              | What UCFP contributes                                                                      | Layers & configs                                           |
 |-----------------------|-------------------------------------------------------------------------------------------|------------------------------------------------------------|
-| Dataset deduplication | Deterministic IDs and canonical hashes collapse byte-identical submissions                | `ufp_ingest` + `IngestConfig`, `ufp_canonical` SHA-256     |
-| Plagiarism detection  | Token offsets, shingles, and MinHash detect paraphrased overlaps                          | `ufp_canonical` tokens, `ufp_perceptual` tuned `k`/`w`     |
-| Content provenance    | Canonical metadata + perceptual signatures trace assets across feeds, storage, and audits | `ufp_ingest`, `PipelineMetrics`, `PerceptualConfig` seeds  |
-| Multimodal search     | Canonical text + binary passthrough feed embedding stores and downstream modalities       | `ufp_index` + `IndexConfig`, `ufp_semantic` embeddings |
+| Dataset deduplication | Deterministic IDs and canonical hashes collapse byte-identical submissions                | `ingest` + `IngestConfig`, `canonical` SHA-256     |
+| Plagiarism detection  | Token offsets, shingles, and MinHash detect paraphrased overlaps                          | `canonical` tokens, `perceptual` tuned `k`/`w`     |
+| Content provenance    | Canonical metadata + perceptual signatures trace assets across feeds, storage, and audits | `ingest`, `PipelineMetrics`, `PerceptualConfig` seeds  |
+| Multimodal search     | Canonical text + binary passthrough feed embedding stores and downstream modalities       | `index` + `IndexConfig`, `semantic` embeddings |
 
 ## Quickstart
 
@@ -56,14 +56,14 @@ cargo test --all
 
 ```bash
 # Individual stage examples
-cargo run --package ufp_ingest --example ingest_demo
-cargo run --package ufp_ingest --example batch_ingest
-cargo run --package ufp_canonical --example demo
-cargo run --package ufp_canonical --example helpers
-cargo run --package ufp_perceptual --example fingerprint_demo
-cargo run --package ufp_semantic --example embed "Doc Title" "Some text to embed"
-cargo run --package ufp_index --example index_demo
-cargo run --package ufp_match --example match_demo
+cargo run --package ingest --example ingest_demo
+cargo run --package ingest --example batch_ingest
+cargo run --package canonical --example demo
+cargo run --package canonical --example helpers
+cargo run --package perceptual --example fingerprint_demo
+cargo run --package semantic --example embed "Doc Title" "Some text to embed"
+cargo run --package index --example index_demo
+cargo run --package matcher --example match_demo
 
 # Full pipeline examples
 cargo run --example full_pipeline      # ingest + semantic + perceptual + index
@@ -74,14 +74,14 @@ cargo run                              # end-to-end demo on big_text.txt
 ## Recent Changes
 
 ### Architecture Improvements (Latest)
-- **Fixed circular dependency**: `ufp_match` no longer depends on `ucfp` umbrella crate
-- **Linear dependency chain**: Clean architecture from ingest → match with no cycles
+- **Fixed circular dependency**: `matcher` no longer depends on `ucfp` umbrella crate
+- **Linear dependency chain**: Clean architecture from ingest → matcher with no cycles
 - **Edition alignment**: All crates use Rust 2021 edition consistently
 - **Dependency versions**: Aligned `thiserror` to 2.0.17 across all crates
 
 ### Documentation Expansion
-- **ufp_ingest docs**: Expanded from 300 to 680+ lines with comprehensive guides
-- **ufp_canonical docs**: Expanded from 180 to 680+ lines with 8 detailed examples
+- **ingest docs**: Expanded from 300 to 680+ lines with comprehensive guides
+- **canonical docs**: Expanded from 180 to 680+ lines with 8 detailed examples
 - **API documentation**: All public items now have doc comments
 - **Troubleshooting guides**: Added common issues and solutions
 
@@ -116,7 +116,7 @@ complex circular dependencies:
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────┐      │
-│  │  ufp_ingest  │───▶│ufp_canonical │───▶│ ufp_perceptual/semantic │      │
+│  │  ingest  │───▶│canonical │───▶│ perceptual/semantic │      │
 │  │              │    │              │    │         (parallel)       │      │
 │  │ • Validation │    │ • Normalize  │    │ • Shingles/MinHash       │      │
 │  │ • Metadata   │    │ • Tokenize   │    │ • Embeddings             │      │
@@ -126,7 +126,7 @@ complex circular dependencies:
 │         │                      │                      │                     │
 │         ▼                      ▼                      ▼                     │
 │  ┌──────────────────────────────────────────────────────────────┐          │
-│  │                         ufp_index                            │          │
+│  │                         index                            │          │
 │  │  • Storage (RocksDB, In-Memory)                              │          │
 │  │  • Quantization (i8 embeddings)                              │          │
 │  │  • Compression (zstd)                                        │          │
@@ -135,7 +135,7 @@ complex circular dependencies:
 │                              │                                              │
 │                              ▼                                              │
 │  ┌──────────────────────────────────────────────────────────────┐          │
-│  │                        ufp_match                             │          │
+│  │                        match                             │          │
 │  │  • Query-time matching                                       │          │
 │  │  • Tenant isolation                                          │          │
 │  │  • Hybrid scoring                                            │          │
@@ -146,23 +146,23 @@ complex circular dependencies:
 
 **Dependency Rules:**
 - Each crate depends only on the crate(s) before it in the chain
-- No circular dependencies (e.g., ufp_match does not depend on ucfp umbrella crate)
-- Crates can be used independently (e.g., just ufp_ingest for validation)
+- No circular dependencies (e.g., match does not depend on ucfp umbrella crate)
+- Crates can be used independently (e.g., just ingest for validation)
 - The root `ucfp` crate provides convenience orchestration but is not required
 
 ### Stage Details
 
-1. **Ingest (`ufp_ingest`)** – validates metadata, derives deterministic IDs, normalizes text/binary
+1. **Ingest (`ingest`)** – validates metadata, derives deterministic IDs, normalizes text/binary
    payloads, and emits `CanonicalIngestRecord`.
-2. **Canonical (`ufp_canonical`)** – converts normalized text into lowercase NFKC strings, token
+2. **Canonical (`canonical`)** – converts normalized text into lowercase NFKC strings, token
    streams with byte offsets, and SHA-256 hashes.
-3. **Perceptual (`ufp_perceptual`)** – shingles canonical tokens, applies winnowing, and produces
+3. **Perceptual (`perceptual`)** – shingles canonical tokens, applies winnowing, and produces
    MinHash fingerprints tuned by `PerceptualConfig`.
-4. **Semantic (`ufp_semantic`)** – turns canonical text into dense embeddings via ONNX Runtime or
+4. **Semantic (`semantic`)** – turns canonical text into dense embeddings via ONNX Runtime or
    remote HTTP APIs, then normalizes/stubs vectors based on the configured tier.
-5. **Index (`ufp_index`)** - stores, retrieves, and searches fingerprints and embeddings using a
+5. **Index (`index`)** - stores, retrieves, and searches fingerprints and embeddings using a
    pluggable backend (e.g., RocksDB, in-memory).
-6. **Match (`ufp_match`)** – executes query-time matching over `ufp_index` using semantic,
+6. **Match (`match`)** – executes query-time matching over `index` using semantic,
    perceptual, or hybrid scoring modes.
 
 The root `ucfp` crate re-exports all public types and orchestrates the stages through:
@@ -179,20 +179,20 @@ The root `ucfp` crate re-exports all public types and orchestrates the stages th
 
 | Layer           | Responsibilities                                                                                                       | Key types                                                               |
 |-----------------|------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
-| `ufp_ingest`    | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
-| `ufp_canonical` | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token`                  |
-| `ufp_perceptual`| Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
-| `ufp_semantic`  | ONNX/API inference, tokenizer lifecycle management, deterministic stub embeddings for offline or “fast” tiers          | `SemanticConfig`, `SemanticEmbedding`, `SemanticError`                  |
-| `ufp_index` | Pluggable storage (RocksDB/in-memory), retrieval, and similarity search for fingerprints and embeddings | `IndexConfig`, `IndexRecord`, `UfpIndex`, `QueryResult` |
+| `ingest`    | Required metadata enforcement, timestamp defaulting, control-character stripping, whitespace normalization, UTF-8 decode | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord`, `CanonicalPayload` |
+| `canonical` | Unicode normalization, casing/punctuation policies, tokenization with byte offsets, SHA-256 hashing                     | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token`                  |
+| `perceptual`| Rolling-hash shingles, winnowing, MinHash signatures with deterministic seeding and optional parallelism                | `PerceptualConfig`, `PerceptualFingerprint`, `WinnowedShingle`, `PerceptualMeta` |
+| `semantic`  | ONNX/API inference, tokenizer lifecycle management, deterministic stub embeddings for offline or “fast” tiers          | `SemanticConfig`, `SemanticEmbedding`, `SemanticError`                  |
+| `index` | Pluggable storage (RocksDB/in-memory), retrieval, and similarity search for fingerprints and embeddings | `IndexConfig`, `IndexRecord`, `UfpIndex`, `QueryResult` |
 
 ### Documentation map
 
-- [`crates/ufp_ingest/doc/ucfp_ingest.md`](crates/ufp_ingest/doc/ucfp_ingest.md) – ingest invariants, metadata normalization flow, and error taxonomy.
-- [`crates/ufp_canonical/doc/ufp_canonical.md`](crates/ufp_canonical/doc/ufp_canonical.md) – canonical transforms, token semantics, and checksum derivation.
-- [`crates/ufp_perceptual/doc/ufp_perceptual.md`](crates/ufp_perceptual/doc/ufp_perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
-- [`crates/ufp_semantic/doc/ufp_semantic.md`](crates/ufp_semantic/doc/ufp_semantic.md) – ONNX/API setup, deterministic stub tiers, and embedding configuration tips.
-- [`crates/ufp_index/doc/ufp_index.md`](crates/ufp_index/doc/ufp_index.md) – backend configuration, query modes, and indexing strategies.
-- [`crates/ufp_match/doc/ufp_match.md`](crates/ufp_match/doc/ufp_match.md) – query-time matching over `ufp_index` and multi-tenant policies.
+- [`crates/ingest/doc/ucfp_ingest.md`](crates/ingest/doc/ucfp_ingest.md) – ingest invariants, metadata normalization flow, and error taxonomy.
+- [`crates/canonical/doc/canonical.md`](crates/canonical/doc/canonical.md) – canonical transforms, token semantics, and checksum derivation.
+- [`crates/perceptual/doc/perceptual.md`](crates/perceptual/doc/perceptual.md) – shingling/winnowing internals, MinHash tuning guidance, and performance notes.
+- [`crates/semantic/doc/semantic.md`](crates/semantic/doc/semantic.md) – ONNX/API setup, deterministic stub tiers, and embedding configuration tips.
+- [`crates/index/doc/index.md`](crates/index/doc/index.md) – backend configuration, query modes, and indexing strategies.
+- [`crates/match/doc/match.md`](crates/match/doc/match.md) – query-time matching over `index` and multi-tenant policies.
 
 ### Config quick reference
 | | Config type          | Knobs you probably care about                                                | Default highlights                              |
@@ -262,7 +262,7 @@ use ucfp::{
     CanonicalizeConfig, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig,
     RawIngestRecord, SemanticConfig, process_record_with_perceptual, semanticize_document,
 };
-use ufp_index::{BackendConfig, IndexConfig, UfpIndex};
+use index::{BackendConfig, IndexConfig, UfpIndex};
 
 let canonical_cfg = CanonicalizeConfig::default();
 let perceptual_cfg = PerceptualConfig { k: 5, ..Default::default() };
@@ -298,18 +298,18 @@ assert_eq!(embedding.doc_id, doc.doc_id);
 
 Call `process_record_with_semantic(...)` to obtain the document and embedding together, or
 `semanticize_document(...)` when you already have a canonical document on hand. Once you have a
-fingerprint and/or embedding, use `ufp_index::UfpIndex` to store and search them.
+fingerprint and/or embedding, use `index::UfpIndex` to store and search them.
 
-### Query-time matching (`ufp_match`)
+### Query-time matching (`match`)
 
-Once you are writing `IndexRecord` values into `ufp_index`, use `ufp_match::DefaultMatcher` at
+Once you are writing `IndexRecord` values into `index`, use `match::DefaultMatcher` at
 query time to turn free-text searches into ranked hits:
 
 ```rust
 use std::sync::Arc;
 use ucfp::{CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig};
-use ufp_index::{BackendConfig, IndexConfig, UfpIndex};
-use ufp_match::{DefaultMatcher, MatchConfig, MatchExpr, MatchRequest, Matcher};
+use index::{BackendConfig, IndexConfig, UfpIndex};
+use match::{DefaultMatcher, MatchConfig, MatchExpr, MatchRequest, Matcher};
 
 let index_cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
 let index = UfpIndex::new(index_cfg).unwrap();
@@ -347,7 +347,7 @@ assert!(hits.len() <= req.config.max_results);
 
 Failures bubble up as `MatchError::InvalidConfig(_)`, `MatchError::Pipeline(_)`, or
 `MatchError::Index(_)`. The CLI binary in `src/main.rs` invokes `big_text_demo`
-and prints the final MinHash signature generated from `crates/ufp_canonical/examples/big_text.txt`.
+and prints the final MinHash signature generated from `crates/canonical/examples/big_text.txt`.
 
 ## Metrics & Observability
 
@@ -373,12 +373,12 @@ cargo run --example pipeline_metrics
 
 ```
 crates/
-  ufp_ingest/        # ingest validation and normalization (stage 1)
-  ufp_canonical/     # canonical text pipeline (stage 2)
-  ufp_perceptual/    # shingling, winnowing, MinHash (stage 3a)
-  ufp_semantic/      # embedding generation (stage 3b)
-  ufp_index/         # pluggable backend for search/storage (stage 4)
-  ufp_match/         # query-time matching (stage 5)
+  ingest/        # ingest validation and normalization (stage 1)
+  canonical/     # canonical text pipeline (stage 2)
+  perceptual/    # shingling, winnowing, MinHash (stage 3a)
+  semantic/      # embedding generation (stage 3b)
+  index/         # pluggable backend for search/storage (stage 4)
+  match/         # query-time matching (stage 5)
 src/                 # workspace exports + CLI demo
 tests/               # integration tests (determinism, errors, pipeline)
 docs/                # static documentation site
@@ -397,21 +397,21 @@ examples/            # workspace-level demos (metrics, etc.)
     │                    │                    │
     ▼                    ▼                    ▼
 ┌─────────┐      ┌─────────────┐      ┌─────────────┐
-│ufp_index│◀─────│ufp_perceptual│      │ufp_semantic │
+│index│◀─────│perceptual│      │semantic │
 └────┬────┘      └──────┬──────┘      └──────┬──────┘
      │                  │                    │
      │                  └──────────┬─────────┘
      │                             │
      │                        ┌────┴────┐
-     │                        │ufp_canonical│
+     │                        │canonical│
      │                        └────┬────┘
      │                             │
      │                        ┌────┴────┐
-     └───────────────────────▶│ufp_ingest │
+     └───────────────────────▶│ingest │
                               └─────────┘
                               
                               ┌─────────┐
-                              │ufp_match │◀───┐
+                              │match │◀───┐
                               └────┬────┘    │
                                    │         │ uses all
                                    └─────────┘
@@ -419,14 +419,14 @@ examples/            # workspace-level demos (metrics, etc.)
 
 **Key Points:**
 - Linear chain: each crate only depends on previous stages
-- `ufp_match` uses direct dependencies (not ucfp umbrella) to maintain clean architecture
+- `match` uses direct dependencies (not ucfp umbrella) to maintain clean architecture
 - All crates can be used independently
 - Cross-compilation friendly: no platform-specific code in core crates
 
 ## Roadmap
 
 - Expand ingest metadata policies and validation rules.
-- Add more `ufp_index` backends (e.g., Elasticsearch, managed vector DBs).
+- Add more `index` backends (e.g., Elasticsearch, managed vector DBs).
 - Extend the pipeline with cross-modal canonicalizers, fingerprints, and embedding backends:
 
 | Modality | Canonicalizer | Fingerprint | Embedding Model |

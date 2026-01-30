@@ -10,7 +10,7 @@ use ucfp::{
     PerceptualConfig, RawIngestRecord, SemanticConfig, process_record_with_perceptual_configs,
     semanticize_document,
 };
-use ufp_index::{
+use index::{
     BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex,
 };
 

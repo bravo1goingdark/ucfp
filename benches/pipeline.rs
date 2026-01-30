@@ -5,7 +5,7 @@ use ucfp::{
     RawIngestRecord, canonicalize, process_record_with_perceptual,
 };
 
-const BIG_TEXT: &str = include_str!("../crates/ufp_canonical/examples/big_text.txt");
+const BIG_TEXT: &str = include_str!("../crates/canonical/examples/big_text.txt");
 
 fn canonical_bench(c: &mut Criterion) {
     let cfg = CanonicalizeConfig::default();

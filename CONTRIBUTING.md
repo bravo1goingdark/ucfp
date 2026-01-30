@@ -31,24 +31,24 @@ checks as CI, and contribute new functionality (including future modalities) wit
 UCFP follows a strict **linear dependency architecture** to maintain clean separation of concerns:
 
 ```
-ufp_ingest → ufp_canonical → ufp_perceptual/semantic → ufp_index → ufp_match
+ingest → canonical → perceptual/semantic → index → match
 ```
 
 **Rules:**
 
 1. **No circular dependencies**: Crates can only depend on earlier stages in the chain
 2. **No umbrella crate dependencies**: Individual crates should not depend on the root `ucfp` crate
-3. **Direct dependencies only**: Use explicit crate dependencies (e.g., `ufp_ingest = { path = "../ufp_ingest" }`)
+3. **Direct dependencies only**: Use explicit crate dependencies (e.g., `ingest = { path = "../ingest" }`)
 4. **Independence**: Each crate should be usable independently
 
-**Example - Correct dependency in ufp_match:**
+**Example - Correct dependency in match:**
 ```toml
 [dependencies]
-ufp_ingest = { path = "../ufp_ingest" }
-ufp_canonical = { path = "../ufp_canonical" }
-ufp_perceptual = { path = "../ufp_perceptual" }
-ufp_semantic = { path = "../ufp_semantic" }
-ufp_index = { path = "../ufp_index" }
+ingest = { path = "../ingest" }
+canonical = { path = "../canonical" }
+perceptual = { path = "../perceptual" }
+semantic = { path = "../semantic" }
+index = { path = "../index" }
 ```
 
 **Example - Incorrect (circular):**
@@ -161,7 +161,7 @@ All crate documentation should include:
 9. **Troubleshooting** - Common issues and solutions
 10. **Integration** - How to use with other crates
 
-See `crates/ufp_ingest/doc/ucfp_ingest.md` and `crates/ufp_canonical/doc/ufp_canonical.md` as examples.
+See `crates/ingest/doc/ucfp_ingest.md` and `crates/canonical/doc/canonical.md` as examples.
 
 ## Future modalities
 
@@ -184,8 +184,8 @@ fingerprints/embeddings. If you prototype any of these:
    
    [dependencies]
    # Add dependencies on earlier stages only
-   ufp_ingest = { path = "../ufp_ingest" }
-   ufp_canonical = { path = "../ufp_canonical" }
+   ingest = { path = "../ingest" }
+   canonical = { path = "../canonical" }
    # ... other dependencies
    ```
 
@@ -202,7 +202,7 @@ fingerprints/embeddings. If you prototype any of these:
    - Update `docs/architecture.svg`
 
 5. **Follow existing patterns**:
-   - Mirror the structure of `ufp_perceptual` or `ufp_semantic`
+   - Mirror the structure of `perceptual` or `semantic`
    - Use the same error handling patterns
    - Provide deterministic fallbacks
    - Include comprehensive tests
@@ -244,9 +244,13 @@ Include the following in every PR description:
 
 ## Need help?
 
-If you get stuck, open a discussion thread or draft PR and call it out in Discord. Mentions are
-welcome for reviewers listed in `CODEOWNERS`, and we are happy to pair on tricky canonicalizer or
-metrics changes. 
+If you get stuck or have questions:
+
+1. **Open a GitHub Issue** - Create a new issue describing your question or problem
+2. **Open a Discussion Thread** - For broader questions or design discussions
+3. **Draft PR** - Open a draft PR with your work-in-progress and ask for feedback
+
+We are happy to help with tricky canonicalizer or metrics changes. 
 
 ### Common Issues
 

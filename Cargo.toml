@@ -1,16 +1,16 @@
 [package]
 name = "ucfp"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 description = "Universal Content Fingerprinting (UCFP) core library "
 license = "Apache-2.0"
 
 [dependencies]
-ufp_canonical = { path = "crates/ufp_canonical" }
-ufp_ingest = { path = "crates/ufp_ingest" }
-ufp_perceptual = { path = "crates/ufp_perceptual" }
-ufp_semantic = { path = "crates/ufp_semantic" }
-ufp_index = { path = "crates/ufp_index" }
+canonical = { path = "crates/canonical" }
+ingest = { path = "crates/ingest" }
+perceptual = { path = "crates/perceptual" }
+semantic = { path = "crates/semantic" }
+index = { path = "crates/index" }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 serde_json = "1.0"
@@ -24,10 +24,10 @@ harness = false
 
 [workspace]
 members = [
-    "crates/ufp_canonical",
-    "crates/ufp_ingest",
-    "crates/ufp_perceptual",
-    "crates/ufp_semantic",
-    "crates/ufp_index",
-    "crates/ufp_match"
+    "crates/canonical",
+    "crates/ingest",
+    "crates/perceptual",
+    "crates/semantic",
+    "crates/index",
+    "crates/matcher"
 ]

@@ -168,6 +168,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "canonical"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hex",
+ "serde",
+ "sha2",
+ "thiserror 2.0.17",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "unicode_categories",
+]
+
+[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -835,6 +849,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "index"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "criterion",
+ "hashbrown 0.16.0",
+ "log",
+ "ndarray 0.17.1",
+ "rocksdb",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "zstd",
+]
+
+[[package]]
 name = "indicatif"
 version = "0.17.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -845,6 +877,18 @@ dependencies = [
  "portable-atomic",
  "unicode-width",
  "web-time",
+]
+
+[[package]]
+name = "ingest"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1013,6 +1057,22 @@ name = "macro_rules_attribute-proc_macro"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
+
+[[package]]
+name = "matcher"
+version = "0.1.0"
+dependencies = [
+ "canonical",
+ "chrono",
+ "index",
+ "ingest",
+ "once_cell",
+ "perceptual",
+ "semantic",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+]
 
 [[package]]
 name = "matrixmultiply"
@@ -1209,6 +1269,18 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
+
+[[package]]
+name = "perceptual"
+version = "0.1.0"
+dependencies = [
+ "canonical",
+ "criterion",
+ "rayon",
+ "serde",
+ "thiserror 2.0.17",
+ "xxhash-rust",
+]
 
 [[package]]
 name = "pin-project-lite"
@@ -1508,6 +1580,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "semantic"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "fxhash",
+ "lru",
+ "once_cell",
+ "onnxruntime",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokenizers",
+ "ureq",
 ]
 
 [[package]]
@@ -1832,102 +1920,14 @@ name = "ucfp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "canonical",
  "chrono",
  "criterion",
+ "index",
+ "ingest",
+ "perceptual",
+ "semantic",
  "serde_json",
- "ufp_canonical",
- "ufp_index",
- "ufp_ingest",
- "ufp_perceptual",
- "ufp_semantic",
-]
-
-[[package]]
-name = "ufp_canonical"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "hex",
- "serde",
- "sha2",
- "thiserror 2.0.17",
- "unicode-normalization",
- "unicode-segmentation",
- "unicode_categories",
-]
-
-[[package]]
-name = "ufp_index"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "criterion",
- "hashbrown 0.16.0",
- "log",
- "ndarray 0.17.1",
- "rocksdb",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.17",
- "zstd",
-]
-
-[[package]]
-name = "ufp_ingest"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "ufp_match"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "once_cell",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "ufp_canonical",
- "ufp_index",
- "ufp_ingest",
- "ufp_perceptual",
- "ufp_semantic",
-]
-
-[[package]]
-name = "ufp_perceptual"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "rayon",
- "serde",
- "thiserror 2.0.17",
- "ufp_canonical",
- "xxhash-rust",
-]
-
-[[package]]
-name = "ufp_semantic"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "fxhash",
- "lru",
- "once_cell",
- "onnxruntime",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokenizers",
- "ureq",
 ]
 
 [[package]]

@@ -96,8 +96,8 @@
 //!
 //! The canonical document, perceptual fingerprint, and optional semantic
 //! embedding produced by these helpers map directly into the index types exposed
-//! by the companion [`ufp_index`](https://docs.rs/ufp_index) crate. The
-//! [`IndexRecord`](https://docs.rs/ufp_index/latest/ufp_index/struct.IndexRecord.html)
+//! by the companion [`index`](https://docs.rs/index) crate. The
+//! [`IndexRecord`](https://docs.rs/index/latest/index/struct.IndexRecord.html)
 //! struct mirrors the combined outputs returned by
 //! [`process_record_with_perceptual_configs`] and
 //! [`process_record_with_semantic_configs`] so search or deduplication services
@@ -113,18 +113,18 @@
 //! non-text-payload failures without needing to depend on the individual
 //! workspace crates.
 
-pub use ufp_canonical::{
-    CanonicalError, CanonicalizeConfig, CanonicalizedDocument, Token, canonicalize,
-    collapse_whitespace, hash_text, tokenize,
+pub use canonical::{
+    canonicalize, collapse_whitespace, hash_text, tokenize, CanonicalError, CanonicalizeConfig,
+    CanonicalizedDocument, Token,
 };
-pub use ufp_ingest::{
-    CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestError, IngestMetadata,
-    IngestPayload, IngestSource, RawIngestRecord, ingest, normalize_payload,
+pub use ingest::{
+    ingest, normalize_payload, CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestError,
+    IngestMetadata, IngestPayload, IngestSource, RawIngestRecord,
 };
-pub use ufp_perceptual::{
-    PerceptualConfig, PerceptualError, PerceptualFingerprint, perceptualize_tokens,
+pub use perceptual::{
+    perceptualize_tokens, PerceptualConfig, PerceptualError, PerceptualFingerprint,
 };
-pub use ufp_semantic::{SemanticConfig, SemanticEmbedding, SemanticError, semanticize};
+pub use semantic::{semanticize, SemanticConfig, SemanticEmbedding, SemanticError};
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use std::error::Error;
@@ -766,7 +766,7 @@ fn demo_timestamp() -> DateTime<Utc> {
 pub fn big_text_demo(
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    const BIG_TEXT: &str = include_str!("../crates/ufp_canonical/examples/big_text.txt");
+    const BIG_TEXT: &str = include_str!("../crates/canonical/examples/big_text.txt");
 
     let raw = RawIngestRecord {
         id: "demo-big-text".into(),
@@ -775,7 +775,7 @@ pub fn big_text_demo(
             tenant_id: Some("ucfp-demo".into()),
             doc_id: Some("big-text".into()),
             received_at: Some(demo_timestamp()),
-            original_source: Some("crates/ufp_canonical/examples/big_text.txt".into()),
+            original_source: Some("crates/canonical/examples/big_text.txt".into()),
             attributes: None,
         },
         payload: Some(IngestPayload::Text(BIG_TEXT.to_string())),
