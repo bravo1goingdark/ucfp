@@ -1,7 +1,7 @@
 use std::io;
 use thiserror::Error;
 
-/// Errors surfaced by [`semanticize`].
+/// Errors surfaced by the `semanticize` function.
 #[derive(Debug, Error)]
 pub enum SemanticError {
     /// The ONNX model could not be located locally and no fallback URL was provided.

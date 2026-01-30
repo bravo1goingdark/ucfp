@@ -11,10 +11,15 @@ use crate::types::IngestMetadata;
 
 /// Holds the result of metadata normalization.
 pub(crate) struct NormalizedMetadata {
+    /// Normalized tenant identifier (default applied if missing).
     pub(crate) tenant_id: String,
+    /// Normalized document identifier (derived if missing).
     pub(crate) doc_id: String,
+    /// Normalized timestamp (default to now if missing).
     pub(crate) received_at: DateTime<Utc>,
+    /// Sanitized original source information.
     pub(crate) original_source: Option<String>,
+    /// Preserved arbitrary attributes.
     pub(crate) attributes: Option<serde_json::Value>,
 }
 

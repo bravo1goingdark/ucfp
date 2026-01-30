@@ -92,5 +92,5 @@ pub mod types;
 pub mod demo_utils;
 
 pub use crate::engine::{DefaultMatcher, Matcher};
-pub use crate::metrics::{MatchMetrics, set_match_metrics};
+pub use crate::metrics::{set_match_metrics, MatchMetrics};
 pub use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, MatchRequest};

@@ -3,14 +3,16 @@ use std::time::Instant;
 
 #[allow(unused_imports)]
 use chrono::{NaiveDate, Utc};
-use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, PerceptualFingerprint, RawIngestRecord, SemanticConfig, SemanticEmbedding,
-    process_record_with_perceptual_configs, process_record_with_semantic_configs,
-};
+use ufp_canonical::{canonicalize, CanonicalizeConfig};
 use ufp_index::{
-    BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex,
+    BackendConfig, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex, INDEX_SCHEMA_VERSION,
 };
+use ufp_ingest::CanonicalPayload;
+use ufp_ingest::{
+    ingest, IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord,
+};
+use ufp_perceptual::{perceptualize_tokens, PerceptualConfig, PerceptualFingerprint};
+use ufp_semantic::{semanticize, SemanticConfig, SemanticEmbedding};
 
 use crate::metrics::metrics_recorder;
 use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, MatchRequest};
@@ -90,12 +92,7 @@ impl DefaultMatcher {
         _cfg: &MatchConfig,
     ) -> Result<(IndexRecord, Option<SemanticEmbedding>), MatchError> {
         let raw = self.build_raw_record(tenant_id, "query-semantic", query_text);
-        let (_doc, embedding) = process_record_with_semantic_configs(
-            raw,
-            &self.ingest_cfg,
-            &self.canonical_cfg,
-            &self.semantic_cfg,
-        )?;
+        let embedding = self.run_semantic_pipeline(&raw)?;
 
         let quantized = self.quantize_embedding(&embedding);
         let record = IndexRecord {
@@ -120,12 +117,7 @@ impl DefaultMatcher {
         _cfg: &MatchConfig,
     ) -> Result<(IndexRecord, Option<PerceptualFingerprint>), MatchError> {
         let raw = self.build_raw_record(tenant_id, "query-perceptual", query_text);
-        let (_doc, fingerprint) = process_record_with_perceptual_configs(
-            raw,
-            &self.ingest_cfg,
-            &self.canonical_cfg,
-            &self.perceptual_cfg,
-        )?;
+        let fingerprint = self.run_perceptual_pipeline(&raw)?;
 
         let record = IndexRecord {
             schema_version: INDEX_SCHEMA_VERSION,
@@ -140,6 +132,59 @@ impl DefaultMatcher {
         };
 
         Ok((record, Some(fingerprint)))
+    }
+
+    /// Run the full pipeline: ingest → canonical → semantic
+    fn run_semantic_pipeline(
+        &self,
+        raw: &RawIngestRecord,
+    ) -> Result<SemanticEmbedding, MatchError> {
+        // Ingest stage
+        let canonical_record =
+            ingest(raw.clone(), &self.ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+
+        // Get text payload
+        let text = match canonical_record.normalized_payload {
+            Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+            _ => return Err(MatchError::Pipeline("No text payload available".into())),
+        };
+
+        // Canonical stage
+        let doc = canonicalize(&canonical_record.doc_id, text, &self.canonical_cfg)
+            .map_err(|e| MatchError::Canonical(e.to_string()))?;
+
+        // Semantic stage
+        let embedding = semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg)
+            .map_err(|e| MatchError::Semantic(e.to_string()))?;
+
+        Ok(embedding)
+    }
+
+    /// Run the full pipeline: ingest → canonical → perceptual
+    fn run_perceptual_pipeline(
+        &self,
+        raw: &RawIngestRecord,
+    ) -> Result<PerceptualFingerprint, MatchError> {
+        // Ingest stage
+        let canonical_record =
+            ingest(raw.clone(), &self.ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+
+        // Get text payload
+        let text = match canonical_record.normalized_payload {
+            Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+            _ => return Err(MatchError::Pipeline("No text payload available".into())),
+        };
+
+        // Canonical stage
+        let doc = canonicalize(&canonical_record.doc_id, text, &self.canonical_cfg)
+            .map_err(|e| MatchError::Canonical(e.to_string()))?;
+
+        // Perceptual stage
+        let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
+        let fingerprint = perceptualize_tokens(&token_refs, &self.perceptual_cfg)
+            .map_err(|e| MatchError::Perceptual(e.to_string()))?;
+
+        Ok(fingerprint)
     }
 
     fn build_raw_record(&self, tenant_id: &str, doc_id: &str, text: &str) -> RawIngestRecord {

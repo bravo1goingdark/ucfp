@@ -9,8 +9,27 @@ semantically related documents in multi-tenant deployments.
 
 Rather than dealing with raw embeddings or MinHash vectors directly, callers
 construct a `MatchRequest` (tenant id + query text + `MatchConfig`).
-`ufp_match` uses `ucfp` to canonicalize and fingerprint/embed the query, then
-searches the index and returns ranked `MatchHit` results.
+`ufp_match` uses the upstream pipeline crates (`ufp_ingest`, `ufp_canonical`,
+`ufp_perceptual`, `ufp_semantic`) to canonicalize and fingerprint/embed the query,
+then searches the index and returns ranked `MatchHit` results.
+
+## Architecture
+
+`ufp_match` sits at the top of the linear dependency chain:
+
+```
+ufp_ingest → ufp_canonical → ufp_perceptual/ufp_semantic → ufp_index → ufp_match
+```
+
+It directly depends on:
+- `ufp_ingest` - For ingest configuration and raw record types
+- `ufp_canonical` - For text canonicalization
+- `ufp_perceptual` - For perceptual fingerprint generation
+- `ufp_semantic` - For semantic embedding generation
+- `ufp_index` - For storage and similarity search
+
+This linear architecture ensures no circular dependencies and clear separation
+of concerns.
 
 ## Key Types
 
@@ -18,13 +37,31 @@ searches the index and returns ranked `MatchHit` results.
 pub enum MatchMode {
     Semantic,
     Perceptual,
-    Hybrid { semantic_weight: f32 },
+    Hybrid,
+}
+
+pub enum MatchExpr {
+    Exact,
+    Semantic { metric: MetricId, min_score: f32 },
+    Perceptual { metric: MetricId, min_score: f32 },
+    Weighted { semantic_weight: f32, min_overall: f32 },
+    And { left: Box<MatchExpr>, right: Box<MatchExpr> },
+    Or { left: Box<MatchExpr>, right: Box<MatchExpr> },
+}
+
+pub enum MetricId {
+    Cosine,
+    Jaccard,
+    Hamming,
 }
 
 pub struct MatchConfig {
+    pub version: String,
+    pub policy_id: String,
+    pub policy_version: String,
     pub mode: MatchMode,
+    pub strategy: MatchExpr,
     pub max_results: usize,
-    pub min_score: f32,
     pub tenant_enforce: bool,
     pub oversample_factor: f32,
     pub explain: bool,
@@ -35,6 +72,9 @@ pub struct MatchRequest {
     pub query_text: String,
     pub config: MatchConfig,
     pub attributes: Option<serde_json::Value>,
+    pub pipeline_version: Option<String>,
+    pub fingerprint_versions: Option<HashMap<String, String>>,
+    pub query_canonical_hash: Option<String>,
 }
 
 pub struct MatchHit {
@@ -42,7 +82,18 @@ pub struct MatchHit {
     pub score: f32,
     pub semantic_score: Option<f32>,
     pub perceptual_score: Option<f32>,
+    pub exact_score: Option<f32>,
     pub metadata: serde_json::Value,
+    pub match_version: String,
+    pub policy_id: String,
+    pub policy_version: String,
+    pub explanation: Option<MatchExplanation>,
+}
+
+pub struct MatchExplanation {
+    pub semantic_distance: Option<f32>,
+    pub perceptual_overlap: Option<f32>,
+    pub token_overlap: Option<f32>,
 }
 
 pub trait Matcher {
@@ -52,9 +103,31 @@ pub trait Matcher {
 pub struct DefaultMatcher { /* ... */ }
 ```
 
-`DefaultMatcher` wires `ucfp` and `ufp_index` together and is suitable for
-production use in most services. You can implement your own `Matcher` on top of
-a different index or metric strategy if needed.
+`DefaultMatcher` wires the individual pipeline crates (`ufp_ingest`, 
+`ufp_canonical`, `ufp_perceptual`, `ufp_semantic`) and `ufp_index` together
+and is suitable for production use in most services. You can implement your 
+own `Matcher` on top of a different index or metric strategy if needed.
+
+## Error Types
+
+```rust
+pub enum MatchError {
+    InvalidConfig(String),
+    Ingest(String),
+    Canonical(String),
+    Perceptual(String),
+    Semantic(String),
+    Pipeline(String),
+    Index(#[from] IndexError),
+}
+```
+
+The error variants now explicitly track which pipeline stage failed:
+- `Ingest` - Error from `ufp_ingest`
+- `Canonical` - Error from `ufp_canonical`
+- `Perceptual` - Error from `ufp_perceptual`
+- `Semantic` - Error from `ufp_semantic`
+- `Index` - Error from `ufp_index`
 
 ## Configuration
 
@@ -62,17 +135,35 @@ a different index or metric strategy if needed.
 JSON/TOML service configs:
 
 ```rust
-use ufp_match::{MatchConfig, MatchMode};
+use ufp_match::{MatchConfig, MatchMode, MatchExpr, MetricId};
 
 let cfg = MatchConfig {
-    mode: MatchMode::Hybrid { semantic_weight: 0.7 },
+    version: "v1".into(),
+    policy_id: "default-policy".into(),
+    policy_version: "v1".into(),
+    mode: MatchMode::Hybrid,
+    strategy: MatchExpr::Weighted {
+        semantic_weight: 0.7,
+        min_overall: 0.3,
+    },
     max_results: 20,
-    min_score: 0.4,
     tenant_enforce: true,
     oversample_factor: 2.0,
     explain: true,
 };
 ```
+
+### MatchExpr Strategy
+
+The `MatchExpr` enum provides declarative control over matching logic:
+
+- `Exact` - Exact identity match on canonical hash
+- `Semantic { metric, min_score }` - Pure semantic similarity with threshold
+- `Perceptual { metric, min_score }` - Pure perceptual similarity with threshold  
+- `Weighted { semantic_weight, min_overall }` - Weighted combination of semantic
+  and perceptual scores (semantic_weight in [0.0, 1.0])
+- `And { left, right }` - Logical conjunction of two sub-strategies
+- `Or { left, right }` - Logical disjunction of two sub-strategies
 
 ### Tenant isolation
 
@@ -109,7 +200,7 @@ score `p` (both treated as `f32`), the final score is:
   score = p.unwrap_or(0.0)
   ```
 
-- Hybrid mode (`MatchMode::Hybrid { semantic_weight }`):
+- Hybrid mode with `MatchExpr::Weighted { semantic_weight, min_overall }`:
 
   ```text
   alpha = clamp(semantic_weight, 0.0, 1.0)
@@ -118,21 +209,22 @@ score `p` (both treated as `f32`), the final score is:
   score = alpha * s_eff + (1.0 - alpha) * p_eff
   ```
 
+- `And` mode: minimum of both sub-strategy scores
+- `Or` mode: maximum of both sub-strategy scores
+
 Scores are pure functions of the inputs and configuration: for a fixed index
 state, config, and query, the same candidates will always receive the same
 scores. Results are then sorted by descending `score` and truncated to
-`max_results`; ties are resolved by the underlying sort implementation after
-sorting by score.
+`max_results`.
 
 ## Example
 
 ```rust
-use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, SemanticConfig, process_record_with_perceptual_configs,
-    process_record_with_semantic_configs,
-};
-use ufp_index::{BackendConfig, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex};
+use ufp_ingest::{IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+use ufp_canonical::CanonicalizeConfig;
+use ufp_perceptual::PerceptualConfig;
+use ufp_semantic::SemanticConfig;
+use ufp_index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex, INDEX_SCHEMA_VERSION};
 use ufp_match::{DefaultMatcher, MatchConfig, MatchMode, MatchRequest, MatchHit, Matcher};
 use serde_json::json;
 
@@ -157,42 +249,12 @@ let raw = RawIngestRecord {
     )),
 };
 
-let (doc, fp) = process_record_with_perceptual_configs(
-    raw.clone(),
-    &ingest_cfg,
-    &canonical_cfg,
-    &perceptual_cfg,
-)?;
-let (_, emb) = process_record_with_semantic_configs(
-    raw,
-    &ingest_cfg,
-    &canonical_cfg,
-    &semantic_cfg,
-)?;
-
+// Use the matcher to run the pipeline internally
 let index_cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
 let index = UfpIndex::new(index_cfg.clone())?;
 
-// Quantize the embedding in the same way as `DefaultMatcher`.
-let scale = index_cfg.quantization.scale();
-let quantized: Vec<i8> = emb
-    .vector
-    .iter()
-    .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
-    .collect();
-
-let rec = IndexRecord {
-    schema_version: ufp_index::INDEX_SCHEMA_VERSION,
-    canonical_hash: doc.sha256_hex.clone(),
-    perceptual: Some(fp.minhash.clone()),
-    embedding: Some(quantized),
-    metadata: json!({
-        "tenant": "tenant-a",
-        "doc_id": "doc-1",
-    }),
-};
-
-index.upsert(&rec)?;
+// Note: In a real scenario, you'd run the pipeline and upsert the document
+// For this example, we assume the index is already populated
 
 let matcher = DefaultMatcher::new(
     index,
@@ -207,6 +269,9 @@ let req = MatchRequest {
     query_text: "Rust and memory safety".into(),
     config: MatchConfig::default(),
     attributes: None,
+    pipeline_version: None,
+    fingerprint_versions: None,
+    query_canonical_hash: None,
 };
 
 let hits: Vec<MatchHit> = matcher.match_document(&req)?;
@@ -216,16 +281,33 @@ assert!(!hits.is_empty());
 ### Hybrid scoring example
 
 ```rust
+use ufp_match::{MatchConfig, MatchMode, MatchExpr, MetricId};
+
 let hybrid_cfg = MatchConfig {
-    mode: MatchMode::Hybrid { semantic_weight: 0.8 },
+    version: "v1".into(),
+    policy_id: "hybrid-policy".into(),
+    policy_version: "v1".into(),
+    mode: MatchMode::Hybrid,
+    strategy: MatchExpr::Weighted {
+        semantic_weight: 0.8,
+        min_overall: 0.3,
+    },
     max_results: 5,
-    min_score: 0.3,
     tenant_enforce: true,
     oversample_factor: 2.0,
     explain: true,
 };
 
-let hybrid_req = MatchRequest { config: hybrid_cfg, ..req };
+let hybrid_req = MatchRequest { 
+    config: hybrid_cfg, 
+    tenant_id: "tenant-a".into(),
+    query_text: "Rust safety".into(),
+    attributes: None,
+    pipeline_version: None,
+    fingerprint_versions: None,
+    query_canonical_hash: None,
+};
+
 let hybrid_hits = matcher.match_document(&hybrid_req)?;
 for hit in hybrid_hits {
     println!(
@@ -247,6 +329,7 @@ etc.) without coupling `ufp_match` to any specific backend.
 The crate includes unit tests for:
 
 - `MatchConfig` validation and defaults.
+- `MatchExpr` strategy validation.
 - End-to-end `DefaultMatcher` behavior over an in-memory `ufp_index`:
   - Basic semantic matching.
   - Tenant isolation enforcement.
@@ -260,3 +343,41 @@ cargo test -p ufp_match
 
 Since `DefaultMatcher::in_memory_default` uses only the in-memory backend, no
 external services or RocksDB toolchain are required to execute the test suite.
+
+## Integration with Pipeline
+
+`ufp_match` depends on the entire UCFP pipeline. The typical flow is:
+
+1. **Indexing phase**:
+   ```
+   RawIngestRecord → ufp_ingest → CanonicalIngestRecord
+   → ufp_canonical → CanonicalizedDocument
+   → (ufp_perceptual + ufp_semantic) → (PerceptualFingerprint, SemanticEmbedding)
+   → ufp_index::IndexRecord → UfpIndex::upsert()
+   ```
+
+2. **Query phase** (handled by `ufp_match`):
+   ```
+   MatchRequest → DefaultMatcher
+   → runs query through pipeline → ufp_index::search()
+   → MatchHit results
+   ```
+
+The `DefaultMatcher` handles the entire query pipeline internally, using the
+individual crate dependencies to process the query text the same way documents
+were processed during indexing.
+
+## Migration from ucfp umbrella crate
+
+If you were previously using `ucfp` as a dependency for matching, update your
+`Cargo.toml` to use `ufp_match` directly:
+
+```toml
+[dependencies]
+ufp_match = { path = "../ufp_match" }
+ufp_index = { path = "../ufp_index" }
+```
+
+The `DefaultMatcher` now directly orchestrates the individual pipeline crates
+instead of going through the `ucfp` umbrella crate, ensuring a clean linear
+dependency graph.

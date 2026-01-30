@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 /// A token with its UTF-8 byte offsets in the canonical text.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Token {
+    /// The token text content.
     pub text: String,
     /// Byte offset (inclusive) in the canonical text.
     pub start: usize,

@@ -25,7 +25,7 @@ pub struct SemanticConfig {
     pub tier: String,
     /// Inference mode selector: `"onnx"` (local), `"api"` (remote HTTP), or `"fast"` (stub).
     pub mode: String,
-    /// Friendly label surfaced on every [`SemanticEmbedding`].
+    /// Friendly label surfaced on every `SemanticEmbedding`.
     pub model_name: String,
     /// Local path where the ONNX file should live (also used as the download target when
     /// [`model_url`](Self::model_url) is provided).

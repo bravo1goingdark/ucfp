@@ -3,11 +3,72 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use serde_json::json;
-use ucfp::IngestSource;
+use ufp_canonical::canonicalize;
+use ufp_ingest::IngestSource;
+use ufp_ingest::{ingest, CanonicalPayload};
+use ufp_perceptual::perceptualize_tokens;
+use ufp_semantic::semanticize;
 
 use crate::demo_utils::base_record_with_tenant;
-use crate::metrics::{MatchMetrics, set_match_metrics};
+use crate::metrics::{set_match_metrics, MatchMetrics};
 use crate::types::MatchExpr;
+
+/// Helper function to run the perceptual pipeline: ingest → canonical → perceptual
+fn run_perceptual_pipeline_helper(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    perceptual_cfg: &PerceptualConfig,
+) -> Result<(ufp_canonical::CanonicalizedDocument, PerceptualFingerprint), MatchError> {
+    // Ingest stage
+    let canonical_record =
+        ingest(raw, ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+
+    // Get text payload
+    let text = match canonical_record.normalized_payload {
+        Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+        _ => return Err(MatchError::Pipeline("No text payload available".into())),
+    };
+
+    // Canonical stage
+    let doc = canonicalize(&canonical_record.doc_id, text, canonical_cfg)
+        .map_err(|e| MatchError::Canonical(e.to_string()))?;
+
+    // Perceptual stage
+    let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
+    let fingerprint = perceptualize_tokens(&token_refs, perceptual_cfg)
+        .map_err(|e| MatchError::Perceptual(e.to_string()))?;
+
+    Ok((doc, fingerprint))
+}
+
+/// Helper function to run the semantic pipeline: ingest → canonical → semantic
+fn run_semantic_pipeline_helper(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    semantic_cfg: &SemanticConfig,
+) -> Result<(ufp_canonical::CanonicalizedDocument, SemanticEmbedding), MatchError> {
+    // Ingest stage
+    let canonical_record =
+        ingest(raw, ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+
+    // Get text payload
+    let text = match canonical_record.normalized_payload {
+        Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+        _ => return Err(MatchError::Pipeline("No text payload available".into())),
+    };
+
+    // Canonical stage
+    let doc = canonicalize(&canonical_record.doc_id, text, canonical_cfg)
+        .map_err(|e| MatchError::Canonical(e.to_string()))?;
+
+    // Semantic stage
+    let embedding = semanticize(&doc.doc_id, &doc.canonical_text, semantic_cfg)
+        .map_err(|e| MatchError::Semantic(e.to_string()))?;
+
+    Ok((doc, embedding))
+}
 
 fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchError> {
     let ingest_cfg = IngestConfig::default();
@@ -36,7 +97,7 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
         "The borrow checker enforces aliasing rules so data races are compile-time errors.",
     );
 
-    let (doc_a_can, fp_a) = process_record_with_perceptual_configs(
+    let (doc_a_can, fp_a) = run_perceptual_pipeline_helper(
         RawIngestRecord {
             id: "doc-alpha".to_string(),
             source: IngestSource::RawText,
@@ -55,7 +116,7 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
         &canonical_cfg,
         &perceptual_cfg,
     )?;
-    let emb_a = process_record_with_semantic_configs(
+    let (_, emb_a) = run_semantic_pipeline_helper(
         base_record_with_tenant(
             tenant,
             "doc-alpha",
@@ -64,10 +125,9 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
         &ingest_cfg,
         &canonical_cfg,
         &semantic_cfg,
-    )?
-    .1;
+    )?;
 
-    let (doc_b_can, fp_b) = process_record_with_perceptual_configs(
+    let (doc_b_can, fp_b) = run_perceptual_pipeline_helper(
         RawIngestRecord {
             id: "doc-bravo".to_string(),
             source: IngestSource::RawText,
@@ -87,7 +147,7 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
         &canonical_cfg,
         &perceptual_cfg,
     )?;
-    let emb_b = process_record_with_semantic_configs(
+    let (_, emb_b) = run_semantic_pipeline_helper(
         base_record_with_tenant(
             tenant,
             "doc-bravo",
@@ -96,8 +156,7 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
         &ingest_cfg,
         &canonical_cfg,
         &semantic_cfg,
-    )?
-    .1;
+    )?;
 
     let cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());
     let index = UfpIndex::new(cfg.clone()).expect("in-memory index");

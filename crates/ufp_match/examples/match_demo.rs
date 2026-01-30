@@ -1,15 +1,85 @@
 use std::error::Error;
 
 use serde_json::json;
-use ucfp::{
-    CanonicalizeConfig, IngestConfig, PerceptualConfig, RawIngestRecord, SemanticConfig,
-    process_record_with_perceptual_configs, process_record_with_semantic_configs,
-};
-use ufp_index::{BackendConfig, INDEX_SCHEMA_VERSION, IndexConfig, IndexRecord, UfpIndex};
+use ufp_canonical::CanonicalizeConfig;
+use ufp_index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex, INDEX_SCHEMA_VERSION};
+use ufp_ingest::{IngestConfig, RawIngestRecord};
 use ufp_match::{
-    DefaultMatcher, MatchConfig, MatchExpr, MatchHit, MatchMode, MatchRequest, Matcher,
     demo_utils::{demo_base_record, quantize_with_scale},
+    DefaultMatcher, MatchConfig, MatchExpr, MatchHit, MatchMode, MatchRequest, Matcher,
 };
+use ufp_perceptual::PerceptualConfig;
+use ufp_semantic::SemanticConfig;
+
+// Pipeline helper functions since we're not using ucfp umbrella crate
+fn run_perceptual_pipeline(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    perceptual_cfg: &PerceptualConfig,
+) -> Result<
+    (
+        ufp_canonical::CanonicalizedDocument,
+        ufp_perceptual::PerceptualFingerprint,
+    ),
+    Box<dyn Error>,
+> {
+    use ufp_canonical::canonicalize;
+    use ufp_ingest::{ingest, CanonicalPayload};
+    use ufp_perceptual::perceptualize_tokens;
+
+    // Ingest stage
+    let canonical_record = ingest(raw, ingest_cfg)?;
+
+    // Get text payload
+    let text = match canonical_record.normalized_payload {
+        Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+        _ => return Err("No text payload available".into()),
+    };
+
+    // Canonical stage
+    let doc = canonicalize(&canonical_record.doc_id, text, canonical_cfg)?;
+
+    // Perceptual stage
+    let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
+    let fingerprint = perceptualize_tokens(&token_refs, perceptual_cfg)?;
+
+    Ok((doc, fingerprint))
+}
+
+fn run_semantic_pipeline(
+    raw: RawIngestRecord,
+    ingest_cfg: &IngestConfig,
+    canonical_cfg: &CanonicalizeConfig,
+    semantic_cfg: &SemanticConfig,
+) -> Result<
+    (
+        ufp_canonical::CanonicalizedDocument,
+        ufp_semantic::SemanticEmbedding,
+    ),
+    Box<dyn Error>,
+> {
+    use ufp_canonical::canonicalize;
+    use ufp_ingest::{ingest, CanonicalPayload};
+    use ufp_semantic::semanticize;
+
+    // Ingest stage
+    let canonical_record = ingest(raw, ingest_cfg)?;
+
+    // Get text payload
+    let text = match canonical_record.normalized_payload {
+        Some(CanonicalPayload::Text(ref t)) => t.as_str(),
+        _ => return Err("No text payload available".into()),
+    };
+
+    // Canonical stage
+    let doc = canonicalize(&canonical_record.doc_id, text, canonical_cfg)?;
+
+    // Semantic stage
+    let embedding = semanticize(&doc.doc_id, &doc.canonical_text, semantic_cfg)?;
+
+    Ok((doc, embedding))
+}
 
 fn base_record(doc_id: &str, text: &str) -> RawIngestRecord {
     demo_base_record(doc_id, text, "examples/match_demo.rs")
@@ -41,23 +111,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         "The borrow checker enforces aliasing rules so data races are compile-time errors.",
     );
 
-    let (doc_a, fp_a) = process_record_with_perceptual_configs(
-        raw_a.clone(),
-        &ingest_cfg,
-        &canonical_cfg,
-        &perceptual_cfg,
-    )?;
-    let (_, emb_a) =
-        process_record_with_semantic_configs(raw_a, &ingest_cfg, &canonical_cfg, &semantic_cfg)?;
+    let (doc_a, fp_a) =
+        run_perceptual_pipeline(raw_a.clone(), &ingest_cfg, &canonical_cfg, &perceptual_cfg)?;
+    let (_, emb_a) = run_semantic_pipeline(raw_a, &ingest_cfg, &canonical_cfg, &semantic_cfg)?;
 
-    let (doc_b, fp_b) = process_record_with_perceptual_configs(
-        raw_b.clone(),
-        &ingest_cfg,
-        &canonical_cfg,
-        &perceptual_cfg,
-    )?;
-    let (_, emb_b) =
-        process_record_with_semantic_configs(raw_b, &ingest_cfg, &canonical_cfg, &semantic_cfg)?;
+    let (doc_b, fp_b) =
+        run_perceptual_pipeline(raw_b.clone(), &ingest_cfg, &canonical_cfg, &perceptual_cfg)?;
+    let (_, emb_b) = run_semantic_pipeline(raw_b, &ingest_cfg, &canonical_cfg, &semantic_cfg)?;
 
     // Build an in-memory index and upsert deterministic records.
     let index_cfg = IndexConfig::new().with_backend(BackendConfig::in_memory());

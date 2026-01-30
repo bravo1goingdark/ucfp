@@ -1,5 +1,6 @@
 use chrono::{NaiveDate, Utc};
-use ucfp::{IngestMetadata, IngestPayload, IngestSource, RawIngestRecord, SemanticEmbedding};
+use ufp_ingest::{IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+use ufp_semantic::SemanticEmbedding;
 
 /// Fixed wall-clock timestamp so demos and tests are deterministic.
 pub fn demo_timestamp() -> chrono::DateTime<Utc> {

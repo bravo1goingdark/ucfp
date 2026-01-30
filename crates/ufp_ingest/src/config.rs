@@ -46,9 +46,13 @@ pub struct MetadataPolicy {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RequiredField {
+    /// Require the tenant_id field to be present in metadata.
     TenantId,
+    /// Require the doc_id field to be present in metadata.
     DocId,
+    /// Require the received_at timestamp to be present in metadata.
     ReceivedAt,
+    /// Require the original_source field to be present in metadata.
     OriginalSource,
 }
 

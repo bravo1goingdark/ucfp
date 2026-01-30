@@ -36,8 +36,11 @@ pub struct IngestMetadata {
 /// The inbound record for ingest.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawIngestRecord {
+    /// Unique identifier for this ingest operation.
     pub id: String,
+    /// Source of the content (API, file upload, raw text, etc.).
     pub source: IngestSource,
+    /// Metadata associated with the record (tenant, doc_id, timestamps, etc.).
     pub metadata: IngestMetadata,
     /// Raw payload when available. Text and binary variants are supported to enable multi-modal handling.
     pub payload: Option<IngestPayload>,
@@ -58,15 +61,21 @@ pub enum IngestPayload {
 /// Normalized record produced by ingest. This is what the canonicalizer will accept.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CanonicalIngestRecord {
+    /// Unique identifier for this ingest operation (mirrors RawIngestRecord.id).
     pub id: String,
+    /// Tenant identifier for multi-tenant isolation.
     pub tenant_id: String,
+    /// Document identifier (may be derived from id if not provided).
     pub doc_id: String,
+    /// Timestamp when the record was received.
     pub received_at: DateTime<Utc>,
+    /// Original source information if provided.
     pub original_source: Option<String>,
+    /// Source of the content (API, file upload, raw text, etc.).
     pub source: IngestSource,
     /// Normalized payload. Text inputs have whitespace collapsed; binary inputs pass through unchanged.
     pub normalized_payload: Option<CanonicalPayload>,
-    /// Raw attributes JSON preserved
+    /// Raw attributes JSON preserved for downstream use.
     pub attributes: Option<serde_json::Value>,
 }
 

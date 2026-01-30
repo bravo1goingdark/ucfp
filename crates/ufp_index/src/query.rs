@@ -2,11 +2,14 @@ use crate::{IndexError, IndexRecord, UfpIndex};
 use hashbrown::HashSet;
 use std::cmp::Ordering;
 
-/// Result entry for a similarity query
+/// Result entry for a similarity query.
 #[derive(Debug, Clone)]
 pub struct QueryResult {
+    /// Canonical hash of the matched document.
     pub canonical_hash: String,
+    /// Similarity score (0.0 to 1.0, higher is more similar).
     pub score: f32,
+    /// Metadata associated with the matched document.
     pub metadata: serde_json::Value,
 }
 

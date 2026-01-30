@@ -116,13 +116,22 @@ pub const INDEX_SCHEMA_VERSION: u16 = 1;
 pub type QuantizedVec = Vec<i8>;
 
 /// Unified index record for any modality
+/// Unified index record for any modality.
+///
+/// This struct represents a document in the index with its canonical hash,
+/// perceptual fingerprints (MinHash), semantic embedding (quantized), and metadata.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct IndexRecord {
+    /// Schema version for backward compatibility when deserializing.
     #[serde(default = "default_schema_version")]
     pub schema_version: u16,
+    /// Canonical hash (SHA-256 hex) that uniquely identifies the document.
     pub canonical_hash: String,
+    /// Perceptual fingerprint (MinHash signature) for similarity search.
     pub perceptual: Option<Vec<u64>>,
+    /// Quantized semantic embedding for vector similarity search.
     pub embedding: Option<QuantizedVec>,
+    /// Arbitrary metadata associated with the document (JSON).
     #[serde(with = "metadata_serde")]
     pub metadata: serde_json::Value,
 }
@@ -131,18 +140,22 @@ const fn default_schema_version() -> u16 {
     INDEX_SCHEMA_VERSION
 }
 
-/// Compression codec options
+/// Compression codec options for index storage.
 #[derive(Clone, Debug, Default)]
 pub enum CompressionCodec {
+    /// No compression (useful for debugging or when storage is not a concern).
     None,
+    /// Zstd compression (default, good balance of speed and ratio).
     #[default]
     Zstd,
 }
 
-/// Compression behavior configuration
+/// Compression behavior configuration.
 #[derive(Clone, Debug)]
 pub struct CompressionConfig {
+    /// The compression codec to use (None or Zstd).
     pub codec: CompressionCodec,
+    /// Compression level (1-22 for Zstd, where higher = better compression but slower).
     pub level: i32,
 }
 
@@ -185,10 +198,18 @@ impl CompressionConfig {
     }
 }
 
-/// Quantization strategies for embeddings
+/// Quantization strategies for embeddings.
+///
+/// Quantization reduces memory usage by converting f32 embeddings to smaller types.
 #[derive(Clone, Debug)]
 pub enum QuantizationConfig {
-    Int8 { scale: f32 },
+    /// 8-bit integer quantization using a linear scale factor.
+    ///
+    /// Values are computed as: `quantized = (value * scale).clamp(-128.0, 127.0) as i8`
+    Int8 {
+        /// The scaling factor for quantization (default: 100.0).
+        scale: f32,
+    },
 }
 
 impl Default for QuantizationConfig {
@@ -212,11 +233,14 @@ impl QuantizationConfig {
     }
 }
 
-/// Config for initializing the index
+/// Config for initializing the index.
 #[derive(Clone, Debug, Default)]
 pub struct IndexConfig {
+    /// Backend storage configuration (in-memory or RocksDB).
     pub backend: BackendConfig,
+    /// Compression settings for stored records.
     pub compression: CompressionConfig,
+    /// Quantization settings for embeddings.
     pub quantization: QuantizationConfig,
 }
 

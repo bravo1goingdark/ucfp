@@ -1894,9 +1894,12 @@ dependencies = [
  "once_cell",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
- "ucfp",
+ "thiserror 2.0.17",
+ "ufp_canonical",
  "ufp_index",
+ "ufp_ingest",
+ "ufp_perceptual",
+ "ufp_semantic",
 ]
 
 [[package]]
@@ -1922,7 +1925,7 @@ dependencies = [
  "onnxruntime",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tokenizers",
  "ureq",
 ]

@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
-use ucfp::PipelineError;
 use ufp_index::IndexError;
 
 use std::collections::HashMap;
@@ -330,9 +329,21 @@ pub enum MatchError {
     /// Invalid configuration (per-request or global).
     #[error("invalid match config: {0}")]
     InvalidConfig(String),
-    /// Ingest/canonical/perceptual/semantic pipeline failed.
+    /// Ingest stage failed.
+    #[error("ingest error: {0}")]
+    Ingest(String),
+    /// Canonical stage failed.
+    #[error("canonical error: {0}")]
+    Canonical(String),
+    /// Perceptual stage failed.
+    #[error("perceptual error: {0}")]
+    Perceptual(String),
+    /// Semantic stage failed.
+    #[error("semantic error: {0}")]
+    Semantic(String),
+    /// Pipeline stage failed.
     #[error("pipeline error: {0}")]
-    Pipeline(#[from] PipelineError),
+    Pipeline(String),
     /// Index read or search failed.
     #[error("index error: {0}")]
     Index(#[from] IndexError),
