@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/bravo1goingdark/ucfp/ci.yml?style=for-the-badge&label=CI)](https://github.com/bravo1goingdark/ucfp/actions)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=for-the-badge)](LICENSE)
 
 <br>
 
@@ -28,6 +28,14 @@ UCFP is an **open-source Rust framework** that unifies **exact hashing**, **perc
 - **Plagiarism Detection** — Identify paraphrased content
 - **Content Provenance** — Track content across systems
 - **Multimodal Search** — Search by meaning, not just keywords
+
+---
+
+## About
+
+UCFP solves a fundamental problem in content systems: traditional hashes fail when content changes even slightly, while semantic meaning requires understanding beyond byte-level matching. This framework provides three complementary layers—**exact hashes** for identical matching, **perceptual fingerprints** for near-duplicates, and **semantic embeddings** for meaning-based comparison—all in a single deterministic pipeline.
+
+Built in Rust for performance and safety, each pipeline stage (ingest, canonical, perceptual, semantic, index, match) operates as a standalone crate with comprehensive observability. The modular design allows you to adopt only what you need while maintaining clean architectural boundaries and reproducible results across environments.
 
 ---
 
