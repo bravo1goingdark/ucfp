@@ -1,33 +1,52 @@
 <div align="center">
 
-# Universal Content Fingerprinting (UCFP)
+# 🔐 Universal Content Fingerprinting (UCFP)
 
 **Deterministic, reproducible content fingerprints for text, audio, image, video, and documents**
+
+<br>
 
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/bravo1goingdark/ucfp/ci.yml?style=for-the-badge&label=CI)](https://github.com/bravo1goingdark/ucfp/actions)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg?style=for-the-badge)](LICENSE)
 
+<br>
+
+[🚀 Quickstart](#quickstart) • [📖 Usage](#usage) • [🏗️ Architecture](#architecture) • [📊 Performance](#metrics--observability) • [🗺️ Roadmap](#roadmap)
+
 </div>
 
-UCFP is an open-source Rust framework that unifies **exact hashing**, **perceptual similarity**, and **semantic embeddings** into one coherent pipeline. Built for speed and reliability, it powers use cases like deduplication, plagiarism detection, content provenance, and multimodal search.
+---
+
+<div align="center">
+
+### ✨ One Pipeline. Multiple Modalities. Infinite Possibilities.
+
+</div>
+
+UCFP is an **open-source Rust framework** that unifies **exact hashing**, **perceptual similarity**, and **semantic embeddings** into a single, coherent pipeline. Built for speed and reliability, it powers:
+
+- 🔍 **Deduplication** — Find exact and near-duplicate content
+- 📝 **Plagiarism Detection** — Identify paraphrased content
+- 🕵️ **Content Provenance** — Track content across systems
+- 🔎 **Multimodal Search** — Search by meaning, not just keywords
 
 ---
 
-## Features
+## 🎯 Features
 
-| Feature | Description |
-|---------|-------------|
-| **Deterministic Ingest** | Metadata validation, canonical IDs, whitespace normalization |
-| **Canonical Text** | Unicode NFKC, lowercasing, punctuation stripping, SHA-256 digests |
-| **Perceptual Fingerprints** | Rolling-hash shingles, winnowing, MinHash signatures |
-| **Semantic Embeddings** | ONNX/API-backed dense vectors with deterministic fallbacks |
-| **Pluggable Indexing** | Backend-agnostic storage (RocksDB, in-memory) |
-| **Clean Architecture** | Linear pipeline: `ingest → canonical → perceptual/semantic → index → match` |
+| Feature | What It Does |
+|:--------|:-------------|
+| 📥 **Deterministic Ingest** | Metadata validation, canonical IDs, whitespace normalization |
+| 📝 **Canonical Text** | Unicode NFKC, lowercasing, punctuation stripping, SHA-256 digests |
+| 🎨 **Perceptual Fingerprints** | Rolling-hash shingles, winnowing, MinHash signatures |
+| 🧠 **Semantic Embeddings** | ONNX/API-backed dense vectors with deterministic fallbacks |
+| 🗄️ **Pluggable Indexing** | Backend-agnostic storage (RocksDB, in-memory) |
+| ⚡ **Clean Architecture** | Linear pipeline with no circular dependencies |
 
 ---
 
-## Quickstart
+## 🚀 Quickstart
 
 ### Prerequisites
 
@@ -61,7 +80,9 @@ cargo run                              # end-to-end demo
 
 ---
 
-## Usage
+## 📖 Usage
+
+### Simple Example
 
 ```rust
 use ucfp::{
@@ -88,7 +109,7 @@ println!("MinHash bands: {}", fingerprint.minhash_bands.len());
 
 ---
 
-## Full Pipeline Example
+## 🏗️ Full Pipeline Example
 
 Complete workflow from ingest to matching:
 
@@ -163,7 +184,7 @@ println!("Found {} matches", hits.len());
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 ### YAML Config
 
@@ -205,7 +226,7 @@ let perceptual_cfg = config.to_perceptual_config();
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────┐    ┌───────────┐    ┌──────────────────┐    ┌─────────┐    ┌───────┐
@@ -215,8 +236,8 @@ let perceptual_cfg = config.to_perceptual_config();
 
 ### Stage Responsibilities
 
-| Stage | What it does | Key Types |
-|-------|--------------|-----------|
+| Stage | What It Does | Key Types |
+|:------|:-------------|:----------|
 | `ingest` | Validation, metadata, ID derivation | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord` |
 | `canonical` | Unicode NFKC, tokenization, SHA-256 | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
 | `perceptual` | Shingles, winnowing, MinHash | `PerceptualConfig`, `PerceptualFingerprint` |
@@ -228,16 +249,16 @@ Each crate can be used independently. The root `ucfp` crate provides convenience
 
 ---
 
-## Workspace Layout
+## 📦 Workspace Layout
 
 ```
 crates/
-├── ingest/       # Stage 1: validation & normalization
-├── canonical/    # Stage 2: canonical text pipeline
-├── perceptual/   # Stage 3a: shingling, winnowing, MinHash
-├── semantic/     # Stage 3b: embedding generation
-├── index/        # Stage 4: storage backend
-└── match/        # Stage 5: query-time matching
+├── 📥 ingest/       # Stage 1: validation & normalization
+├── 📝 canonical/    # Stage 2: canonical text pipeline
+├── 🎨 perceptual/   # Stage 3a: shingling, winnowing, MinHash
+├── 🧠 semantic/     # Stage 3b: embedding generation
+├── 🗄️ index/        # Stage 4: storage backend
+└── 🎯 match/        # Stage 5: query-time matching
 
 src/              # CLI demo & re-exports
 tests/            # Integration tests
@@ -246,7 +267,7 @@ examples/         # Workspace demos
 
 ---
 
-## Metrics & Observability
+## 📊 Metrics & Observability
 
 Hook into pipeline stages:
 
@@ -257,36 +278,41 @@ set_pipeline_metrics(my_metrics_recorder);
 set_pipeline_logger(my_structured_logger);
 ```
 
-All pipeline stages emit metrics:
-- `ingest` — validation and normalization
-- `canonical` — text canonicalization
-- `perceptual` — fingerprint generation
-- `semantic` — embedding generation
-- `index` — storage operations
-- `match` — query execution
+### Stage Metrics
 
-### Real-Time Performance Metrics
+All pipeline stages emit detailed metrics:
+
+| Stage | Purpose | Metric Type |
+|:------|:--------|:------------|
+| `ingest` | Validation and normalization | Latency, throughput |
+| `canonical` | Text canonicalization | Latency, token count |
+| `perceptual` | Fingerprint generation | Latency, shingles/sec |
+| `semantic` | Embedding generation | Latency, vectors/sec |
+| `index` | Storage operations | Latency, query time |
+| `match` | Query execution | Latency, match count |
+
+### ⚡ Real-Time Performance Metrics
 
 Benchmarked on a typical development machine (Windows, unoptimized debug build):
 
-| Stage | Latency (typical) | Throughput |
-|-------|-------------------|------------|
+| Stage | Latency | Throughput |
+|:------|:--------|:-----------|
 | `ingest` | ~113 µs | validation + normalization |
 | `canonical` | ~249 µs | Unicode NFKC + tokenization |
-| `perceptual` | ~143-708 µs | MinHash fingerprinting (varies by config) |
-| `semantic` | ~109 µs | embedding generation (fast/stub mode) |
+| `perceptual` | ~143-708 µs | MinHash fingerprinting |
+| `semantic` | ~109 µs | embedding generation |
 | `index` | ~180 µs | storage operation |
 | `match` | ~320 µs | query execution |
 
-**End-to-End Pipeline:**
-- Single 1,000-word document: **~30ms** (full pipeline)
-- Large 10,000-word document: **~150ms** (full pipeline)
-- Batch throughput: **~1.7ms per doc** (100 documents)
-- Small documents: **~244µs per doc** (1,000 documents)
-- Shingle processing: **~400µs** (k=3 to k=13)
-- MinHash bands/rows: **387-708µs** (8×8 to 32×16)
+#### 📈 End-to-End Performance
 
-Example structured output:
+- **Single 1,000-word doc**: ~30ms (full pipeline)
+- **Large 10,000-word doc**: ~150ms (full pipeline)
+- **Batch throughput**: ~1.7ms per doc (100 docs)
+- **Small docs**: ~244µs per doc (1,000 docs)
+
+#### 📝 Example Output
+
 ```
 timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=113
 timestamp="2025-02-10T02:15:01.241Z" stage=canonical status=success latency_us=249
@@ -303,10 +329,10 @@ cargo run --example pipeline_metrics
 
 ---
 
-## Roadmap
+## 🗺️ Roadmap
 
 | Modality | Status | Canonicalizer | Fingerprint | Embedding |
-|----------|--------|---------------|-------------|-----------|
+|:---------|:-------|:--------------|:------------|:----------|
 | **Text** | ✅ Ready | NFKC + tokenization | MinHash | BGE / E5 |
 | **Image** | 🔮 Planned | DCT normalization | pHash | CLIP / SigLIP |
 | **Audio** | 🔮 Planned | Mel-spectrogram | Winnowing | SpeechCLIP / Whisper |
@@ -315,7 +341,7 @@ cargo run --example pipeline_metrics
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 We welcome fixes, optimizations, and new modalities!
 
@@ -326,6 +352,20 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) for:
 
 ---
 
-## License
+## 📜 License
 
-MIT **OR** Apache-2.0
+<div align="center">
+
+**MIT** OR **Apache-2.0**
+
+Choose whichever works best for your project.
+
+</div>
+
+---
+
+<div align="center">
+
+Made with ❤️ in Rust
+
+</div>
