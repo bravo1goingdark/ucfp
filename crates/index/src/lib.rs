@@ -266,16 +266,34 @@ impl IndexConfig {
 }
 
 /// Custom error type
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum IndexError {
     #[error("Backend error: {0}")]
     Backend(String),
     #[error("Serialization encode error: {0}")]
-    Encode(#[from] EncodeError),
+    Encode(String),
     #[error("Serialization decode error: {0}")]
-    Decode(#[from] DecodeError),
+    Decode(String),
     #[error("Compression error: {0}")]
-    Zstd(#[from] std::io::Error),
+    Zstd(String),
+}
+
+impl From<EncodeError> for IndexError {
+    fn from(e: EncodeError) -> Self {
+        IndexError::Encode(e.to_string())
+    }
+}
+
+impl From<DecodeError> for IndexError {
+    fn from(e: DecodeError) -> Self {
+        IndexError::Decode(e.to_string())
+    }
+}
+
+impl From<std::io::Error> for IndexError {
+    fn from(e: std::io::Error) -> Self {
+        IndexError::Zstd(e.to_string())
+    }
 }
 
 impl IndexError {

@@ -4,9 +4,10 @@ use std::time::Duration;
 
 use ucfp::{
     process_record_with_perceptual, semanticize_document, set_pipeline_logger,
-    set_pipeline_metrics, CanonicalizeConfig, IngestError, IngestMetadata, IngestPayload,
-    IngestSource, KeyValueLogger, PerceptualConfig, PerceptualError, PipelineError,
-    PipelineEventLogger, PipelineMetrics, RawIngestRecord, SemanticConfig, SemanticError,
+    set_pipeline_metrics, CanonicalizeConfig, IndexError, IngestError, IngestMetadata,
+    IngestPayload, IngestSource, KeyValueLogger, MatchError, PerceptualConfig, PerceptualError,
+    PipelineError, PipelineEventLogger, PipelineMetrics, RawIngestRecord, SemanticConfig,
+    SemanticError,
 };
 
 fn main() -> Result<(), PipelineError> {
@@ -93,6 +94,14 @@ impl PipelineMetrics for RecordingMetrics {
     fn record_semantic(&self, latency: Duration, result: Result<(), SemanticError>) {
         let result = result.map_err(|err| err.to_string());
         self.push(format_stage("semantic", latency, result));
+    }
+
+    fn record_index(&self, latency: Duration, result: Result<(), IndexError>) {
+        self.push(format_stage("index", latency, result));
+    }
+
+    fn record_match(&self, latency: Duration, result: Result<(), MatchError>) {
+        self.push(format_stage("match", latency, result));
     }
 }
 

@@ -1,0 +1,72 @@
+# UCFP Production Configuration
+# High-performance configuration for production deployments
+
+version: "1.0"
+name: "production"
+
+# Production ingest with strict limits
+ingest:
+  version: 1
+  default_tenant_id: "production"
+  doc_id_namespace: "your-unique-uuid-here"
+  strip_control_chars: true
+  max_payload_bytes: 10485760  # 10MB
+  max_normalized_bytes: 102400  # 100KB
+  max_attribute_bytes: 10240   # 10KB
+  require_tenant_id: true
+
+# Full canonicalization
+canonical:
+  version: 1
+  normalize_unicode: true
+  lowercase: true
+  strip_punctuation: true  # Strip punctuation for better matching
+
+# Production perceptual with larger signatures
+perceptual:
+  version: 1
+  k: 9
+  w: 4
+  minhash_bands: 32  # More bands for better precision
+  minhash_rows_per_band: 8
+  seed: 1732584193
+  use_parallel: true  # Enable parallel processing
+  include_intermediates: false  # Save memory
+
+# ONNX inference for production quality
+semantic:
+  tier: "accurate"  # 1024-dim embeddings
+  mode: "onnx"
+  model_name: "bge-large-en-v1.5"
+  model_path: "/opt/ucfp/models/bge-large-en-v1.5/onnx/model.onnx"
+  tokenizer_path: "/opt/ucfp/models/bge-large-en-v1.5/tokenizer.json"
+  normalize: true
+  device: "cpu"
+  # Fallback to API if ONNX fails
+  # api_url: "https://api.openai.com/v1/embeddings"
+  # api_auth_header: "Bearer ${OPENAI_API_KEY}"
+  # api_provider: "openai"
+  # api_timeout_secs: 60
+
+# Persistent storage with RocksDB
+index:
+  backend: "rocksdb"
+  rocksdb_path: "/var/lib/ucfp/index"
+  compression: "zstd"  # Maximum compression
+  quantization: "i8"   # 8-bit quantization for memory efficiency
+
+# Strict matcher for production
+matcher:
+  version: 1
+  policy_id: "production-policy"
+  policy_version: "v1"
+  mode: "hybrid"  # Use both semantic and perceptual
+  strategy: "weighted"
+  max_results: 20
+  tenant_enforce: true
+  oversample_factor: 3.0  # Higher for better recall
+  explain: false  # Disable in production for speed
+
+# Environment overrides for secrets
+env_overrides:
+  UCFP_SEMANTIC_API_KEY: "${SEMANTIC_API_KEY}"

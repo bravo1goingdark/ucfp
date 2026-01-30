@@ -328,4 +328,285 @@ mod tests {
         assert_eq!(embedding.doc_id, "doc1");
         assert!(embedding.normalized);
     }
+
+    // Additional integration tests
+
+    #[test]
+    fn semanticize_fast_mode() {
+        let cfg = SemanticConfig {
+            mode: "fast".into(),
+            tier: "balanced".into(),
+            normalize: false,
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc1", "hello world", &cfg).unwrap();
+        assert_eq!(embedding.embedding_dim, 768);
+        assert!(!embedding.normalized);
+    }
+
+    #[test]
+    fn semanticize_batch_empty() {
+        let cfg = SemanticConfig::default();
+        let docs: Vec<(&str, &str)> = vec![];
+
+        let embeddings = semanticize_batch(&docs, &cfg).unwrap();
+        assert!(embeddings.is_empty());
+    }
+
+    #[test]
+    fn semanticize_batch_single() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let docs = vec![("doc-1", "single document")];
+        let embeddings = semanticize_batch(&docs, &cfg).unwrap();
+
+        assert_eq!(embeddings.len(), 1);
+        assert_eq!(embeddings[0].doc_id, "doc-1");
+    }
+
+    #[test]
+    fn semanticize_batch_multiple() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let docs = vec![("doc-1", "first"), ("doc-2", "second"), ("doc-3", "third")];
+        let embeddings = semanticize_batch(&docs, &cfg).unwrap();
+
+        assert_eq!(embeddings.len(), 3);
+        assert_eq!(embeddings[0].doc_id, "doc-1");
+        assert_eq!(embeddings[1].doc_id, "doc-2");
+        assert_eq!(embeddings[2].doc_id, "doc-3");
+    }
+
+    #[test]
+    fn semanticize_different_texts_produce_different_embeddings() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let e1 = semanticize("doc1", "hello world", &cfg).unwrap();
+        let e2 = semanticize("doc2", "goodbye world", &cfg).unwrap();
+
+        assert_ne!(e1.vector, e2.vector);
+    }
+
+    #[test]
+    fn semanticize_all_tiers() {
+        for tier in ["fast", "balanced", "accurate"] {
+            let cfg = SemanticConfig {
+                tier: tier.into(),
+                mode: "fast".into(),
+                ..Default::default()
+            };
+
+            let embedding = semanticize("doc", "test", &cfg).unwrap();
+
+            match tier {
+                "fast" => assert_eq!(embedding.embedding_dim, 384),
+                "balanced" => assert_eq!(embedding.embedding_dim, 768),
+                "accurate" => assert_eq!(embedding.embedding_dim, 1024),
+                _ => panic!("unknown tier"),
+            }
+        }
+    }
+
+    #[test]
+    fn semanticize_with_normalization() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            mode: "fast".into(),
+            normalize: true,
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "test", &cfg).unwrap();
+
+        assert!(embedding.normalized);
+        let norm: f32 = embedding.vector.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn semanticize_without_normalization() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            mode: "fast".into(),
+            normalize: false,
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "test", &cfg).unwrap();
+
+        assert!(!embedding.normalized);
+    }
+
+    #[test]
+    fn semanticize_preserves_doc_id() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let doc_id = "my-special-doc-id-123";
+        let embedding = semanticize(doc_id, "test", &cfg).unwrap();
+
+        assert_eq!(embedding.doc_id, doc_id);
+    }
+
+    #[test]
+    fn semanticize_preserves_model_name() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            mode: "fast".into(),
+            model_name: "my-custom-model".into(),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "test", &cfg).unwrap();
+
+        assert_eq!(embedding.model_name, "my-custom-model");
+    }
+
+    #[test]
+    fn semanticize_unicode_text() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "Hello 世界", &cfg).unwrap();
+        assert!(embedding.embedding_dim > 0);
+        assert!(!embedding.vector.is_empty());
+    }
+
+    #[test]
+    fn semanticize_empty_text() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "", &cfg).unwrap();
+        assert!(embedding.embedding_dim > 0);
+        assert!(!embedding.vector.is_empty());
+    }
+
+    #[test]
+    fn semanticize_long_text() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let long_text = "word ".repeat(1000);
+        let embedding = semanticize("doc", &long_text, &cfg).unwrap();
+        assert!(embedding.embedding_dim > 0);
+    }
+
+    #[test]
+    fn semanticize_special_characters() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "!@#$%^&*()_+", &cfg).unwrap();
+        assert!(embedding.embedding_dim > 0);
+    }
+
+    #[test]
+    fn semanticize_multiline_text() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let text = "Line 1\nLine 2\nLine 3";
+        let embedding = semanticize("doc", text, &cfg).unwrap();
+        assert!(embedding.embedding_dim > 0);
+    }
+
+    #[test]
+    fn semanticize_determinism_repeated_calls() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let text = "test text for determinism";
+
+        for _ in 0..10 {
+            let e1 = semanticize("doc", text, &cfg).unwrap();
+            let e2 = semanticize("doc", text, &cfg).unwrap();
+            assert_eq!(e1.vector, e2.vector);
+        }
+    }
+
+    #[test]
+    fn batch_preserves_order() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let docs = vec![
+            ("first", "doc one content"),
+            ("second", "doc two content"),
+            ("third", "doc three content"),
+        ];
+
+        let embeddings = semanticize_batch(&docs, &cfg).unwrap();
+
+        assert_eq!(embeddings[0].doc_id, "first");
+        assert_eq!(embeddings[1].doc_id, "second");
+        assert_eq!(embeddings[2].doc_id, "third");
+    }
+
+    #[test]
+    fn batch_different_texts_different_embeddings() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            ..Default::default()
+        };
+
+        let docs = vec![("a", "hello"), ("b", "world")];
+        let embeddings = semanticize_batch(&docs, &cfg).unwrap();
+
+        assert_ne!(embeddings[0].vector, embeddings[1].vector);
+    }
+
+    #[test]
+    fn fast_mode_ignores_model_settings() {
+        let cfg = SemanticConfig {
+            mode: "fast".into(),
+            tier: "accurate".into(),
+            model_path: PathBuf::from("/nonexistent/model.onnx"),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "test", &cfg).unwrap();
+        assert_eq!(embedding.tier, "accurate");
+        assert_eq!(embedding.embedding_dim, 1024);
+    }
+
+    #[test]
+    fn tier_fast_ignores_onnx() {
+        let cfg = SemanticConfig {
+            tier: "fast".into(),
+            mode: "onnx".into(),
+            model_path: PathBuf::from("/nonexistent/model.onnx"),
+            ..Default::default()
+        };
+
+        let embedding = semanticize("doc", "test", &cfg).unwrap();
+        assert_eq!(embedding.tier, "fast");
+        assert_eq!(embedding.embedding_dim, 384);
+    }
 }

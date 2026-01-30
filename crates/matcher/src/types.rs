@@ -324,7 +324,7 @@ pub struct MatchHit {
 }
 
 /// Errors produced by the matching layer.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum MatchError {
     /// Invalid configuration (per-request or global).
     #[error("invalid match config: {0}")]
@@ -346,5 +346,11 @@ pub enum MatchError {
     Pipeline(String),
     /// Index read or search failed.
     #[error("index error: {0}")]
-    Index(#[from] IndexError),
+    Index(IndexError),
+}
+
+impl From<IndexError> for MatchError {
+    fn from(err: IndexError) -> Self {
+        MatchError::Index(err)
+    }
 }

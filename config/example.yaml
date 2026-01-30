@@ -1,0 +1,195 @@
+# UCFP Pipeline Configuration
+# This is an example configuration file for the Universal Content Fingerprinting Pipeline
+# Place this file in your project root or specify the path when loading
+
+version: "1.0"
+name: "production-pipeline"
+
+# =============================================================================
+# INGEST STAGE CONFIGURATION
+# =============================================================================
+# The ingest stage validates metadata, derives deterministic IDs, and normalizes
+# text/binary payloads before they enter the pipeline.
+ingest:
+  # Configuration schema version (must be >= 1)
+  version: 1
+  
+  # Default tenant ID when not provided in metadata
+  default_tenant_id: "default"
+  
+  # UUID namespace for generating deterministic document IDs
+  # This should be a unique UUID for your organization
+  doc_id_namespace: "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  
+  # Strip control characters from text payloads
+  strip_control_chars: true
+  
+  # Maximum payload size in bytes (10MB default)
+  max_payload_bytes: 10485760
+  
+  # Maximum normalized text size in bytes (100KB default)
+  max_normalized_bytes: 102400
+  
+  # Maximum attribute size in bytes (10KB default)
+  max_attribute_bytes: 10240
+  
+  # Require tenant_id to be present in metadata
+  require_tenant_id: false
+
+# =============================================================================
+# CANONICAL STAGE CONFIGURATION
+# =============================================================================
+# The canonical stage converts normalized text into lowercase NFKC strings,
+# token streams with byte offsets, and SHA-256 hashes.
+canonical:
+  # Configuration schema version (must be >= 1)
+  version: 1
+  
+  # Apply Unicode NFKC normalization
+  normalize_unicode: true
+  
+  # Convert text to lowercase
+  lowercase: true
+  
+  # Strip punctuation from text
+  strip_punctuation: false
+
+# =============================================================================
+# PERCEPTUAL STAGE CONFIGURATION
+# =============================================================================
+# The perceptual stage creates MinHash fingerprints for similarity detection
+# using shingling, winnowing, and MinHash algorithms.
+perceptual:
+  # Configuration schema version (must be >= 1)
+  version: 1
+  
+  # Number of tokens per shingle (k-gram size)
+  # Larger values = more context, less noise tolerant
+  # Smaller values = more noise tolerant
+  k: 9
+  
+  # Window size for winnowing algorithm
+  # Larger windows = fewer shingles selected
+  # Smaller windows = more shingles selected
+  w: 4
+  
+  # Number of bands for MinHash LSH
+  # More bands = higher recall, lower precision
+  # Fewer bands = lower recall, higher precision
+  minhash_bands: 16
+  
+  # Rows per band for MinHash
+  minhash_rows_per_band: 8
+  
+  # Random seed for deterministic hashing
+  # Use the same seed for consistent fingerprints across runs
+  seed: 1732584193
+  
+  # Enable parallel MinHash computation
+  use_parallel: false
+  
+  # Include intermediate shingles in output (for debugging)
+  include_intermediates: true
+
+# =============================================================================
+# SEMANTIC STAGE CONFIGURATION
+# =============================================================================
+# The semantic stage generates dense vector embeddings using either local
+# ONNX models or remote API services.
+semantic:
+  # Model tier: "fast" (stub), "balanced" (768-dim), "accurate" (1024-dim)
+  tier: "balanced"
+  
+  # Inference mode: "fast" (deterministic stub), "onnx" (local), "api" (remote)
+  mode: "fast"
+  
+  # Model name for identification
+  model_name: "bge-small-en-v1.5"
+  
+  # Local model path (optional, uses default if not set)
+  # model_path: "./models/bge-small-en-v1.5/onnx/model.onnx"
+  
+  # Remote model URL for download (optional)
+  # model_url: "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/model.onnx"
+  
+  # API endpoint for remote inference (when mode: "api")
+  # api_url: "https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5"
+  
+  # API authorization header (when mode: "api")
+  # api_auth_header: "Bearer hf_xxx"
+  
+  # API provider: "hf", "openai", or "custom"
+  # api_provider: "hf"
+  
+  # API timeout in seconds
+  api_timeout_secs: 30
+  
+  # Local tokenizer path (optional)
+  # tokenizer_path: "./models/bge-small-en-v1.5/tokenizer.json"
+  
+  # Remote tokenizer URL (optional)
+  # tokenizer_url: "https://huggingface.co/BAAI/bge-small-en-v1.5/resolve/main/tokenizer.json"
+  
+  # L2 normalize embeddings (recommended for cosine similarity)
+  normalize: true
+  
+  # Compute device (currently only "cpu" is supported)
+  device: "cpu"
+
+# =============================================================================
+# INDEX STAGE CONFIGURATION
+# =============================================================================
+# The index stage provides storage and retrieval for fingerprints and embeddings.
+index:
+  # Backend type: "in_memory" or "rocksdb"
+  backend: "in_memory"
+  
+  # Path for RocksDB database (required when backend: "rocksdb")
+  # rocksdb_path: "./data/ucfp_index"
+  
+  # Compression algorithm: "zstd", "lz4", or "none"
+  compression: "zstd"
+  
+  # Quantization for embeddings: "i8" (8-bit), "f32" (32-bit), or "none"
+  quantization: "i8"
+
+# =============================================================================
+# MATCHER STAGE CONFIGURATION
+# =============================================================================
+# The matcher stage executes query-time matching and search operations.
+matcher:
+  # Configuration schema version (must be >= 1)
+  version: 1
+  
+  # Policy identifier for multi-tenant environments
+  policy_id: "default-policy"
+  
+  # Policy version
+  policy_version: "v1"
+  
+  # Matching mode: "semantic", "perceptual", or "hybrid"
+  mode: "semantic"
+  
+  # Matching strategy: "weighted", "threshold", or "best"
+  strategy: "weighted"
+  
+  # Maximum number of results to return
+  max_results: 10
+  
+  # Enforce tenant isolation in search
+  tenant_enforce: true
+  
+  # Oversample factor for LSH queries
+  # Higher values = more candidates checked
+  oversample_factor: 2.0
+  
+  # Include explanation in results (for debugging)
+  explain: false
+
+# =============================================================================
+# ENVIRONMENT VARIABLE OVERRIDES
+# =============================================================================
+# These environment variables will override values in this config file
+env_overrides:
+  # UCFP_INGEST_DEFAULT_TENANT_ID: "override-tenant"
+  # UCFP_SEMANTIC_API_KEY: "${API_KEY}"

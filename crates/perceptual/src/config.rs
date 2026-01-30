@@ -180,3 +180,196 @@ pub enum PerceptualError {
     #[error("invalid config: minhash length overflow for bands={bands} rows={rows}")]
     InvalidConfigMinhashLength { bands: usize, rows: usize },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_default_values() {
+        let cfg = PerceptualConfig::default();
+        assert_eq!(cfg.version, 1);
+        assert_eq!(cfg.k, 9);
+        assert_eq!(cfg.w, 4);
+        assert_eq!(cfg.minhash_bands, 16);
+        assert_eq!(cfg.minhash_rows_per_band, 8);
+        assert_eq!(cfg.seed, 0xF00D_BAAD_F00D_BAAD);
+        assert!(!cfg.use_parallel);
+        assert!(cfg.include_intermediates);
+    }
+
+    #[test]
+    fn config_new_creates_default() {
+        let cfg_new = PerceptualConfig::new();
+        let cfg_default = PerceptualConfig::default();
+        assert_eq!(cfg_new, cfg_default);
+    }
+
+    #[test]
+    fn config_builder_with_k() {
+        let cfg = PerceptualConfig::new().with_k(5);
+        assert_eq!(cfg.k, 5);
+    }
+
+    #[test]
+    fn config_builder_with_w() {
+        let cfg = PerceptualConfig::new().with_w(8);
+        assert_eq!(cfg.w, 8);
+    }
+
+    #[test]
+    fn config_builder_with_minhash_bands() {
+        let cfg = PerceptualConfig::new().with_minhash_bands(32);
+        assert_eq!(cfg.minhash_bands, 32);
+    }
+
+    #[test]
+    fn config_builder_with_minhash_rows_per_band() {
+        let cfg = PerceptualConfig::new().with_minhash_rows_per_band(16);
+        assert_eq!(cfg.minhash_rows_per_band, 16);
+    }
+
+    #[test]
+    fn config_builder_with_seed() {
+        let cfg = PerceptualConfig::new().with_seed(12345);
+        assert_eq!(cfg.seed, 12345);
+    }
+
+    #[test]
+    fn config_builder_with_parallel() {
+        let cfg = PerceptualConfig::new().with_parallel(true);
+        assert!(cfg.use_parallel);
+    }
+
+    #[test]
+    fn config_builder_with_intermediates() {
+        let cfg = PerceptualConfig::new().with_intermediates(false);
+        assert!(!cfg.include_intermediates);
+    }
+
+    #[test]
+    fn config_builder_chain() {
+        let cfg = PerceptualConfig::new()
+            .with_k(3)
+            .with_w(2)
+            .with_minhash_bands(8)
+            .with_minhash_rows_per_band(4)
+            .with_seed(42)
+            .with_parallel(true)
+            .with_intermediates(false);
+
+        assert_eq!(cfg.k, 3);
+        assert_eq!(cfg.w, 2);
+        assert_eq!(cfg.minhash_bands, 8);
+        assert_eq!(cfg.minhash_rows_per_band, 4);
+        assert_eq!(cfg.seed, 42);
+        assert!(cfg.use_parallel);
+        assert!(!cfg.include_intermediates);
+    }
+
+    #[test]
+    fn config_validate_valid() {
+        let cfg = PerceptualConfig::default();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn config_validate_invalid_k_zero() {
+        let cfg = PerceptualConfig::new().with_k(0);
+        assert!(matches!(
+            cfg.validate(),
+            Err(PerceptualError::InvalidConfigK { k: 0 })
+        ));
+    }
+
+    #[test]
+    fn config_validate_invalid_w_zero() {
+        let cfg = PerceptualConfig::new().with_w(0);
+        assert!(matches!(
+            cfg.validate(),
+            Err(PerceptualError::InvalidConfigW { w: 0 })
+        ));
+    }
+
+    #[test]
+    fn config_validate_invalid_bands_zero() {
+        let cfg = PerceptualConfig::new().with_minhash_bands(0);
+        assert!(matches!(
+            cfg.validate(),
+            Err(PerceptualError::InvalidConfigBands { bands: 0 })
+        ));
+    }
+
+    #[test]
+    fn config_validate_invalid_rows_zero() {
+        let cfg = PerceptualConfig::new().with_minhash_rows_per_band(0);
+        assert!(matches!(
+            cfg.validate(),
+            Err(PerceptualError::InvalidConfigRows { rows: 0 })
+        ));
+    }
+
+    #[test]
+    fn config_validate_invalid_version_zero() {
+        let cfg = PerceptualConfig {
+            version: 0,
+            ..Default::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(PerceptualError::InvalidConfigVersion { version: 0 })
+        ));
+    }
+
+    #[test]
+    fn config_clone() {
+        let cfg = PerceptualConfig::default();
+        let cloned = cfg.clone();
+        assert_eq!(cfg, cloned);
+    }
+
+    #[test]
+    fn config_serde_roundtrip() {
+        let cfg = PerceptualConfig::new()
+            .with_k(5)
+            .with_w(3)
+            .with_seed(12345)
+            .with_parallel(true);
+
+        let serialized = serde_json::to_string(&cfg).unwrap();
+        let deserialized: PerceptualConfig = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(cfg, deserialized);
+    }
+
+    #[test]
+    fn error_display_not_enough_tokens() {
+        let err = PerceptualError::NotEnoughTokens { k: 9 };
+        assert!(err.to_string().contains("not enough tokens"));
+        assert!(err.to_string().contains("k=9"));
+    }
+
+    #[test]
+    fn error_display_invalid_config_k() {
+        let err = PerceptualError::InvalidConfigK { k: 0 };
+        assert!(err.to_string().contains("invalid config"));
+        assert!(err.to_string().contains("k must be >= 1"));
+    }
+
+    #[test]
+    fn error_clone() {
+        let err = PerceptualError::NotEnoughTokens { k: 5 };
+        let cloned = err.clone();
+        assert_eq!(format!("{err}"), format!("{}", cloned));
+    }
+
+    #[test]
+    fn error_partial_eq() {
+        let err1 = PerceptualError::InvalidConfigK { k: 0 };
+        let err2 = PerceptualError::InvalidConfigK { k: 0 };
+        let err3 = PerceptualError::InvalidConfigW { w: 0 };
+
+        assert_eq!(err1, err2);
+        assert_ne!(err1, err3);
+    }
+}

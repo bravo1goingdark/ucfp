@@ -117,14 +117,18 @@ pub use canonical::{
     canonicalize, collapse_whitespace, hash_text, tokenize, CanonicalError, CanonicalizeConfig,
     CanonicalizedDocument, Token,
 };
+pub use index::IndexError;
 pub use ingest::{
     ingest, normalize_payload, CanonicalIngestRecord, CanonicalPayload, IngestConfig, IngestError,
     IngestMetadata, IngestPayload, IngestSource, RawIngestRecord,
 };
+pub use matcher::{MatchError, Matcher};
 pub use perceptual::{
     perceptualize_tokens, PerceptualConfig, PerceptualError, PerceptualFingerprint,
 };
 pub use semantic::{semanticize, SemanticConfig, SemanticEmbedding, SemanticError};
+
+pub mod config;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use std::error::Error;
@@ -205,6 +209,8 @@ pub trait PipelineMetrics: Send + Sync {
     fn record_canonical(&self, latency: Duration, result: Result<(), PipelineError>);
     fn record_perceptual(&self, latency: Duration, result: Result<(), PerceptualError>);
     fn record_semantic(&self, latency: Duration, result: Result<(), SemanticError>);
+    fn record_index(&self, latency: Duration, result: Result<(), IndexError>);
+    fn record_match(&self, latency: Duration, result: Result<(), MatchError>);
 }
 
 /// Processing stage captured in observability events.
@@ -214,6 +220,8 @@ pub enum PipelineStage {
     Canonical,
     Perceptual,
     Semantic,
+    Index,
+    Match,
 }
 
 impl fmt::Display for PipelineStage {
@@ -223,6 +231,8 @@ impl fmt::Display for PipelineStage {
             PipelineStage::Canonical => "canonical",
             PipelineStage::Perceptual => "perceptual",
             PipelineStage::Semantic => "semantic",
+            PipelineStage::Index => "index",
+            PipelineStage::Match => "match",
         };
         f.write_str(name)
     }
@@ -405,6 +415,14 @@ struct StageContext {
 }
 
 impl StageContext {
+    fn new(record_id: String) -> Self {
+        Self {
+            record_id,
+            doc_id: None,
+            tenant_id: None,
+        }
+    }
+
     fn from_raw(record: &RawIngestRecord) -> Self {
         Self {
             record_id: record.id.clone(),
@@ -496,6 +514,22 @@ impl MetricsSpan {
         self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
         if let Some(recorder) = self.recorder {
             recorder.record_semantic(latency, result);
+        }
+    }
+
+    fn record_index(self, result: Result<(), IndexError>) {
+        let latency = self.start.elapsed();
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+        if let Some(recorder) = self.recorder {
+            recorder.record_index(latency, result);
+        }
+    }
+
+    fn record_match(self, result: Result<(), MatchError>) {
+        let latency = self.start.elapsed();
+        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+        if let Some(recorder) = self.recorder {
+            recorder.record_match(latency, result);
         }
     }
 
@@ -784,6 +818,40 @@ pub fn big_text_demo(
     process_record_with_perceptual(raw, &CanonicalizeConfig::default(), perceptual_cfg)
 }
 
+/// Execute an index upsert operation with metrics tracking.
+/// Wraps `index.upsert()` and records latency to the metrics pipeline.
+pub fn index_upsert_with_metrics(
+    index: &index::UfpIndex,
+    record: &index::IndexRecord,
+) -> Result<(), IndexError> {
+    let span = MetricsSpan::start(
+        PipelineStage::Index,
+        StageContext::new(record.canonical_hash.clone()),
+    );
+    let result = index.upsert(record);
+    if let Some(s) = span {
+        s.record_index(result.as_ref().map_err(|e| e.clone()).map(|_| ()));
+    }
+    result
+}
+
+/// Execute a match query with metrics tracking.
+/// Wraps `matcher.match_document()` and records latency to the metrics pipeline.
+pub fn match_document_with_metrics(
+    matcher: &matcher::DefaultMatcher,
+    request: &matcher::MatchRequest,
+) -> Result<Vec<matcher::MatchHit>, MatchError> {
+    let span = MetricsSpan::start(
+        PipelineStage::Match,
+        StageContext::new(request.query_text.clone()),
+    );
+    let result = matcher.match_document(request);
+    if let Some(s) = span {
+        s.record_match(result.as_ref().map_err(|e| e.clone()).map(|_| ()));
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -969,6 +1037,24 @@ mod tests {
                 "semantic_ok"
             } else {
                 "semantic_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
+
+        fn record_index(&self, _latency: Duration, result: Result<(), IndexError>) {
+            let label = if result.is_ok() {
+                "index_ok"
+            } else {
+                "index_err"
+            };
+            self.events.write().unwrap().push(label);
+        }
+
+        fn record_match(&self, _latency: Duration, result: Result<(), MatchError>) {
+            let label = if result.is_ok() {
+                "match_ok"
+            } else {
+                "match_err"
             };
             self.events.write().unwrap().push(label);
         }

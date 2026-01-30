@@ -1,0 +1,57 @@
+# UCFP Development Configuration
+# Lightweight configuration optimized for development and testing
+
+version: "1.0"
+name: "development"
+
+# Development-optimized ingest config
+ingest:
+  version: 1
+  default_tenant_id: "dev"
+  strip_control_chars: true
+  # More lenient limits for development
+  max_payload_bytes: 52428800  # 50MB
+  max_normalized_bytes: 512000  # 500KB
+  require_tenant_id: false
+
+# Fast canonicalization
+canonical:
+  version: 1
+  normalize_unicode: true
+  lowercase: true
+  strip_punctuation: false
+
+# Smaller perceptual config for faster processing
+perceptual:
+  version: 1
+  k: 5  # Smaller shingles for faster processing
+  w: 2
+  minhash_bands: 8
+  minhash_rows_per_band: 4
+  seed: 12345
+  use_parallel: false
+  include_intermediates: true  # Keep for debugging
+
+# Fast mode for semantic (deterministic stub)
+semantic:
+  tier: "fast"
+  mode: "fast"
+  model_name: "dev-stub"
+  normalize: true
+  device: "cpu"
+
+# In-memory index for development
+index:
+  backend: "in_memory"
+  compression: "none"  # No compression for speed
+  quantization: "f32"  # Full precision for accuracy
+
+# Relaxed matcher settings
+matcher:
+  version: 1
+  max_results: 5
+  tenant_enforce: false  # Disable for easier testing
+  mode: "semantic"
+  strategy: "weighted"
+  oversample_factor: 1.5
+  explain: true  # Enable explanations for debugging
