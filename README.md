@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🔐 Universal Content Fingerprinting (UCFP)
+# Universal Content Fingerprinting (UCFP)
 
 **Deterministic, reproducible content fingerprints for text, audio, image, video, and documents**
 
@@ -12,41 +12,26 @@
 
 <br>
 
-[🚀 Quickstart](#quickstart) • [📖 Usage](#usage) • [🏗️ Architecture](#architecture) • [📊 Performance](#metrics--observability) • [🗺️ Roadmap](#roadmap)
-
 </div>
 
 ---
 
 <div align="center">
 
-### ✨ One Pipeline. Multiple Modalities. Infinite Possibilities.
+### One Pipeline. Multiple Modalities. Infinite Possibilities.
 
 </div>
 
 UCFP is an **open-source Rust framework** that unifies **exact hashing**, **perceptual similarity**, and **semantic embeddings** into a single, coherent pipeline. Built for speed and reliability, it powers:
 
-- 🔍 **Deduplication** — Find exact and near-duplicate content
-- 📝 **Plagiarism Detection** — Identify paraphrased content
-- 🕵️ **Content Provenance** — Track content across systems
-- 🔎 **Multimodal Search** — Search by meaning, not just keywords
+- **Deduplication** — Find exact and near-duplicate content
+- **Plagiarism Detection** — Identify paraphrased content
+- **Content Provenance** — Track content across systems
+- **Multimodal Search** — Search by meaning, not just keywords
 
 ---
 
-## 🎯 Features
-
-| Feature | What It Does |
-|:--------|:-------------|
-| 📥 **Deterministic Ingest** | Metadata validation, canonical IDs, whitespace normalization |
-| 📝 **Canonical Text** | Unicode NFKC, lowercasing, punctuation stripping, SHA-256 digests |
-| 🎨 **Perceptual Fingerprints** | Rolling-hash shingles, winnowing, MinHash signatures |
-| 🧠 **Semantic Embeddings** | ONNX/API-backed dense vectors with deterministic fallbacks |
-| 🗄️ **Pluggable Indexing** | Backend-agnostic storage (RocksDB, in-memory) |
-| ⚡ **Clean Architecture** | Linear pipeline with no circular dependencies |
-
----
-
-## 🚀 Quickstart
+## Quickstart
 
 ### Prerequisites
 
@@ -80,7 +65,7 @@ cargo run                              # end-to-end demo
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Simple Example
 
@@ -109,7 +94,7 @@ println!("MinHash bands: {}", fingerprint.minhash_bands.len());
 
 ---
 
-## 🏗️ Full Pipeline Example
+## Full Pipeline Example
 
 Complete workflow from ingest to matching:
 
@@ -144,7 +129,7 @@ let record = RawIngestRecord {
     payload: Some(IngestPayload::Text("Rust memory safety features".into())),
 };
 
-// 4. Process through pipeline (ingest → canonical → perceptual)
+// 4. Process through pipeline (ingest -> canonical -> perceptual)
 let (doc, fingerprint) =
     process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
 
@@ -184,7 +169,7 @@ println!("Found {} matches", hits.len());
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### YAML Config
 
@@ -226,39 +211,37 @@ let perceptual_cfg = config.to_perceptual_config();
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
-┌─────────┐    ┌───────────┐    ┌──────────────────┐    ┌─────────┐    ┌───────┐
-│  ingest │───▶│ canonical │───▶│perceptual/semantic│───▶│  index  │───▶│ match │
-└─────────┘    └───────────┘    └──────────────────┘    └─────────┘    └───────┘
++---------+    +-----------+    +--------------------+    +---------+    +-------+
+|  ingest |--->| canonical |--->|perceptual/semantic |--->|  index  |--->| match |
++---------+    +-----------+    +--------------------+    +---------+    +-------+
 ```
 
-### Stage Responsibilities
+The pipeline consists of six stages, each with a specific responsibility. Each crate can be used independently, or you can use the root `ucfp` crate for convenient orchestration.
 
-| Stage | What It Does | Key Types |
-|:------|:-------------|:----------|
-| `ingest` | Validation, metadata, ID derivation | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord` |
-| `canonical` | Unicode NFKC, tokenization, SHA-256 | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
-| `perceptual` | Shingles, winnowing, MinHash | `PerceptualConfig`, `PerceptualFingerprint` |
-| `semantic` | Dense embeddings (ONNX/API/stub) | `SemanticConfig`, `SemanticEmbedding` |
-| `index` | Storage, retrieval, search | `IndexConfig`, `UfpIndex`, `QueryResult` |
-| `match` | Query-time matching, tenant isolation | `MatchConfig`, `DefaultMatcher`, `MatchResult` |
-
-Each crate can be used independently. The root `ucfp` crate provides convenience orchestration.
+| Stage | Responsibility | Key Types |
+|:------|:---------------|:----------|
+| **ingest** | Validation, metadata normalization, ID derivation | `IngestConfig`, `RawIngestRecord`, `CanonicalIngestRecord` |
+| **canonical** | Unicode NFKC normalization, tokenization, SHA-256 hashing | `CanonicalizeConfig`, `CanonicalizedDocument`, `Token` |
+| **perceptual** | Rolling-hash shingles, winnowing, MinHash signatures | `PerceptualConfig`, `PerceptualFingerprint` |
+| **semantic** | Dense embeddings via ONNX, API, or deterministic stub | `SemanticConfig`, `SemanticEmbedding` |
+| **index** | Storage backend abstraction, retrieval, similarity search | `IndexConfig`, `UfpIndex`, `QueryResult` |
+| **match** | Query-time matching with tenant isolation | `MatchConfig`, `DefaultMatcher`, `MatchResult` |
 
 ---
 
-## 📦 Workspace Layout
+## Workspace Layout
 
 ```
 crates/
-├── 📥 ingest/       # Stage 1: validation & normalization
-├── 📝 canonical/    # Stage 2: canonical text pipeline
-├── 🎨 perceptual/   # Stage 3a: shingling, winnowing, MinHash
-├── 🧠 semantic/     # Stage 3b: embedding generation
-├── 🗄️ index/        # Stage 4: storage backend
-└── 🎯 match/        # Stage 5: query-time matching
+├── ingest/       # Stage 1: validation & normalization
+├── canonical/    # Stage 2: canonical text pipeline
+├── perceptual/   # Stage 3a: shingling, winnowing, MinHash
+├── semantic/     # Stage 3b: embedding generation
+├── index/        # Stage 4: storage backend
+└── match/        # Stage 5: query-time matching
 
 src/              # CLI demo & re-exports
 tests/            # Integration tests
@@ -267,7 +250,7 @@ examples/         # Workspace demos
 
 ---
 
-## 📊 Metrics & Observability
+## Metrics & Observability
 
 Hook into pipeline stages:
 
@@ -291,27 +274,27 @@ All pipeline stages emit detailed metrics:
 | `index` | Storage operations | Latency, query time |
 | `match` | Query execution | Latency, match count |
 
-### ⚡ Real-Time Performance Metrics
+### Real-Time Performance Metrics
 
 Benchmarked on a typical development machine (Windows, unoptimized debug build):
 
 | Stage | Latency | Throughput |
 |:------|:--------|:-----------|
-| `ingest` | ~113 µs | validation + normalization |
-| `canonical` | ~249 µs | Unicode NFKC + tokenization |
-| `perceptual` | ~143-708 µs | MinHash fingerprinting |
-| `semantic` | ~109 µs | embedding generation |
-| `index` | ~180 µs | storage operation |
-| `match` | ~320 µs | query execution |
+| `ingest` | ~113 us | validation + normalization |
+| `canonical` | ~249 us | Unicode NFKC + tokenization |
+| `perceptual` | ~143-708 us | MinHash fingerprinting |
+| `semantic` | ~109 us | embedding generation |
+| `index` | ~180 us | storage operation |
+| `match` | ~320 us | query execution |
 
-#### 📈 End-to-End Performance
+#### End-to-End Performance
 
 - **Single 1,000-word doc**: ~30ms (full pipeline)
 - **Large 10,000-word doc**: ~150ms (full pipeline)
 - **Batch throughput**: ~1.7ms per doc (100 docs)
-- **Small docs**: ~244µs per doc (1,000 docs)
+- **Small docs**: ~244us per doc (1,000 docs)
 
-#### 📝 Example Output
+#### Example Output
 
 ```
 timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=113
@@ -329,19 +312,19 @@ cargo run --example pipeline_metrics
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 | Modality | Status | Canonicalizer | Fingerprint | Embedding |
 |:---------|:-------|:--------------|:------------|:----------|
-| **Text** | ✅ Ready | NFKC + tokenization | MinHash | BGE / E5 |
-| **Image** | 🔮 Planned | DCT normalization | pHash | CLIP / SigLIP |
-| **Audio** | 🔮 Planned | Mel-spectrogram | Winnowing | SpeechCLIP / Whisper |
-| **Video** | 🔮 Planned | Keyframes | Scene hashes | VideoCLIP / XCLIP |
-| **Document** | 🔮 Planned | OCR + layout | Layout graph | LayoutLMv3 |
+| **Text** | Ready | NFKC + tokenization | MinHash | BGE / E5 |
+| **Image** | Planned | DCT normalization | pHash | CLIP / SigLIP |
+| **Audio** | Planned | Mel-spectrogram | Winnowing | SpeechCLIP / Whisper |
+| **Video** | Planned | Keyframes | Scene hashes | VideoCLIP / XCLIP |
+| **Document** | Planned | OCR + layout | Layout graph | LayoutLMv3 |
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome fixes, optimizations, and new modalities!
 
@@ -351,21 +334,3 @@ Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) for:
 - Documentation expectations
 
 ---
-
-## 📜 License
-
-<div align="center">
-
-**MIT** OR **Apache-2.0**
-
-Choose whichever works best for your project.
-
-</div>
-
----
-
-<div align="center">
-
-Made with ❤️ in Rust
-
-</div>
