@@ -34,5 +34,6 @@ members = [
     "crates/perceptual",
     "crates/semantic",
     "crates/index",
-    "crates/matcher"
+    "crates/matcher",
+    "crates/server"
 ]

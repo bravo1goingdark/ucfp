@@ -1,0 +1,42 @@
+# UCFP Server Configuration Example
+# 
+# This file demonstrates all available configuration options for the UCFP server.
+# Save this as 'server.yaml' in your working directory or use environment variables.
+
+# Server binding configuration
+bind_addr: "0.0.0.0"  # Bind to all interfaces (use "127.0.0.1" for localhost only)
+port: 8080             # HTTP port
+
+# Request handling
+timeout_secs: 30       # Maximum request processing time
+max_body_size_mb: 10   # Maximum request body size in megabytes
+
+# Rate limiting
+rate_limit_per_minute: 100  # Maximum requests per API key per minute
+
+# Authentication
+# In production, use strong random keys and store them securely
+api_keys:
+  - "prod-key-001"
+  - "prod-key-002"
+  - "demo-key-for-testing"
+
+# CORS settings
+enable_cors: true      # Enable Cross-Origin Resource Sharing
+
+# Logging
+log_level: "info"      # Log level: trace, debug, info, warn, error
+
+# Metrics
+metrics_enabled: true  # Enable Prometheus-compatible metrics endpoint
+
+# Environment variable equivalents:
+# UCFP_SERVER__BIND_ADDR=0.0.0.0
+# UCFP_SERVER__PORT=8080
+# UCFP_SERVER__TIMEOUT_SECS=30
+# UCFP_SERVER__MAX_BODY_SIZE_MB=10
+# UCFP_SERVER__RATE_LIMIT_PER_MINUTE=100
+# UCFP_SERVER__API_KEYS='["key1","key2"]'
+# UCFP_SERVER__ENABLE_CORS=true
+# UCFP_SERVER__LOG_LEVEL=info
+# UCFP_SERVER__METRICS_ENABLED=true

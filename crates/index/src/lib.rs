@@ -68,9 +68,11 @@
 //! // assert_eq!(results[0].canonical_hash, "doc-1");
 //! ```
 
+pub mod ann;
 mod backend;
 mod query;
 
+use crate::ann::AnnConfig;
 use std::sync::RwLock;
 
 mod metadata_serde {
@@ -242,6 +244,9 @@ pub struct IndexConfig {
     pub compression: CompressionConfig,
     /// Quantization settings for embeddings.
     pub quantization: QuantizationConfig,
+    /// ANN (Approximate Nearest Neighbor) configuration for semantic search.
+    /// When enabled, uses HNSW algorithm for sub-linear search on large datasets.
+    pub ann: AnnConfig,
 }
 
 impl IndexConfig {
@@ -261,6 +266,11 @@ impl IndexConfig {
 
     pub fn with_quantization(mut self, quantization: QuantizationConfig) -> Self {
         self.quantization = quantization;
+        self
+    }
+
+    pub fn with_ann(mut self, ann: AnnConfig) -> Self {
+        self.ann = ann;
         self
     }
 }
@@ -391,6 +401,18 @@ impl UfpIndex {
         } else {
             Ok(None)
         }
+    }
+
+    /// Scan all records in the index.
+    /// Iterates over all records in the backend, decodes them, and passes them to the visitor.
+    pub fn scan(
+        &self,
+        visitor: &mut dyn FnMut(&IndexRecord) -> Result<(), IndexError>,
+    ) -> Result<(), IndexError> {
+        self.backend.scan(&mut |data: &[u8]| {
+            let record = self.decode_record(data)?;
+            visitor(&record)
+        })
     }
 
     /// Batch insert multiple records (efficient for large datasets).

@@ -39,6 +39,16 @@ pub struct SemanticConfig {
     pub tokenizer_url: Option<String>,
     pub normalize: bool,
     pub device: String,
+    // Resilience configuration
+    pub enable_resilience: bool,
+    pub circuit_breaker_failure_threshold: u32,
+    pub circuit_breaker_reset_timeout_secs: u64,
+    pub retry_max_retries: u32,
+    pub retry_base_delay_ms: u64,
+    pub retry_max_delay_ms: u64,
+    pub retry_jitter: bool,
+    pub rate_limit_requests_per_second: f64,
+    pub rate_limit_burst_size: u32,
 }
 
 pub struct SemanticEmbedding {
@@ -96,6 +106,97 @@ pub fn semanticize_batch<D, T>(
 - `onnx.rs`: tokenization + ONNX runtime execution.
 - `normalize.rs`: L2 normalization helpers.
 - `stub.rs`: deterministic stub vector generation.
+- `resilience.rs`: circuit breaker, retry, and rate limiting for API calls.
+
+## Resilience & Production Features
+
+The `semantic` crate provides built-in resilience patterns for production deployments using external API providers (OpenAI, Hugging Face, etc.):
+
+### Circuit Breaker
+
+Prevents cascading failures when embedding services are unavailable:
+
+- `circuit_breaker_failure_threshold`: Number of consecutive failures before opening the circuit (default: 5)
+- `circuit_breaker_reset_timeout_secs`: Time to wait before attempting to close the circuit (default: 30)
+
+When the circuit is open, requests fail fast without hitting the API, allowing the service to recover.
+
+### Retry with Exponential Backoff
+
+Handles transient failures gracefully:
+
+- `retry_max_retries`: Maximum number of retry attempts (default: 3)
+- `retry_base_delay_ms`: Initial delay before first retry in milliseconds (default: 100)
+- `retry_max_delay_ms`: Maximum delay between retries in milliseconds (default: 10000)
+- `retry_jitter`: Add random jitter to prevent thundering herd (default: true)
+
+Retries are automatically skipped when the circuit breaker is open.
+
+### Rate Limiting
+
+Protects downstream services and manages costs using a token bucket algorithm:
+
+- `rate_limit_requests_per_second`: Sustained request rate per provider (default: 10.0)
+- `rate_limit_burst_size`: Maximum burst size for short spikes (default: 5)
+
+Rate limits are enforced per provider, allowing independent policies for different embedding services.
+
+### Enabling/Disabling Resilience
+
+Set `enable_resilience: true` in `SemanticConfig` to activate all resilience features. When disabled, API calls proceed without circuit breaker, retry, or rate limiting protection.
+
+### Monitoring APIs
+
+```rust
+// Get circuit breaker statistics for a provider
+pub fn get_circuit_breaker_stats(provider: &str) -> CircuitBreakerStats;
+
+// Check if a provider is healthy
+pub fn is_provider_healthy(provider: &str) -> bool;
+```
+
+`CircuitBreakerStats` provides:
+- Current state (Closed, Open, HalfOpen)
+- Failure count
+- Success count
+- Last failure time
+- State change history
+
+### Example
+
+```rust
+use semantic::{semanticize, SemanticConfig};
+
+let cfg = SemanticConfig {
+    mode: "api".into(),
+    api_url: Some("https://api.openai.com/v1/embeddings".into()),
+    api_auth_header: Some("Bearer sk-xxx".into()),
+    api_provider: Some("openai".into()),
+    // Enable resilience features
+    enable_resilience: true,
+    // Circuit breaker: open after 5 failures, reset after 60 seconds
+    circuit_breaker_failure_threshold: 5,
+    circuit_breaker_reset_timeout_secs: 60,
+    // Retry: up to 3 retries with exponential backoff
+    retry_max_retries: 3,
+    retry_base_delay_ms: 100,
+    retry_max_delay_ms: 5000,
+    retry_jitter: true,
+    // Rate limit: 5 req/s with burst of 10
+    rate_limit_requests_per_second: 5.0,
+    rate_limit_burst_size: 10,
+    ..Default::default()
+};
+
+// Check provider health before making requests
+if semantic::is_provider_healthy("openai") {
+    let embedding = semanticize("doc-42", "hello world", &cfg)?;
+}
+
+// Monitor circuit breaker stats
+let stats = semantic::get_circuit_breaker_stats("openai");
+println!("Circuit state: {:?}", stats.state);
+```
 
 ## Configuration & Model Assets
 
@@ -115,6 +216,18 @@ pub fn semanticize_batch<D, T>(
 - `normalize`: set to `true` to produce unit-length vectors (recommended for cosine similarity).
 - `device`: currently `"cpu"` only; future work can expose GPU providers once ONNX Runtime is built
   with CUDA support.
+
+### Resilience Configuration (API mode)
+
+- `enable_resilience`: master switch for all resilience features (default: `false`).
+- `circuit_breaker_failure_threshold`: failures before opening circuit (default: 5).
+- `circuit_breaker_reset_timeout_secs`: seconds before attempting reset (default: 30).
+- `retry_max_retries`: maximum retry attempts for transient failures (default: 3).
+- `retry_base_delay_ms`: initial retry delay in milliseconds (default: 100).
+- `retry_max_delay_ms`: maximum retry delay in milliseconds (default: 10000).
+- `retry_jitter`: add randomization to retry delays (default: true).
+- `rate_limit_requests_per_second`: sustained rate limit per provider (default: 10.0).
+- `rate_limit_burst_size`: burst allowance for short spikes (default: 5).
 
 Drop your ONNX model under `models/<name>/onnx/<file>.onnx` alongside its tokenizer JSON; the new
 integration test `test_real_model_inference` shows the expected layout using the BGE small encoder.

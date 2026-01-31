@@ -30,6 +30,12 @@ export default function Footer() {
             </a>
           </div>
         </motion.div>
+
+        <div className="footer-bottom">
+          <span className="footer-copyright">
+            © 2025 UCFP. Open source under Apache-2.0.
+          </span>
+        </div>
       </div>
     </footer>
   )

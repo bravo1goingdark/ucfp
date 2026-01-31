@@ -3,6 +3,8 @@ import './App.css'
 import Hero from './components/Hero'
 import Features from './components/Features'
 import Pipeline from './components/Pipeline'
+import Performance from './components/Performance'
+import ServerApi from './components/ServerApi'
 import Modalities from './components/Modalities'
 import Footer from './components/Footer'
 import Navigation from './components/Navigation'
@@ -27,6 +29,8 @@ function App() {
         <Hero />
         <Features />
         <Pipeline />
+        <Performance />
+        <ServerApi />
         <Modalities />
       </main>
       <Footer />

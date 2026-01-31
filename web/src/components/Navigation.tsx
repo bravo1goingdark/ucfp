@@ -15,6 +15,8 @@ export default function Navigation({ scrolled, theme, toggleTheme }: NavigationP
   const navLinks = [
     { href: '#features', label: 'Features' },
     { href: '#pipeline', label: 'Pipeline' },
+    { href: '#performance', label: 'Performance' },
+    { href: '#server', label: 'API' },
     { href: '#modalities', label: 'Modalities' },
   ]
 

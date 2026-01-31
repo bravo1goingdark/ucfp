@@ -22,6 +22,8 @@ log = "0.4"
 thiserror = "2.0.17"
 anyhow = "1.0.100"
 hashbrown = "0.16.0"
+# ANN is always available but runtime configurable
+hnsw_rs = "0.3.1"
 
 [dev-dependencies]
 tempfile = "3.13"

@@ -24,11 +24,12 @@ pub trait IndexBackend: Send + Sync {
 }
 
 /// Configuration for selecting and building a backend.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum BackendConfig {
     /// Use RocksDB for storage. The `path` is the directory where the database will be stored.
     RocksDb { path: String },
     /// Use an in-memory HashMap for storage. This is useful for testing.
+    #[default]
     InMemory,
 }
 
@@ -62,23 +63,6 @@ impl BackendConfig {
                     ))
                 }
             }
-        }
-    }
-}
-
-impl Default for BackendConfig {
-    fn default() -> Self {
-        // The default backend is RocksDB if the feature is enabled.
-        #[cfg(feature = "backend-rocksdb")]
-        {
-            BackendConfig::RocksDb {
-                path: "data/index".into(),
-            }
-        }
-        // Otherwise, fallback to In-memory.
-        #[cfg(not(feature = "backend-rocksdb"))]
-        {
-            BackendConfig::InMemory
         }
     }
 }

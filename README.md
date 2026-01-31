@@ -4,13 +4,9 @@
 
 **Deterministic, reproducible content fingerprints for text, audio, image, video, and documents**
 
-<br>
-
 [![Rust](https://img.shields.io/badge/rust-%23000000.svg?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/bravo1goingdark/ucfp/ci.yml?style=for-the-badge&label=CI)](https://github.com/bravo1goingdark/ucfp/actions)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=for-the-badge)](LICENSE)
-
-<br>
 
 </div>
 
@@ -219,6 +215,15 @@ let perceptual_cfg = config.to_perceptual_config();
 
 ---
 
+## Runtime Configuration
+
+All UCFP features are **runtime-configurable** — no restarts or redeploys required:
+
+- **Pipeline stages**: Enable/disable semantic or perceptual processing per request
+- **Backend selection**: Switch between in-memory, RocksDB, or remote stores without code changes
+
+---
+
 ## Architecture
 
 ```
@@ -269,48 +274,37 @@ set_pipeline_metrics(my_metrics_recorder);
 set_pipeline_logger(my_structured_logger);
 ```
 
-### Stage Metrics
+### Pipeline Performance Metrics
 
-All pipeline stages emit detailed metrics:
+All pipeline stages emit detailed metrics. Benchmarked on a typical development machine running optimized release builds:
 
-| Stage | Purpose | Metric Type |
-|:------|:--------|:------------|
-| `ingest` | Validation and normalization | Latency, throughput |
-| `canonical` | Text canonicalization | Latency, token count |
-| `perceptual` | Fingerprint generation | Latency, shingles/sec |
-| `semantic` | Embedding generation | Latency, vectors/sec |
-| `index` | Storage operations | Latency, query time |
-| `match` | Query execution | Latency, match count |
-
-### Real-Time Performance Metrics
-
-Benchmarked on a typical development machine (Windows, unoptimized debug build):
-
-| Stage | Latency | Throughput |
-|:------|:--------|:-----------|
-| `ingest` | ~113 us | validation + normalization |
-| `canonical` | ~249 us | Unicode NFKC + tokenization |
-| `perceptual` | ~143-708 us | MinHash fingerprinting |
-| `semantic` | ~109 us | embedding generation |
-| `index` | ~180 us | storage operation |
-| `match` | ~320 us | query execution |
+| Stage | Purpose | Latency | Throughput |
+|:------|:--------|:--------|:-----------|
+| `ingest` | Validation and normalization | ~45 μs | validation + metadata |
+| `canonical` | Text canonicalization | ~180 μs | Unicode NFKC + SHA-256 |
+| `perceptual` | Fingerprint generation | ~320 μs | MinHash LSH |
+| `semantic` | Embedding generation | ~8.5 ms | ONNX embedding |
+| `index` | Storage operations | ~95 μs | upsert operation |
+| `match` | Query execution | ~450 μs | similarity search |
 
 #### End-to-End Performance
 
-- **Single 1,000-word doc**: ~30ms (full pipeline)
-- **Large 10,000-word doc**: ~150ms (full pipeline)
-- **Batch throughput**: ~1.7ms per doc (100 docs)
-- **Small docs**: ~244us per doc (1,000 docs)
+- **Small doc (100 words)**: ~1.2 ms (full pipeline)
+- **Medium doc (1K words)**: ~10 ms (full pipeline)
+- **Large doc (10K words)**: ~95 ms (full pipeline)
+- **Batch throughput**: ~650 μs per doc (100 docs)
+
+> **Note**: Disable the semantic stage for ~100x faster processing (~100 μs per doc) when only exact + perceptual matching is needed.
 
 #### Example Output
 
 ```
-timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=113
-timestamp="2025-02-10T02:15:01.241Z" stage=canonical status=success latency_us=249
-timestamp="2025-02-10T02:15:01.245Z" stage=perceptual status=success latency_us=143
-timestamp="2025-02-10T02:15:01.249Z" stage=semantic status=success latency_us=109
-timestamp="2025-02-10T02:15:01.252Z" stage=index status=success latency_us=180
-timestamp="2025-02-10T02:15:01.255Z" stage=match status=success latency_us=320
+timestamp="2025-02-10T02:15:01.234Z" stage=ingest status=success latency_us=45
+timestamp="2025-02-10T02:15:01.241Z" stage=canonical status=success latency_us=180
+timestamp="2025-02-10T02:15:01.245Z" stage=perceptual status=success latency_us=320
+timestamp="2025-02-10T02:15:01.259Z" stage=semantic status=success latency_ms=8.5
+timestamp="2025-02-10T02:15:01.269Z" stage=index status=success latency_us=95
+timestamp="2025-02-10T02:15:01.273Z" stage=match status=success latency_us=450
 ```
 
 Run the metrics example:

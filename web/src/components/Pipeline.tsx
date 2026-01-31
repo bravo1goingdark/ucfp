@@ -49,8 +49,8 @@ const stages = [
     features: [
       'ONNX runtime support',
       'BGE/E5 embeddings',
-      'Sentence transformers',
-      'API fallback mode'
+      'API fallback mode',
+      'Sentence transformers'
     ],
     metric: '~109μs',
     step: '04'
@@ -62,8 +62,8 @@ const stages = [
     features: [
       'RocksDB backend',
       'In-memory mode',
-      'Tenant isolation',
-      'Fast retrieval'
+      'ANN search (HNSW)',
+      'Embedding quantization'
     ],
     metric: '~180μs',
     step: '05'

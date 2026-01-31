@@ -68,6 +68,12 @@ pub mod config;
 pub mod error;
 pub mod types;
 
+// Resilience modules
+pub mod circuit_breaker;
+pub mod rate_limit;
+pub mod retry;
+mod serde_millis;
+
 mod api;
 mod assets;
 mod cache;

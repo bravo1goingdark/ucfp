@@ -1,0 +1,56 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+authors = ["UCFP Team"]
+description = "HTTP REST API server for UCFP content fingerprinting"
+repository = "https://github.com/bravo1goingdark/ucfp"
+
+[dependencies]
+# Core UCFP crates
+ucfp = { path = "../.." }
+ingest = { path = "../ingest" }
+canonical = { path = "../canonical" }
+perceptual = { path = "../perceptual" }
+semantic = { path = "../semantic" }
+index = { path = "../index" }
+matcher = { path = "../matcher" }
+
+# Server framework
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1.42", features = ["full"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["compression-full", "timeout", "trace", "cors"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration and environment
+config = "0.15"
+dotenvy = "0.15"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics and monitoring
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# Authentication and security
+headers = "0.4"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+once_cell = "1.20"
+dashmap = "6.1"
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tokio-test = "0.4"
