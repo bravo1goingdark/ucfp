@@ -250,12 +250,9 @@ pub async fn compare_documents(
         }
 
         // Process semantic
-        if let Ok((_, embedding)) = ucfp::process_record_with_semantic_configs(
-            raw,
-            ingest_cfg,
-            canonical_cfg,
-            semantic_cfg,
-        ) {
+        if let Ok((_, embedding)) =
+            ucfp::process_record_with_semantic_configs(raw, ingest_cfg, canonical_cfg, semantic_cfg)
+        {
             semantic = Some(
                 serde_json::to_value(embedding)
                     .map_err(|e| ServerError::Internal(e.to_string()))?,
