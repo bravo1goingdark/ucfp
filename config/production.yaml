@@ -48,10 +48,10 @@ semantic:
   # api_provider: "openai"
   # api_timeout_secs: 60
 
-# Persistent storage with RocksDB
+# Persistent storage with Redb
 index:
-  backend: "rocksdb"
-  rocksdb_path: "/var/lib/ucfp/index"
+  backend: "redb"
+  redb_path: "/var/lib/ucfp/index.redb"
   compression: "zstd"  # Maximum compression
   quantization: "i8"   # 8-bit quantization for memory efficiency
 

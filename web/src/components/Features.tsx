@@ -21,7 +21,7 @@ const features = [
   {
     icon: Database,
     title: 'Unified Index',
-    description: 'Pluggable storage backends with RocksDB support for scalable content indexing.',
+    description: 'Pluggable storage backends including Redb for scalable content indexing.',
   },
   {
     icon: Search,

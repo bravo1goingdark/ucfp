@@ -424,7 +424,7 @@ pub struct IndexYamlConfig {
     pub backend: String,
 
     #[serde(default)]
-    pub rocksdb_path: Option<String>,
+    pub redb_path: Option<String>,
 
     #[serde(default = "default_compression")]
     pub compression: String,
@@ -435,16 +435,16 @@ pub struct IndexYamlConfig {
 
 impl IndexYamlConfig {
     fn validate(&self) -> Result<(), ConfigLoadError> {
-        let valid_backends = ["in_memory", "rocksdb"];
+        let valid_backends = ["in_memory", "redb"];
         if !valid_backends.contains(&self.backend.as_str()) {
             return Err(ConfigLoadError::Validation(format!(
                 "index.backend must be one of: {valid_backends:?}"
             )));
         }
 
-        if self.backend == "rocksdb" && self.rocksdb_path.is_none() {
+        if self.backend == "redb" && self.redb_path.is_none() {
             return Err(ConfigLoadError::Validation(
-                "index.rocksdb_path is required when backend is 'rocksdb'".to_string(),
+                "index.redb_path is required when backend is 'redb'".to_string(),
             ));
         }
 
@@ -456,7 +456,7 @@ impl Default for IndexYamlConfig {
     fn default() -> Self {
         Self {
             backend: "in_memory".to_string(),
-            rocksdb_path: None,
+            redb_path: None,
             compression: "zstd".to_string(),
             quantization: "i8".to_string(),
         }

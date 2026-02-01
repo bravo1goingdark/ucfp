@@ -4,7 +4,7 @@ use serde_json::json;
 fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all("data")?;
 
-    let cfg = IndexConfig::new().with_backend(BackendConfig::rocksdb("data/index"));
+    let cfg = IndexConfig::new().with_backend(BackendConfig::redb("data/index.redb"));
 
     let index = UfpIndex::new(cfg)?;
 

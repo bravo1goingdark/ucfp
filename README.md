@@ -227,8 +227,8 @@ semantic:
   mode: "fast"
 
 index:
-  backend: "rocksdb"
-  rocksdb_path: "./data/index"
+  backend: "redb"
+  redb_path: "./data/index"
 ```
 
 ### Load in Code
@@ -248,7 +248,7 @@ let perceptual_cfg = config.to_perceptual_config();
 All UCFP features are **runtime-configurable** — no restarts or redeploys required:
 
 - **Pipeline stages**: Enable/disable semantic or perceptual processing per request
-- **Backend selection**: Switch between in-memory, RocksDB, or remote stores without code changes
+- **Backend selection**: Switch between in-memory, Redb, or remote stores without code changes
 
 ---
 

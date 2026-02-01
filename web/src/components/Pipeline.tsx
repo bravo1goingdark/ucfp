@@ -60,7 +60,7 @@ const stages = [
     name: 'Index', 
     description: 'Storage layer with pluggable backends for persisting fingerprints and embeddings.',
     features: [
-      'RocksDB backend',
+      'Redb backend',
       'In-memory mode',
       'ANN search (HNSW)',
       'Embedding quantization'

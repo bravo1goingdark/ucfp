@@ -25,7 +25,7 @@ impl ServerState {
     /// Create new server state
     pub fn new(config: ServerConfig) -> ServerResult<Self> {
         // Initialize index with in-memory backend for now
-        // In production, this would use RocksDB
+        // In production, this would use Redb for persistence
         let index_config = IndexConfig::new().with_backend(index::BackendConfig::in_memory());
         let index = Arc::new(UfpIndex::new(index_config)?);
 

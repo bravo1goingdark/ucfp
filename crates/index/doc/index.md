@@ -4,7 +4,7 @@
 
 `index` is the storage layer for UCFP fingerprints + embeddings. It
 provides deterministic quantization, compression, and search primitives while
-remaining backend-agnostic so deployments can pick RocksDB for on-disk storage
+remaining backend-agnostic so deployments can pick Redb for on-disk storage
 or the fast in-memory map for ephemeral workloads (and you can still inject a
 custom backend that implements the trait if you need one later).
 
@@ -13,9 +13,9 @@ The crate exposes a single entry point (`UfpIndex`) that accepts a runtime
 quantization strategy, then offers CRUD and similarity search operations.
 
 ## Features
-- Storage options: RocksDB (default) for durable indexing or the fast
+- Storage options: Redb (default) for durable indexing or the fast
   in-memory backend when you only need ephemeral state (tests, demos, lambdas).
-- RocksDB lives behind the `backend-rocksdb` feature so you can build a
+- Redb lives behind the `backend-redb` feature so you can build a
   dependency-light, in-memory-only binary when native libraries are
   unavailable.
 - Runtime-configurable compression (zstd or none) and quantization strategies.
@@ -71,7 +71,7 @@ use index::{
     BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION
 };
 
-let cfg = IndexConfig::new().with_backend(BackendConfig::rocksdb("data/index"));
+let cfg = IndexConfig::new().with_backend(BackendConfig::redb("data/index"));
 let index = UfpIndex::new(cfg)?;
 
 index.upsert(&IndexRecord {
@@ -106,7 +106,7 @@ let index = UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
 ```
 
 From the workspace root, run `cargo run -p index --example index_demo` to
-see end-to-end insert + semantic/perceptual queries with the default RocksDB
+see end-to-end insert + semantic/perceptual queries with the default Redb
 backend. Switch to the fast in-memory backend by calling
 `IndexConfig::with_backend(...)` in your initialization code—no config files
 required.
@@ -131,7 +131,7 @@ All ANN parameters are runtime-configurable through `IndexConfig`:
 use index::{AnnConfig, BackendConfig, IndexConfig, UfpIndex};
 
 let cfg = IndexConfig::new()
-    .with_backend(BackendConfig::rocksdb("data/index"))
+    .with_backend(BackendConfig::redb("data/index"))
     .with_ann(AnnConfig {
         enabled: true,                    // Enable/disable ANN entirely
         min_vectors_for_ann: 1000,        // Auto-switch threshold
@@ -164,7 +164,7 @@ When ANN is disabled or the dataset is small, the index automatically uses linea
 use index::{AnnConfig, BackendConfig, CompressionConfig, IndexConfig};
 
 let cfg = IndexConfig::new()
-    .with_backend(BackendConfig::rocksdb("data/index"))
+    .with_backend(BackendConfig::redb("data/index"))
     .with_compression(CompressionConfig::zstd())
     .with_ann(AnnConfig {
         enabled: true,
@@ -188,7 +188,7 @@ let cfg = IndexConfig::new()
   quantization strategy. Clone it when you need to keep the same knobs in
   application state or mirror them inside background workers.
 - **Storage abstraction:** The `IndexBackend` trait isolates persistence so you
-  can pick RocksDB or the in-memory map today (and keep the door open for
+  can pick Redb or the in-memory map today (and keep the door open for
   bespoke implementations later). Each backend only needs to implement six
   methods.
 - **Compression + quantization:** `CompressionConfig` (currently none/zstd)
@@ -312,21 +312,21 @@ matches.
 
 | Feature | Enables |
 | --- | --- |
-| `backend-rocksdb` *(default)* | RocksDB backend (requires libclang at build). |
+| `backend-redb` *(default)* | Redb backend (requires pure Rust at build). |
 
 Disable default features (`--no-default-features`) to run purely in-memory
-without pulling in RocksDB or its libclang toolchain.
+without pulling in Redb or its pure Rust toolchain.
 
 ## Testing
 
 ```bash
-# In-memory only (no RocksDB/libclang needed)
+# In-memory only (no Redb/pure Rust needed)
 cargo test -p index --no-default-features
 
-# Full suite with RocksDB enabled
+# Full suite with Redb enabled
 cargo test -p index
 ```
 
 Unit tests cover serialization roundtrips, backend swaps, and query correctness.
-Integration tests/examples exercise both in-memory and RocksDB paths; enable the
+Integration tests/examples exercise both in-memory and Redb paths; enable the
 default feature set when you want parity with production deployments.

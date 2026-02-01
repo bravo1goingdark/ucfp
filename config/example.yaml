@@ -141,11 +141,11 @@ semantic:
 # =============================================================================
 # The index stage provides storage and retrieval for fingerprints and embeddings.
 index:
-  # Backend type: "in_memory" or "rocksdb"
+  # Backend type: "in_memory" or "redb"
   backend: "in_memory"
   
-  # Path for RocksDB database (required when backend: "rocksdb")
-  # rocksdb_path: "./data/ucfp_index"
+  # Path for Redb database file (required when backend: "redb")
+  # redb_path: "./data/ucfp_index.redb"
   
   # Compression algorithm: "zstd", "lz4", or "none"
   compression: "zstd"

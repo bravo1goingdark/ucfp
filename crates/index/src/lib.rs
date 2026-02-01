@@ -9,20 +9,51 @@
 //!
 //! - **Pluggable Backends**: Supports multiple storage backends through a common
 //!   [`IndexBackend`] trait. Out of the box, it provides:
-//!   - An in-memory `HashMap`-based backend for fast, ephemeral storage (ideal for testing).
-//!   - A RocksDB backend for persistent, on-disk storage (enabled via the `backend-rocksdb` feature).
+//!   - **Redb** (default): Pure Rust ACID-compliant embedded database. No C++ dependencies.
+//!   - **In-memory**: HashMap-based backend for fast, ephemeral storage (ideal for testing).
 //! - **Flexible Configuration**: All behaviors, including the choice of backend,
 //!   compression, and quantization strategies, are configured at runtime via the
 //!   [`IndexConfig`] struct.
 //! - **Efficient Storage**:
 //!   - **Quantization**: Provides utilities to quantize `f32` embeddings into `i8` vectors
 //!     to reduce storage space and improve query performance. Use the `quantize` or
-//!     `quantize_with_strategy` methods before creating `IndexRecord` instances.//!   - **Compression**: Compresses serialized records (using Zstd by default) before
+//!     `quantize_with_strategy` methods before creating `IndexRecord` instances.
+//!   - **Compression**: Compresses serialized records (using Zstd by default) before
 //!     writing to the backend.
 //! - **Similarity Search**: Provides search capabilities for both semantic and
 //!   perceptual fingerprints:
 //!   - **Semantic Search**: Computes cosine similarity on quantized embeddings.
 //!   - **Perceptual Search**: Computes Jaccard similarity on MinHash signatures.
+//!
+//! ## Backend Selection Guide
+//!
+//! | Backend | Use Case | Dependencies | Compile Time |
+//! |---------|----------|--------------|--------------|
+//! | **Redb** (default) | Production, single-node | None (pure Rust) | Fast |
+//! | **InMemory** | Testing, development | None | Fastest |
+//!
+//! ### Why Redb?
+//!
+//! Redb is the default backend because:
+//! - **No C++ dependencies**: Compiles with just Rust toolchain (no clang/LLVM required)
+//! - **ACID transactions**: Crash-safe by default with MVCC
+//! - **Pure Rust**: Better integration with Rust ecosystem, easier cross-compilation
+//! - **Fast compilation**: No C++ compilation overhead
+//! - **Future-proof**: Easy migration path to PostgreSQL when horizontal scaling is needed
+//!
+//! ### Configuration Examples
+//!
+//! ```rust
+//! use index::{UfpIndex, IndexConfig, BackendConfig};
+//!
+//! // Redb (default, recommended)
+//! let config = IndexConfig::new()
+//!     .with_backend(BackendConfig::redb("/data/ucfp.redb"));
+//!
+//! // In-memory (testing)
+//! let config = IndexConfig::new()
+//!     .with_backend(BackendConfig::in_memory());
+//! ```
 //!
 //! ## Key Concepts
 //!
@@ -40,8 +71,8 @@
 //! use index::{UfpIndex, IndexConfig, BackendConfig, IndexRecord, QueryMode, INDEX_SCHEMA_VERSION};
 //! use serde_json::json;
 //!
-//! // Configure an in-memory index
-//! let config = IndexConfig::new().with_backend(BackendConfig::in_memory());
+//! // Configure with Redb (default, persistent storage)
+//! let config = IndexConfig::new().with_backend(BackendConfig::redb("/tmp/ucfp.redb"));
 //! let index = UfpIndex::new(config).unwrap();
 //!
 //! // Create and insert a record
@@ -98,8 +129,8 @@ mod metadata_serde {
     }
 }
 
-#[cfg(feature = "backend-rocksdb")]
-pub use backend::RocksDbBackend;
+#[cfg(feature = "backend-redb")]
+pub use backend::RedbBackend;
 pub use backend::{BackendConfig, InMemoryBackend, IndexBackend};
 pub use query::{QueryMode, QueryResult};
 
@@ -238,7 +269,7 @@ impl QuantizationConfig {
 /// Config for initializing the index.
 #[derive(Clone, Debug, Default)]
 pub struct IndexConfig {
-    /// Backend storage configuration (in-memory or RocksDB).
+    /// Backend storage configuration (in-memory or Redb).
     pub backend: BackendConfig,
     /// Compression settings for stored records.
     pub compression: CompressionConfig,

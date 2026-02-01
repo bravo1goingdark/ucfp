@@ -342,7 +342,7 @@ cargo test -p match
 ```
 
 Since `DefaultMatcher::in_memory_default` uses only the in-memory backend, no
-external services or RocksDB toolchain are required to execute the test suite.
+external services or Redb toolchain are required to execute the test suite.
 
 ## Integration with Pipeline
 
