@@ -11,8 +11,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   check:
@@ -26,9 +24,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -59,9 +54,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
-
       - name: Cache Rust dependencies
         uses: actions/cache@v4
         with:
@@ -74,19 +66,11 @@ jobs:
             ${{ runner.os }}-cargo-test-
             ${{ runner.os }}-cargo-
 
-      - name: Cache apt packages
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.0
-        with:
-          packages: clang libclang-dev llvm-dev
-          version: 1.0
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev llvm-dev
 
       - name: Run tests
-        run: cargo nextest run --workspace --no-fail-fast
-        env:
-          NEXTEST_RETRIES: 2
+        run: cargo test --workspace --all-targets
 
   build:
     name: Build Check
@@ -98,9 +82,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -114,11 +95,8 @@ jobs:
             ${{ runner.os }}-cargo-build-
             ${{ runner.os }}-cargo-
 
-      - name: Cache apt packages
-        uses: awalsh128/cache-apt-pkgs-action@v1.4.0
-        with:
-          packages: clang libclang-dev llvm-dev
-          version: 1.0
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev llvm-dev
 
       - name: Build all targets
         run: cargo build --workspace --all-targets
@@ -133,9 +111,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Run sccache-cache
-        uses: mozilla-actions/sccache-action@v0.0.4
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
