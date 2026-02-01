@@ -1,7 +1,7 @@
 //! Payload validation and normalization utilities.
 //!
 //! This module contains helpers for enforcing payload presence/shape policies
-//! and transforming raw payloads into [`CanonicalPayload`](crate::CanonicalPayload)
+//! and transforming raw payloads into [`CanonicalPayload`]
 //! values suitable for downstream processing.
 use crate::config::IngestConfig;
 use crate::error::IngestError;

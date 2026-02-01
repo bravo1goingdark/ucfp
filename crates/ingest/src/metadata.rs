@@ -1,7 +1,7 @@
 //! Metadata normalization and policy enforcement for `ingest`.
 //!
 //! Functions in this module are responsible for sanitizing metadata, applying
-//! defaults, and enforcing configured [`MetadataPolicy`](crate::MetadataPolicy)
+//! defaults, and enforcing configured [`MetadataPolicy`]
 //! rules before records flow further down the pipeline.
 use chrono::{DateTime, Utc};
 
