@@ -48,8 +48,13 @@ pub struct ProcessResponse {
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub canonical_hash: Option<String>,
+    /// Perceptual fingerprint result containing the full `PerceptualFingerprint` struct.
+    /// For indexing, extract the `minhash` field (`Vec<u64>`) which contains the LSH signature
+    /// for approximate Jaccard similarity search.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub perceptual_fingerprint: Option<serde_json::Value>,
+    /// Semantic embedding result containing the `SemanticEmbedding` struct.
+    /// For indexing, the server API accepts the raw f32 vector which gets quantized to i8.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_embedding: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,7 +96,47 @@ fn default_true() -> bool {
     true
 }
 
-/// Process a single document
+/// Process a single document through the UCFP pipeline.
+///
+/// This endpoint runs text through the full pipeline: ingest → canonicalize →
+/// perceptual fingerprinting and/or semantic embedding generation.
+///
+/// # Pipeline Stages
+/// 1. **Ingest**: Validates and normalizes the input text
+/// 2. **Canonicalize**: Tokenizes and normalizes text (lowercase, NFKC, etc.)
+/// 3. **Perceptual** (optional): Generates MinHash LSH signature for similarity search
+/// 4. **Semantic** (optional): Generates vector embedding for semantic similarity
+///
+/// # Response Fields
+/// - `perceptual_fingerprint`: Full `PerceptualFingerprint` struct with `minhash` field
+///   containing the LSH signature (use this field's value for the index insert API)
+/// - `semantic_embedding`: `SemanticEmbedding` struct with the embedding vector
+///   (extract the `vector` field for the index insert API)
+///
+/// # Example
+/// ```json
+/// // Request
+/// {
+///   "text": "Hello world",
+///   "enable_perceptual": true,
+///   "enable_semantic": true
+/// }
+///
+/// // Response
+/// {
+///   "doc_id": "uuid",
+///   "status": "success",
+///   "perceptual_fingerprint": {
+///     "minhash": [123456789, ...],
+///     "meta": { "k": 9, "w": 4, ... }
+///   },
+///   "semantic_embedding": {
+///     "vector": [0.1, 0.2, ...],
+///     "doc_id": "uuid",
+///     "model_name": "bge-small-en-v1.5"
+///   }
+/// }
+/// ```
 pub async fn process_document(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<ProcessRequest>,
