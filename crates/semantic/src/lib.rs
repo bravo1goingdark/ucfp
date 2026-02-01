@@ -131,7 +131,14 @@ pub fn semanticize(
     let handle = get_or_load_model_handle(&assets)?;
     let texts = [text];
     // Run the ONNX model to get the embeddings.
-    let mut vectors = run_onnx_embeddings(handle.as_ref(), &texts)?;
+    let mut vectors = run_onnx_embeddings(
+        handle.as_ref(),
+        &texts,
+        cfg.max_sequence_length,
+        cfg.enable_chunking,
+        cfg.chunk_overlap_ratio,
+        &cfg.pooling_strategy,
+    )?;
     let mut embedding = vectors
         .pop()
         .ok_or_else(|| SemanticError::Inference("model returned no outputs".into()))?;
@@ -205,7 +212,14 @@ where
     // --- Inference ---
     let handle = get_or_load_model_handle(&assets)?;
     let text_refs: Vec<&str> = docs.iter().map(|(_, text)| text.as_ref()).collect();
-    let embeddings = run_onnx_embeddings(handle.as_ref(), &text_refs)?;
+    let embeddings = run_onnx_embeddings(
+        handle.as_ref(),
+        &text_refs,
+        cfg.max_sequence_length,
+        cfg.enable_chunking,
+        cfg.chunk_overlap_ratio,
+        &cfg.pooling_strategy,
+    )?;
     if embeddings.len() != docs.len() {
         return Err(SemanticError::Inference(format!(
             "model returned {} embeddings for {} inputs",

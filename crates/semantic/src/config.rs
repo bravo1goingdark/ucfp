@@ -65,6 +65,40 @@ pub struct SemanticConfig {
     /// Whether to enable resilience features (retry, circuit breaker, rate limiting).
     /// Defaults to true for production safety.
     pub enable_resilience: bool,
+    /// Maximum sequence length (in tokens) for the model.
+    /// Texts longer than this will be truncated or chunked (if chunking is enabled).
+    /// Default is 512 for BERT-based models, but can be increased for models
+    /// that support longer contexts (e.g., 4096 for Longformer, 2048 for GPT).
+    #[serde(default = "default_max_sequence_length")]
+    pub max_sequence_length: usize,
+    /// Enable sliding-window chunking for long texts.
+    /// When enabled, texts exceeding `max_sequence_length` are split into overlapping chunks,
+    /// embedded independently, and pooled. This is explicit opt-in for better quality
+    /// on long documents at the cost of multiple inference calls.
+    #[serde(default)]
+    pub enable_chunking: bool,
+    /// Overlap ratio between chunks (0.0 to 1.0).
+    /// 0.5 means 50% overlap (e.g., chunk 2 starts at position 256 when chunk size is 512).
+    /// Higher overlap captures more context at boundaries but increases computation.
+    #[serde(default = "default_chunk_overlap_ratio")]
+    pub chunk_overlap_ratio: f32,
+    /// Pooling strategy for combining chunk embeddings.
+    /// Options: "mean" (simple average), "weighted_mean" (center-weighted, default),
+    /// "max" (element-wise maximum), "first" (use first chunk only).
+    #[serde(default = "default_pooling_strategy")]
+    pub pooling_strategy: String,
+}
+
+fn default_max_sequence_length() -> usize {
+    512
+}
+
+fn default_chunk_overlap_ratio() -> f32 {
+    0.5
+}
+
+fn default_pooling_strategy() -> String {
+    "weighted_mean".to_string()
 }
 
 impl Default for SemanticConfig {
@@ -87,6 +121,10 @@ impl Default for SemanticConfig {
             circuit_breaker_config: None, // Uses defaults when None
             rate_limit_config: None,      // Uses defaults when None
             enable_resilience: true,
+            max_sequence_length: default_max_sequence_length(),
+            enable_chunking: false,
+            chunk_overlap_ratio: default_chunk_overlap_ratio(),
+            pooling_strategy: default_pooling_strategy(),
         }
     }
 }
@@ -157,6 +195,8 @@ mod tests {
             circuit_breaker_config: None,
             rate_limit_config: None,
             enable_resilience: true,
+            max_sequence_length: 512,
+            ..Default::default()
         };
 
         let serialized = serde_json::to_string(&cfg).unwrap();

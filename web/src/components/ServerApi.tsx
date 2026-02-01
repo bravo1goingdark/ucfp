@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion'
-import { Globe, Shield, Zap } from 'lucide-react'
+import { Globe, Shield, Zap, BookOpen, Layers } from 'lucide-react'
 import './ServerApi.css'
 
 const features = [
   { icon: Globe, title: 'REST API', desc: 'HTTP endpoints for all pipeline operations' },
   { icon: Shield, title: 'Authentication', desc: 'API key-based auth with tenant isolation' },
   { icon: Zap, title: 'Async I/O', desc: 'Built on Tokio for high-performance requests' },
+  { icon: Layers, title: 'Chunking', desc: 'Sliding-window chunking for long documents' },
 ]
 
 export default function ServerApi() {
@@ -30,7 +31,7 @@ export default function ServerApi() {
         >
           <div className="server-card-header">
             <h3>HTTP Endpoints</h3>
-            <span className="server-badge">7 endpoints</span>
+            <span className="server-badge">9 endpoints</span>
           </div>
 
           <div className="endpoints-list">
@@ -38,6 +39,11 @@ export default function ServerApi() {
               <span className="method get">GET</span>
               <code>/health</code>
               <span className="endpoint-name">Health check</span>
+            </div>
+            <div className="endpoint-row">
+              <span className="method get">GET</span>
+              <code>/ready</code>
+              <span className="endpoint-name">Readiness probe</span>
             </div>
             <div className="endpoint-row">
               <span className="method post">POST</span>
@@ -58,6 +64,11 @@ export default function ServerApi() {
               <span className="method get">GET</span>
               <code>/api/v1/index/search</code>
               <span className="endpoint-name">Search index</span>
+            </div>
+            <div className="endpoint-row">
+              <span className="method get">GET</span>
+              <code>/api/v1/index/documents</code>
+              <span className="endpoint-name">List documents</span>
             </div>
             <div className="endpoint-row">
               <span className="method post">POST</span>
@@ -83,6 +94,34 @@ export default function ServerApi() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="api-docs-section">
+            <div className="docs-header">
+              <BookOpen size={20} strokeWidth={1.5} />
+              <h4>API Documentation</h4>
+            </div>
+            <p className="docs-text">
+              Complete API reference with examples, error codes, and configuration options.
+            </p>
+            <div className="docs-links">
+              <a 
+                href="https://github.com/bravo1goingdark/ucfp/blob/main/crates/server/API.md" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="docs-link"
+              >
+                📚 Full API Reference →
+              </a>
+              <a 
+                href="https://github.com/bravo1goingdark/ucfp/blob/main/crates/server/README.md" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="docs-link"
+              >
+                🚀 Server Quick Start →
+              </a>
+            </div>
           </div>
         </motion.div>
       </div>

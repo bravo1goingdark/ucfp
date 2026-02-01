@@ -69,6 +69,34 @@ cargo run                              # end-to-end demo
 
 ---
 
+## API Documentation
+
+Complete REST API documentation is available:
+
+- **Server API Reference**: [`crates/server/API.md`](crates/server/API.md) - Full REST API documentation with examples
+- **Server Quick Start**: [`crates/server/README.md`](crates/server/README.md) - Getting started guide for the HTTP server
+
+### Quick API Example
+
+```bash
+# Process a document with chunking enabled for long text
+curl -X POST http://localhost:8080/api/v1/process \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "text": "Your document content here...",
+    "enable_semantic": true,
+    "semantic_config": {
+      "max_sequence_length": 512,
+      "enable_chunking": true,
+      "chunk_overlap_ratio": 0.5,
+      "pooling_strategy": "weighted_mean"
+    }
+  }'
+```
+
+---
+
 ## Usage
 
 ### Simple Example
@@ -286,6 +314,36 @@ All pipeline stages emit detailed metrics. Benchmarked on a typical development 
 | `semantic` | Embedding generation | ~8.5 ms | ONNX embedding |
 | `index` | Storage operations | ~95 μs | upsert operation |
 | `match` | Query execution | ~450 μs | similarity search |
+
+#### Handling Long Documents (Chunking)
+
+For documents exceeding the model's token limit (e.g., 512 tokens for BERT), UCFP supports **sliding-window chunking** with weighted pooling:
+
+```rust
+use ucfp::{semanticize_document, SemanticConfig};
+
+// Configure for long documents
+let semantic_cfg = SemanticConfig {
+    max_sequence_length: 512,                // Model's token limit
+    enable_chunking: true,                   // Enable sliding-window chunking
+    chunk_overlap_ratio: 0.5,                // 50% overlap between chunks
+    pooling_strategy: "weighted_mean".into(), // Center-weighted pooling
+    ..Default::default()
+};
+
+// Long document (1000+ words) is automatically chunked and pooled
+let long_text = "Very long document content...".repeat(100);
+let doc = canonicalize("doc-001", &long_text, &canonical_cfg)?;
+let embedding = semanticize_document(&doc, &semantic_cfg)?;
+```
+
+**How it works:**
+1. Long text is split into overlapping chunks (50% overlap by default)
+2. Each chunk is embedded independently via ONNX
+3. Embeddings are pooled using center-weighted mean
+4. Returns a single embedding representing the entire document
+
+**Performance:** Chunking requires N inference calls for N chunks. A 1000-word document produces ~3-4 chunks, requiring ~30ms total (vs 8.5ms for short text).
 
 #### End-to-End Performance
 

@@ -123,7 +123,7 @@
 
 .server-features {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 16px;
 }
 
@@ -161,9 +161,62 @@
   line-height: 1.4;
 }
 
-@media (max-width: 640px) {
+/* API Documentation Section */
+.api-docs-section {
+  margin-top: 32px;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.docs-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.docs-header h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.docs-text {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+  line-height: 1.5;
+}
+
+.docs-links {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.docs-link {
+  font-size: 0.85rem;
+  color: #6366f1;
+  text-decoration: none;
+  padding: 8px 16px;
+  background: rgba(99, 102, 241, 0.1);
+  border-radius: 8px;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+}
+
+.docs-link:hover {
+  background: rgba(99, 102, 241, 0.2);
+  transform: translateY(-1px);
+}
+
+/* Responsive Updates */
+@media (max-width: 768px) {
   .server-features {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
   
   .server-feature {
@@ -182,5 +235,13 @@
     margin-left: 0;
     width: 100%;
     padding-left: 52px;
+  }
+  
+  .docs-links {
+    flex-direction: column;
+  }
+  
+  .docs-link {
+    text-align: center;
   }
 }

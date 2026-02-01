@@ -136,17 +136,115 @@ pub async fn insert_record(
 
 /// Search the index
 pub async fn search_index(
-    State(_state): State<Arc<ServerState>>,
+    State(state): State<Arc<ServerState>>,
     Query(query): Query<IndexSearchQuery>,
 ) -> ServerResult<impl IntoResponse> {
-    // For now, return mock results
-    // In a full implementation, this would:
-    // 1. Process the query text through the pipeline
-    // 2. Generate fingerprint/embedding based on strategy
-    // 3. Search the index using the appropriate method
-    // 4. Return ranked results
+    use matcher::types::MetricId;
+    use matcher::{MatchConfig, MatchExpr, MatchMode, MatchRequest, Matcher};
 
-    let hits = vec![];
+    // Determine strategy and mode
+    let (mode, strategy) = match query.strategy.as_str() {
+        "semantic" => (
+            MatchMode::Semantic,
+            MatchExpr::Semantic {
+                metric: MetricId::Cosine,
+                min_score: 0.0,
+            },
+        ),
+        _ => (
+            MatchMode::Perceptual,
+            MatchExpr::Perceptual {
+                metric: MetricId::Jaccard,
+                min_score: 0.0,
+            },
+        ),
+    };
+
+    // Get tenant ID from query or use default from config
+    let tenant_id = query.tenant_id.unwrap_or_else(|| {
+        state
+            .config
+            .api_keys
+            .iter()
+            .next()
+            .cloned()
+            .unwrap_or_default()
+    });
+
+    // Build match request for searching
+    let match_req = MatchRequest {
+        tenant_id: tenant_id.clone(),
+        query_text: query.query.clone(),
+        config: MatchConfig {
+            version: "v1".to_string(),
+            policy_id: "search-policy".to_string(),
+            policy_version: "v1".to_string(),
+            mode,
+            strategy,
+            max_results: query.top_k,
+            tenant_enforce: true,
+            oversample_factor: 2.0,
+            explain: false,
+        },
+        attributes: None,
+        pipeline_version: None,
+        fingerprint_versions: None,
+        query_canonical_hash: None,
+    };
+
+    // Execute search using the matcher
+    let match_hits = state
+        .matcher
+        .match_document(&match_req)
+        .map_err(ServerError::Match)?;
+
+    // Convert hits to SearchHit format
+    let hits: Vec<SearchHit> = match_hits
+        .into_iter()
+        .map(|hit| {
+            // Extract doc_id and tenant_id from metadata
+            let doc_id = hit
+                .metadata
+                .get("doc_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| hit.canonical_hash.clone());
+
+            let hit_tenant_id = hit
+                .metadata
+                .get("tenant")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    hit.metadata
+                        .get("tenant_id")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                });
+
+            // Convert metadata to HashMap<String, String>
+            let metadata: HashMap<String, String> = hit
+                .metadata
+                .as_object()
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            SearchHit {
+                doc_id,
+                score: hit.score as f64,
+                tenant_id: hit_tenant_id,
+                metadata: if metadata.is_empty() {
+                    None
+                } else {
+                    Some(metadata)
+                },
+            }
+        })
+        .collect();
 
     Ok(Json(IndexSearchResponse {
         query: query.query,

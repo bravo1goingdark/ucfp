@@ -155,9 +155,50 @@ Process a single document through the fingerprinting pipeline.
   },
   "semantic_config": {
     "tier": "balanced",
-    "normalize": true
+    "normalize": true,
+    "max_sequence_length": 512,
+    "enable_chunking": false,
+    "chunk_overlap_ratio": 0.5,
+    "pooling_strategy": "weighted_mean"
   }
 }
+```
+
+**Semantic Config Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `tier` | string | `"balanced"` | Model tier: `fast`, `balanced`, `accurate` |
+| `normalize` | boolean | `true` | L2 normalize embeddings |
+| `max_sequence_length` | integer | `512` | Model's token limit (e.g., 512 for BERT, 4096 for Longformer) |
+| `enable_chunking` | boolean | `false` | Enable sliding-window chunking for long documents |
+| `chunk_overlap_ratio` | float | `0.5` | Overlap between chunks (0.0-1.0) |
+| `pooling_strategy` | string | `"weighted_mean"` | Pooling strategy: `mean`, `weighted_mean`, `max`, `first` |
+
+**Chunking for Long Documents:**
+
+When `enable_chunking` is `true` and text exceeds `max_sequence_length`:
+1. Text is split into overlapping chunks (controlled by `chunk_overlap_ratio`)
+2. Each chunk is embedded independently via ONNX
+3. Embeddings are pooled using the specified strategy
+4. Returns a single embedding representing the entire document
+
+**Example with Chunking:**
+```bash
+curl -X POST http://localhost:8080/api/v1/process \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: demo-key-12345" \
+  -d '{
+    "doc_id": "long-doc-001",
+    "text": "Very long document content exceeding 512 tokens...",
+    "enable_semantic": true,
+    "semantic_config": {
+      "max_sequence_length": 512,
+      "enable_chunking": true,
+      "chunk_overlap_ratio": 0.5,
+      "pooling_strategy": "weighted_mean"
+    }
+  }'
 ```
 
 **Response:**

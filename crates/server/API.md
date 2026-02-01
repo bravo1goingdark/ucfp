@@ -479,10 +479,40 @@ Get server metadata (version, uptime).
 
 ```json
 {
-  "tier": "balanced",      // Model tier: fast, balanced, accurate
-  "normalize": true,       // L2 normalize embeddings
-  "model_name": "...",     // Specific model (optional)
-  "mode": "onnx"          // Processing mode: onnx, api, fast
+  "tier": "balanced",                // Model tier: fast, balanced, accurate
+  "normalize": true,                 // L2 normalize embeddings
+  "model_name": "...",               // Specific model (optional)
+  "mode": "onnx",                    // Processing mode: onnx, api, fast
+  "max_sequence_length": 512,        // Model's token limit (512 for BERT, 4096 for Longformer, etc.)
+  "enable_chunking": false,          // Enable sliding-window chunking for long documents
+  "chunk_overlap_ratio": 0.5,        // Overlap between chunks (0.0-1.0, default 0.5 = 50%)
+  "pooling_strategy": "weighted_mean" // Pooling: mean, weighted_mean, max, first
+}
+```
+
+**Chunking for Long Documents:**
+
+When `enable_chunking` is `true` and text exceeds `max_sequence_length` tokens:
+- Text is split into overlapping chunks (controlled by `chunk_overlap_ratio`)
+- Each chunk is embedded independently
+- Embeddings are pooled using the specified strategy:
+  - `mean`: Simple average of all chunks
+  - `weighted_mean`: Center-weighted average (default) - center chunks get higher weight
+  - `max`: Element-wise maximum across chunks
+  - `first`: Use only the first chunk
+
+**Example with Chunking:**
+
+```json
+{
+  "text": "Very long document content...",
+  "enable_semantic": true,
+  "semantic_config": {
+    "max_sequence_length": 512,
+    "enable_chunking": true,
+    "chunk_overlap_ratio": 0.5,
+    "pooling_strategy": "weighted_mean"
+  }
 }
 ```
 

@@ -39,6 +39,12 @@ pub struct SemanticConfig {
     pub tokenizer_url: Option<String>,
     pub normalize: bool,
     pub device: String,
+    // Model-specific configuration
+    pub max_sequence_length: usize,       // Model's token limit (e.g., 512 for BERT, 4096 for Longformer)
+    // Chunking configuration (for long documents)
+    pub enable_chunking: bool,            // Enable sliding-window chunking for long texts
+    pub chunk_overlap_ratio: f32,         // Overlap between chunks (0.0-1.0, default 0.5)
+    pub pooling_strategy: String,         // Pooling: "mean", "weighted_mean", "max", "first"
     // Resilience configuration
     pub enable_resilience: bool,
     pub circuit_breaker_failure_threshold: u32,
@@ -228,6 +234,52 @@ println!("Circuit state: {:?}", stats.state);
 - `retry_jitter`: add randomization to retry delays (default: true).
 - `rate_limit_requests_per_second`: sustained rate limit per provider (default: 10.0).
 - `rate_limit_burst_size`: burst allowance for short spikes (default: 5).
+
+### Chunking Configuration (Long Documents)
+
+For documents exceeding the model's token limit, enable sliding-window chunking to preserve
+content from the entire document:
+
+- `max_sequence_length`: the model's maximum token capacity (default: 512 for BERT-based models).
+  Set this to match your specific model (e.g., 4096 for Longformer, 2048 for GPT models).
+- `enable_chunking`: set to `true` to enable sliding-window chunking for long texts (default: `false`).
+- `chunk_overlap_ratio`: overlap between consecutive chunks as a fraction (0.0-1.0, default: 0.5).
+  0.5 means 50% overlap (chunk 2 starts at position 256 when chunk size is 512).
+- `pooling_strategy`: how to combine chunk embeddings into a single vector:
+  - `"mean"`: simple average of all chunks
+  - `"weighted_mean"`: center-weighted average (default) - center chunks get higher weight
+  - `"max"`: element-wise maximum across chunks
+  - `"first"`: use only the first chunk (baseline)
+
+**How Chunking Works:**
+
+1. Long text is split into overlapping chunks based on `max_sequence_length`
+2. Each chunk is embedded independently via ONNX inference
+3. Embeddings are pooled using the specified strategy
+4. Returns a single embedding representing the entire document
+
+**Example:**
+
+```rust
+use semantic::{semanticize, SemanticConfig};
+
+let cfg = SemanticConfig {
+    mode: "onnx".into(),
+    max_sequence_length: 512,              // BERT model limit
+    enable_chunking: true,                 // Enable for long documents
+    chunk_overlap_ratio: 0.5,              // 50% overlap
+    pooling_strategy: "weighted_mean".into(), // Center-weighted pooling
+    ..Default::default()
+};
+
+// Process a long document (1000+ words) - automatically chunked
+let long_text = "...".repeat(1000);
+let embedding = semanticize("doc-42", &long_text, &cfg)?;
+```
+
+**Performance Note:** Chunking requires N inference calls for N chunks. A 1000-word document
+with 512-token chunks and 50% overlap produces ~3-4 chunks, requiring 3-4 ONNX inference calls.
+This trades speed for quality on long documents.
 
 Drop your ONNX model under `models/<name>/onnx/<file>.onnx` alongside its tokenizer JSON; the new
 integration test `test_real_model_inference` shows the expected layout using the BGE small encoder.

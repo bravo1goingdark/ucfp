@@ -21,6 +21,10 @@ fn main() -> anyhow::Result<()> {
         ..Default::default()
     };
     // Use the bundled ONNX model/tokenizer for actual embeddings.
+    // For long documents (>512 tokens), enable chunking:
+    //   enable_chunking: true,
+    //   chunk_overlap_ratio: 0.5,
+    //   pooling_strategy: "weighted_mean".into(),
     let semantic_cfg = SemanticConfig {
         tier: "balanced".into(),
         mode: "onnx".into(),
