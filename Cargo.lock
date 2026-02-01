@@ -3556,6 +3556,7 @@ dependencies = [
  "index",
  "ingest",
  "matcher",
+ "ndarray 0.17.1",
  "perceptual",
  "semantic",
  "serde",

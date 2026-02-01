@@ -7,6 +7,7 @@ use index::{
     BackendConfig, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex, INDEX_SCHEMA_VERSION,
 };
 use ingest::{IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+use ndarray::Array1;
 use serde_json::json;
 use std::path::PathBuf;
 use ucfp::{
@@ -67,28 +68,27 @@ fn main() -> anyhow::Result<()> {
     for (tenant, doc_id, text) in corpus {
         let raw = build_raw_record(tenant, doc_id, text);
         let processed = process_record_with_perceptual_configs(
-            &raw,
+            raw,
             &ingest_cfg,
             &canonical_cfg,
             &perceptual_cfg,
         )?;
 
-        let semantic = semanticize_document(
-            &doc_id.to_string(),
-            &processed.canonical_text,
-            &semantic_cfg,
-        )
-        .context("semantic embedding")?;
+        let semantic =
+            semanticize_document(&processed.0, &semantic_cfg).context("semantic embedding")?;
 
         let rec = IndexRecord {
             schema_version: INDEX_SCHEMA_VERSION,
             canonical_hash: format!("{}-{}", tenant, doc_id),
-            perceptual: Some(processed.perceptual_signature.clone()),
-            embedding: Some(semantic.quantized_embedding.clone()),
+            perceptual: Some(processed.1.minhash.clone()),
+            embedding: Some(UfpIndex::quantize(
+                &Array1::from(semantic.vector.clone()),
+                127.0,
+            )),
             metadata: json!({
                 "tenant": tenant,
                 "doc_id": doc_id,
-                "source": processed.canonical_text.chars().take(80).collect::<String>() + "..."
+                "source": processed.0.canonical_text.chars().take(80).collect::<String>() + "..."
             }),
         };
 
@@ -100,23 +100,22 @@ fn main() -> anyhow::Result<()> {
 
     let query_raw = build_raw_record("query", "q1", "Rust ownership prevents data races");
     let query_processed = process_record_with_perceptual_configs(
-        &query_raw,
+        query_raw,
         &ingest_cfg,
         &canonical_cfg,
         &perceptual_cfg,
     )?;
-    let query_semantic = semanticize_document(
-        &"q1".to_string(),
-        &query_processed.canonical_text,
-        &semantic_cfg,
-    )
-    .context("query semantic")?;
+    let query_semantic =
+        semanticize_document(&query_processed.0, &semantic_cfg).context("query semantic")?;
 
     let query = IndexRecord {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: "query-1".into(),
-        perceptual: Some(query_processed.perceptual_signature.clone()),
-        embedding: Some(query_semantic.quantized_embedding.clone()),
+        perceptual: Some(query_processed.1.minhash.clone()),
+        embedding: Some(UfpIndex::quantize(
+            &Array1::from(query_semantic.vector.clone()),
+            127.0,
+        )),
         metadata: json!({}),
     };
 

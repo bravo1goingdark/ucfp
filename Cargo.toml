@@ -22,6 +22,7 @@ thiserror = "2.0.17"
 [dev-dependencies]
 criterion = "0.5"
 tempfile = "3"
+ndarray = "0.17"
 
 [[bench]]
 name = "pipeline"

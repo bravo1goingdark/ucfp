@@ -10,9 +10,9 @@
 
 The pipeline consists of three stages:
 
-1. rolling-hash shingles built from contiguous token windows
-2. winnowing to retain rightmost minimum hashes per window
-3. MinHash signatures that enable locality-sensitive similarity search
+1. **Rolling-hash shingles**: Build shingles from contiguous token windows using a polynomial rolling hash.
+2. **Winnowing**: Data reduction step that selects minimum hashes per window to reduce the number of shingles fed into MinHash. This is purely an optimization to improve performance, not a locality-sensitive hashing technique.
+3. **MinHash signatures**: The actual LSH (Locality-Sensitive Hashing) implementation that produces fixed-size signatures enabling approximate Jaccard similarity search. The bands×rows structure (`minhash_bands` × `minhash_rows_per_band`) provides the LSH properties.
 
 All behavior is configured at runtime through `PerceptualConfig` (no Cargo features required), and the resulting `PerceptualFingerprint` records its `perceptual_version` and algorithm identifier so that changes remain auditable.
 
@@ -41,8 +41,12 @@ pub struct PerceptualConfig {
 }
 
 pub struct PerceptualFingerprint {
+    /// All rolling-hash shingles (optional intermediate, can be empty to save space)
     pub shingles: Vec<u64>,
+    /// Winnowed shingles selected for data reduction (optional intermediate, can be empty)
     pub winnowed: Vec<WinnowedShingle>,
+    /// **MinHash signature - the LSH output used for similarity search**. This is the primary 
+    /// value that should be stored in the index for perceptual matching.
     pub minhash: Vec<u64>,
     pub meta: PerceptualMeta,
 }
@@ -79,6 +83,15 @@ pub struct PerceptualMeta {
 
 `PerceptualError` captures invalid configuration (zero/overflowing parameters, unsupported version) and situations where the token stream is too short (`NotEnoughTokens`).
 
+## Summary: What to Store in the Index
+
+**Only `PerceptualFingerprint.minhash` (the `Vec<u64>`) should be stored** for similarity search. The other fields are intermediate artifacts:
+
+- `shingles` and `winnowed` are computed for debugging/analysis only
+- Set `include_intermediates: false` in production to save memory
+- The MinHash signature enables Jaccard similarity estimation via LSH
+- Downstream code (index, matcher) only uses `minhash`, never the intermediate fields
+
 ## Public API
 
 ```rust
@@ -100,7 +113,23 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
 - `winnow_minq` implements a monotonic deque with rightmost tie-breaking for consistent minima. The deque stores candidate indices in non-decreasing hash order, evicts stale entries as the window slides, and inspects the **front** element so we truly pick the minimum hash (older revisions accidentally peeked at the back, selecting maxima). When hashes tie, newer candidates replace older ones to enforce deterministic rightmost minima.
 - `minhash_signature` supports optional Rayon-backed parallelism when `cfg.use_parallel` is `true`.
 
-### Winnowing behavior
+### MinHash - The LSH Implementation
+
+**MinHash is the actual LSH (Locality-Sensitive Hashing) implementation**, not winnowing. It produces fixed-size signatures where similar documents have similar signatures with high probability.
+
+**How it works**:
+- Takes the unique winnowed shingle hashes as input
+- Computes `m` independent hash functions (where `m = bands × rows`)
+- Each signature slot is the minimum hash value for that permutation
+- The bands×rows structure enables efficient similarity search:
+  - Documents sharing any band (all rows match) are candidate matches
+  - More bands = higher recall, fewer bands = higher precision
+
+**The resulting `minhash: Vec<u64>`** is what enables approximate Jaccard similarity estimation and powers the perceptual similarity search in the index.
+
+### Winnowing behavior (Data Reduction, NOT LSH)
+
+**Important**: Winnowing is a preprocessing optimization to reduce data size, NOT a locality-sensitive hashing technique. It simply selects a subset of shingles to reduce computation time for the subsequent MinHash step.
 
 `winnow_minq` guarantees coverage even when `w` is larger than the shingle count by clamping to at least one window. Each step:
 
@@ -108,15 +137,15 @@ pub fn minhash_signature(unique_shingles: &[u64], m: usize, cfg: &PerceptualConf
 2. Pops trailing candidates whose hash is greater than or equal to the new entrant.
 3. Emits the front index if it differs from the previously published shingle.
 
-This mirrors the classic winnowing algorithm and produces deterministic fingerprints for deduplication and similarity scoring.
+**Trade-off**: Larger window size (w) = fewer shingles = faster MinHash computation, but potentially slightly reduced similarity accuracy. The default w=4 reduces shingles by ~75% while maintaining practical similarity detection quality.
 
 ### Configuration Fields
 
 - `version` - Semantic version of the configuration; must be >= 1. Any change that affects fingerprints requires a bump.
 - `k` - Tokens per shingle window. Larger values capture longer phrases while reducing the number of shingles; defaults to 9.
-- `w` - Winnowing window size (in shingles). Smaller windows retain more fingerprints; defaults to 4. When `w` exceeds the number of shingles we treat the entire document as a single window so at least one fingerprint is emitted.
-- `minhash_bands` - Number of MinHash bands. Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
-- `minhash_rows_per_band` - Rows per band. Defaults to 8, producing 128 MinHash values with the default band count.
+- `w` - Winnowing window size (in shingles). Smaller windows retain more fingerprints; defaults to 4. This is a performance tuning parameter, not an LSH parameter. When `w` exceeds the number of shingles we treat the entire document as a single window so at least one fingerprint is emitted.
+- `minhash_bands` - Number of MinHash bands for LSH. This is the LSH parameter that controls recall vs precision trade-off: more bands = higher recall (find more similar docs), fewer bands = higher precision (fewer false positives). Together with `minhash_rows_per_band` it defines signature length; defaults to 16.
+- `minhash_rows_per_band` - Rows per band for LSH. Defaults to 8, producing 128 MinHash values with the default band count. The bands×rows structure creates the LSH signature that enables approximate similarity search.
 - `seed` - Master seed feeding both rolling hash and MinHash permutations for deterministic output.
 - `use_parallel` - Enables Rayon-backed parallel MinHash computation when `true`.
 - `include_intermediates` - When `false`, the returned `PerceptualFingerprint` omits `shingles` and `winnowed` content (they are computed internally but cleared before return) to reduce memory and storage. This does not change the MinHash result.

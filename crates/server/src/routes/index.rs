@@ -21,11 +21,21 @@ pub struct IndexInsertRequest {
     /// Canonical hash
     pub canonical_hash: String,
 
-    /// Optional perceptual fingerprint (MinHash values as strings)
+    /// Optional perceptual fingerprint for similarity search.
+    ///
+    /// This must be the **MinHash signature** (`Vec<u64>`) from `PerceptualFingerprint.minhash`,
+    /// not the full fingerprint struct. The MinHash signature enables approximate Jaccard
+    /// similarity search via Locality-Sensitive Hashing (LSH).
+    ///
+    /// Generate via: `perceptualize_tokens(&tokens, &config)?.minhash`
     #[serde(default)]
     pub perceptual_fingerprint: Option<Vec<u64>>,
 
-    /// Optional semantic embedding
+    /// Optional semantic embedding for vector similarity search.
+    ///
+    /// Raw f32 embedding vector from the semantic layer. The server automatically
+    /// quantizes this to i8 for storage. Use `semanticize()` or `semanticize_document()`
+    /// from the semantic crate to generate embeddings.
     #[serde(default)]
     pub semantic_embedding: Option<Vec<f32>>,
 
@@ -90,7 +100,28 @@ fn default_top_k() -> usize {
     10
 }
 
-/// Insert a record into the index
+/// Insert a record into the index.
+///
+/// This endpoint accepts document data with optional perceptual and semantic fingerprints
+/// for similarity search. The perceptual fingerprint enables Jaccard similarity via MinHash LSH,
+/// while the semantic embedding enables cosine similarity via vector search.
+///
+/// # Field Processing
+/// - `perceptual_fingerprint`: Stored directly as MinHash signature for LSH-based search
+/// - `semantic_embedding`: Automatically quantized from f32 to i8 (scale=100.0) for storage
+/// - `metadata`: Merged with doc_id and tenant_id fields
+///
+/// # Example Request Body
+/// ```json
+/// {
+///   "doc_id": "doc-123",
+///   "canonical_hash": "sha256_hex...",
+///   "perceptual_fingerprint": [123456789, 987654321, ...],
+///   "semantic_embedding": [0.1, 0.2, 0.3, ...],
+///   "tenant_id": "tenant-a",
+///   "metadata": {"title": "Example Doc"}
+/// }
+/// ```
 pub async fn insert_record(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<IndexInsertRequest>,

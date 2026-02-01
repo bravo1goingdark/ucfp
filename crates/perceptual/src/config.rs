@@ -24,14 +24,16 @@ pub struct PerceptualConfig {
     /// This controls local context sensitivity. Larger values are more robust
     /// to noise but less tolerant to reordering.
     pub k: usize,
-    /// Window size for winnowing.
+    /// Window size for winnowing (performance optimization, NOT LSH).
     ///
-    /// Determines how aggressively shingle hashes are subsampled. Larger
-    /// windows keep fewer shingles.
+    /// Determines how aggressively shingle hashes are subsampled before MinHash.
+    /// Larger windows keep fewer shingles, making MinHash faster but potentially
+    /// slightly less accurate. This is a preprocessing optimization, not an LSH parameter.
     pub w: usize,
-    /// Number of bands for MinHash.
+    /// Number of bands for MinHash LSH. More bands = higher recall, fewer = higher precision.
+    /// This LSH parameter controls the approximate nearest neighbor search trade-off.
     pub minhash_bands: usize,
-    /// Number of rows per band for MinHash.
+    /// Number of rows per band for MinHash LSH. Defines signature length with minhash_bands.
     pub minhash_rows_per_band: usize,
     /// Random seed for deterministic hashing.
     ///

@@ -25,18 +25,18 @@
 //!     shingle is hashed into a 64‑bit integer using a deterministic rolling
 //!     hash algorithm. This captures the local structure of the text.
 //!
-//! 2.  **Winnowing**: To reduce the number of fingerprints while preserving a
-//!     guarantee on matching, a winnowing algorithm is applied to the shingle
-//!     hashes. It selects a subset of shingles by choosing the minimum hash
-//!     value within a sliding window. This significantly reduces the data size
-//!     without sacrificing the ability to detect similarities.
+//! 2.  **Winnowing** (Data Reduction): To improve performance, a winnowing
+//!     algorithm selects a subset of shingles by choosing the minimum hash value
+//!     within a sliding window. This reduces the number of shingles fed into
+//!     MinHash by approximately 1/w. **Note**: This is purely a preprocessing
+//!     optimization, NOT a locality-sensitive hashing technique.
 //!
-//! 3.  **MinHashing**: The set of winnowed shingle hashes is used to generate a
-//!     fixed‑size MinHash signature. This signature is a compact representation
-//!     of the document's content that can be efficiently compared with other
-//!     signatures to estimate Jaccard similarity. The implementation supports
-//!     optional parallelism via Rayon for improved performance on large
-//!     documents.
+//! 3.  **MinHashing** (LSH): The actual LSH (Locality-Sensitive Hashing)
+//!     implementation that generates a fixed-size signature from the winnowed
+//!     shingles. The bands×rows structure (`minhash_bands` × `minhash_rows_per_band`)
+//!     provides the LSH properties for approximate Jaccard similarity search.
+//!     The resulting `minhash` field is the primary output used for similarity
+//!     comparison and indexing.
 //!
 //! ## Example Usage
 //!
@@ -51,8 +51,12 @@
 //!
 //! let fingerprint = perceptualize_tokens(&tokens, &config).unwrap();
 //!
+//! // The minhash field contains the LSH signature for similarity search
 //! assert!(!fingerprint.minhash.is_empty());
 //! assert_eq!(fingerprint.meta.k, 3);
+//!
+//! // For indexing and similarity comparison, use fingerprint.minhash (Vec<u64>)
+//! // The shingles and winnowed fields are intermediate artifacts for debugging
 //! ```
 //!
 pub mod config;

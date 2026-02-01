@@ -17,7 +17,10 @@ pub struct MatchRequest {
     #[serde(default)]
     pub tenant_id: Option<String>,
 
-    /// Match strategy: "perceptual", "semantic", or "hybrid"
+    /// Match strategy for similarity search:
+    /// - `"perceptual"`: Jaccard similarity via MinHash LSH (exact/shingle-level similarity)
+    /// - `"semantic"`: Cosine similarity via quantized embeddings (meaning/vector similarity)
+    /// - `"hybrid"`: Combines both strategies (default)
     #[serde(default = "default_strategy")]
     pub strategy: String,
 
@@ -67,7 +70,24 @@ fn default_oversample() -> f32 {
     1.5
 }
 
-/// Match documents against query
+/// Match documents against query using perceptual and/or semantic similarity.
+///
+/// This endpoint searches the index for documents similar to the query text.
+/// The similarity strategy determines which fingerprint type is used:
+///
+/// - **Perceptual**: Uses MinHash LSH signatures for Jaccard similarity.
+///   Best for detecting near-duplicates, plagiarism, or verbatim reuse.
+///   Documents are similar if they share many shingles (exact text chunks).
+///
+/// - **Semantic**: Uses quantized embeddings for cosine similarity.
+///   Best for finding conceptually related content.
+///   Documents are similar if their meanings are close in vector space.
+///
+/// - **Hybrid**: Combines both perceptual and semantic signals.
+///
+/// # Query Processing
+/// The query text is automatically processed through the same pipeline (canonicalize →
+/// perceptualize and/or embed) before matching against indexed documents.
 pub async fn match_documents(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<MatchRequest>,
