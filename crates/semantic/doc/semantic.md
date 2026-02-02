@@ -299,7 +299,7 @@ use semantic::{semanticize, SemanticConfig};
 
 let cfg = SemanticConfig {
     mode: "api".into(),
-    api_url: Some("https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5".into()),
+    api_url: Some("https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction".into()),
     api_auth_header: Some("Bearer hf_xxx".into()),
     api_provider: Some("hf".into()),
     ..Default::default()

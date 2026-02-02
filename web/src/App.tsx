@@ -1,11 +1,6 @@
 import { useEffect, useState } from 'react'
-import './App.css'
-import Hero from './components/Hero'
-import Features from './components/Features'
-import Pipeline from './components/Pipeline'
-import Performance from './components/Performance'
-import ServerApi from './components/ServerApi'
-import Modalities from './components/Modalities'
+import './styles/App.css'
+import LandingPage from './pages/LandingPage'
 import Footer from './components/Footer'
 import Navigation from './components/Navigation'
 import { useDarkMode } from './hooks/useDarkMode'
@@ -26,12 +21,7 @@ function App() {
     <div className="app">
       <Navigation scrolled={scrolled} theme={theme} toggleTheme={toggleTheme} />
       <main>
-        <Hero />
-        <Features />
-        <Pipeline />
-        <Performance />
-        <ServerApi />
-        <Modalities />
+        <LandingPage />
       </main>
       <Footer />
     </div>

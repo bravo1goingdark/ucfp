@@ -92,16 +92,26 @@ When adding new modality crates (image, audio, video, document):
 Run the same commands that CI executes before pushing:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --all --all-targets -- -D warnings
-cargo test --all
+./run-ci-local.sh
 ```
 
-If your change only touches a subset of crates, you can run the commands with `-p <crate>` while
-iterating, but make sure to run the full workspace versions before submitting a PR. CI executes the
-exact triplet defined in `.github/workflows/ci.yml`.
+This script runs all the same checks as CI: formatting, linting, tests, builds, and documentation checks. It's recommended to run this script before pushing any code to ensure all checks pass locally.
+
+If your change only touches a subset of crates, you can run individual commands while iterating, but make sure to run the full script before submitting a PR. CI executes the exact same checks defined in `.github/workflows/ci.yml`.
 
 ### Additional guidance
+
+- Avoid unnecessary allocations or clones on hot paths. If you need convenience helpers, prefer
+  borrowing APIs (see `Token: AsRef<str>` for reference) or scoped `impl`s.
+- Reuse the shared error enums (`PipelineError`, `IngestError`, etc.) instead of ad hoc string
+  errors so that telemetry remains consistent.
+- Update `PipelineMetrics` spans whenever you create new pipeline stages or metrics so latency
+  reporting stays accurate.
+- Keep public APIs documented with `///` comments and include examples or tests when behavior changes.
+- When touching `proto/` definitions, regenerate the artifacts and commit the updated files as part
+  of the same change.
+- **Document all public items**: Every `pub struct`, `pub enum`, `pub fn`, and `pub trait` must have
+  a doc comment explaining its purpose and usage.
 
 - Avoid unnecessary allocations or clones on hot paths. If you need convenience helpers, prefer
   borrowing APIs (see `Token: AsRef<str>` for reference) or scoped `impl`s.

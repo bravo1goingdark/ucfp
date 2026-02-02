@@ -20,7 +20,6 @@ static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
         .pool_max_idle_per_host(32)
-        .http2_prior_knowledge()
         .build()
         .expect("Failed to build HTTP client")
 });

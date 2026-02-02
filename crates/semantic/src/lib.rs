@@ -53,6 +53,9 @@
 //! ```
 //!
 //! ### Remote API Inference
+//!
+//! Use Hugging Face Inference API for remote embedding generation:
+//!
 //! ```no_run
 //! use semantic::{semanticize, SemanticConfig};
 //!
@@ -60,15 +63,26 @@
 //! async fn main() {
 //!     let cfg = SemanticConfig {
 //!         mode: "api".into(),
-//!         api_url: Some("https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5".into()),
+//!         // Primary endpoint (router.huggingface.co)
+//!         api_url: Some("https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction".into()),
 //!         api_auth_header: Some("Bearer YOUR_HF_TOKEN".into()),
-//!         api_provider: Some("hf".into()),
+//!         api_provider: Some("auto".into()),
 //!         ..Default::default()
 //!     };
 //!
 //!     let embedding = semanticize("doc-2", "Another test.", &cfg).await.unwrap();
 //! }
 //! ```
+//!
+//! **Supported API Endpoints:**
+//! - **Hugging Face Router** (Recommended): `https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction`
+//! - **Hugging Face API**: `https://api-inference.huggingface.co/models/{model}`
+//!
+//! **Environment Variables:**
+//! - `UFP_SEMANTIC_API_URL`: API endpoint URL
+//! - `UFP_SEMANTIC_API_TOKEN`: Hugging Face API token
+//!
+//! See the `api_embed` example for complete usage.
 
 pub mod config;
 pub mod error;

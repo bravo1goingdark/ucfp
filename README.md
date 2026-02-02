@@ -266,18 +266,9 @@ All UCFP features are **runtime-configurable** — no restarts or redeploys requ
 
 ## Architecture
 
-```
-+---------+    +-----------+    +--------------------+    +---------+    +-------+
-|  ingest |--->| canonical |--->|perceptual/semantic |--->|  index  |--->| match |
-+---------+    +-----------+    +--------------------+    +---------+    +-------+
-                                                                  |
-                                                                  v
-                                                            +-----------+
-                                                            | ANN/HNSW  |
-                                                            +-----------+
-```
+![UCFP Architecture Diagram](ucfp.png)
 
-The pipeline consists of six stages, each with a specific responsibility. Each crate can be used independently, or you can use the root `ucfp` crate for convenient orchestration.
+*The pipeline consists of six stages, each with a specific responsibility. Each crate can be used independently, or you can use the root `ucfp` crate for convenient orchestration.*
 
 ### Key Features
 
@@ -423,13 +414,14 @@ cargo run --example pipeline_metrics
 
 ---
 
-## Contributing
+## Development
 
-We welcome fixes, optimizations, and new modalities!
+Before pushing code, run the local CI pipeline to ensure all checks pass:
 
-Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) for:
-- Workflow guidelines
-- Required checks (`cargo fmt`, `cargo clippy`, `cargo test`)
-- Documentation expectations
+```bash
+./run-ci-local.sh
+```
+
+This script runs the same checks as the CI pipeline: formatting, linting, tests, builds, and documentation validation. See [CONTRIBUTING.md](CONTRIBUTING.md) for full development guidelines.
 
 ---

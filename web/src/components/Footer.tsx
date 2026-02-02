@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { Fingerprint, Github } from 'lucide-react'
-import './Footer.css'
+import '../styles/Footer.css'
 
 export default function Footer() {
   return (
@@ -22,9 +22,12 @@ export default function Footer() {
           </div>
 
           <div className="footer-links">
-            <a href="#features">Features</a>
+            <a href="#problem">Problem</a>
+            <a href="#solution">Solution</a>
             <a href="#pipeline">Pipeline</a>
-            <a href="#modalities">Modalities</a>
+            <a href="#benefits">Benefits</a>
+            <a href="#status">Status</a>
+            <a href="#faq">FAQ</a>
             <a href="https://github.com/bravo1goingdark/ucfp" target="_blank" rel="noopener noreferrer">
               <Github size={18} />
             </a>

@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Fingerprint, Menu, X, Github, Sun, Moon } from 'lucide-react'
 import { useState } from 'react'
-import './Navigation.css'
+import '../styles/Navigation.css'
 
 interface NavigationProps {
   scrolled: boolean
@@ -13,11 +13,12 @@ export default function Navigation({ scrolled, theme, toggleTheme }: NavigationP
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const navLinks = [
-    { href: '#features', label: 'Features' },
+    { href: '#problem', label: 'Problem' },
+    { href: '#solution', label: 'Solution' },
     { href: '#pipeline', label: 'Pipeline' },
-    { href: '#performance', label: 'Performance' },
-    { href: '#server', label: 'API' },
-    { href: '#modalities', label: 'Modalities' },
+    { href: '#benefits', label: 'Benefits' },
+    { href: '#status', label: 'Status' },
+    { href: '#faq', label: 'FAQ' },
   ]
 
   return (
