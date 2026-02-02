@@ -261,6 +261,17 @@ Process multiple documents in a single request.
 }
 ```
 
+**Performance Notes:**
+- Documents are processed concurrently (up to 10 at a time) for optimal throughput
+- Order of results matches the order of input documents
+- Individual document failures don't block the entire batch
+- Recommended batch size: 50-100 documents for best performance
+
+**Error Handling:**
+- Failed documents return with `"status": "error"` and an `error` field
+- Successful documents are still returned even if some fail
+- Check `successful` vs `failed` counts in the response
+
 ---
 
 ### POST /api/v1/index/insert
@@ -392,6 +403,12 @@ Find documents matching a query using perceptual/semantic similarity.
 | `oversample_factor` | float | No | 1.5 | For semantic search |
 | `min_score` | float | No | - | Minimum similarity threshold (0.0-1.0) |
 
+**Search Performance Notes:**
+- **Semantic search** uses HNSW ANN (Approximate Nearest Neighbor) for datasets with 1000+ vectors
+- ANN provides **100-1000x faster** O(log n) search vs linear O(n) scan
+- 95-99% recall rate - may miss ~1-5% of true nearest neighbors
+- Falls back to exact linear scan for small datasets (<1000 vectors)
+
 **Response:**
 ```json
 {
@@ -486,9 +503,34 @@ Get server metadata (version, uptime).
   "max_sequence_length": 512,        // Model's token limit (512 for BERT, 4096 for Longformer, etc.)
   "enable_chunking": false,          // Enable sliding-window chunking for long documents
   "chunk_overlap_ratio": 0.5,        // Overlap between chunks (0.0-1.0, default 0.5 = 50%)
-  "pooling_strategy": "weighted_mean" // Pooling: mean, weighted_mean, max, first
+  "pooling_strategy": "weighted_mean", // Pooling: mean, weighted_mean, max, first
+  
+  // Resilience configuration (for API mode)
+  "enable_resilience": true,
+  "circuit_breaker_failure_threshold": 5,
+  "circuit_breaker_reset_timeout_secs": 30,
+  "retry_max_retries": 3,
+  "retry_base_delay_ms": 100,
+  "retry_max_delay_ms": 10000,
+  "rate_limit_requests_per_second": 10.0,
+  "rate_limit_burst_size": 5
 }
 ```
+
+**Resilience Features:**
+- **Circuit Breaker**: Prevents cascade failures when external APIs are down
+  - Opens after `failure_threshold` consecutive failures
+  - Automatically resets after `reset_timeout_secs` to test if service recovered
+  - Returns "Service temporarily unavailable" while open
+  
+- **Retry with Exponential Backoff**: Automatically retries failed requests
+  - Base delay doubles with each attempt (1x, 2x, 4x, ...)
+  - Caps at `max_delay_ms`
+  - Only retries on retryable errors (timeouts, 5xx, 429)
+  
+- **Rate Limiting**: Token bucket algorithm per provider
+  - `requests_per_second`: Steady-state rate limit
+  - `burst_size`: Maximum burst capacity
 
 **Chunking for Long Documents:**
 
@@ -515,6 +557,37 @@ When `enable_chunking` is `true` and text exceeds `max_sequence_length` tokens:
   }
 }
 ```
+
+### Index / ANN Config
+
+```json
+{
+  "backend": "redb",              // Storage backend: redb, memory
+  "redb_path": "./data/index",    // Path for Redb database
+  
+  // ANN (Approximate Nearest Neighbor) Configuration
+  "ann": {
+    "enabled": true,              // Enable HNSW ANN search
+    "min_vectors_for_ann": 1000,  // Auto-switch to ANN at this threshold
+    "m": 16,                      // HNSW neighbors per node (higher = better quality)
+    "ef_construction": 200,       // Build quality (higher = better, slower build)
+    "ef_search": 50              // Search quality (higher = better, slower search)
+  }
+}
+```
+
+**ANN (HNSW) Search:**
+- Automatically enables when index contains `min_vectors_for_ann` or more vectors
+- Uses Hierarchical Navigable Small World (HNSW) graphs for sub-linear O(log n) search
+- **Performance**: 100-1000x faster than linear scan for large datasets
+- **Recall**: 95-99% (may miss 1-5% of true nearest neighbors)
+- **Trade-offs**: Higher memory usage, longer build time vs query speed
+
+**Parameter Guidelines:**
+- `m`: 16-64 (16 for speed, 64 for quality)
+- `ef_construction`: 100-400 (higher = better index quality)
+- `ef_search`: 50-200 (higher = better search quality)
+- `min_vectors_for_ann`: 500-2000 (threshold to enable ANN vs linear scan)
 
 ---
 

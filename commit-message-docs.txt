@@ -1,0 +1,34 @@
+docs: update documentation for high-throughput optimizations
+
+Updated all documentation to reflect the Phase 1 & 2 performance optimizations:
+
+**README.md:**
+- Added ANN/HNSW configuration options
+- Added resilience configuration (circuit breaker, retry, rate limiting)
+- Updated performance metrics with optimization gains (5-10x, 100-1000x)
+- Updated architecture diagram with ANN component
+- Added performance improvement highlights table
+- Updated end-to-end performance numbers
+
+**crates/server/API.md:**
+- Added batch processing performance notes and recommendations
+- Documented ANN search behavior and performance characteristics
+- Added resilience configuration options (circuit breaker, retry, rate limiting)
+- Added Index/ANN configuration section with parameter guidelines
+- Updated semantic search documentation with ANN fallbacks
+
+**crates/server/CHANGELOG.md:**
+- Added v0.2.0 release notes with all optimization features
+- Documented performance improvements, new features, and configuration additions
+
+**web/src/components/Performance.tsx:**
+- Updated stage metrics with optimization highlights
+- Added end-to-end performance improvements column
+- Added performance highlights section (5-10x, 100-1000x, 10x gains)
+- Updated note about ANN automatic activation
+
+**web/src/components/Features.tsx:**
+- Added ANN Search feature with HNSW description
+- Added Resilient APIs feature with circuit breaker/retry description
+- Added highlight styling for new features
+- Updated subtitle to mention high-throughput optimizations
