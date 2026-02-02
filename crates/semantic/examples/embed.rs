@@ -2,7 +2,8 @@ use std::{env, error::Error, path::PathBuf};
 
 use semantic::{semanticize, SemanticConfig, SemanticEmbedding};
 
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let doc_id = args.next().unwrap_or_else(|| "example-doc".into());
     let text = args
@@ -29,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let embedding: SemanticEmbedding = semanticize(&doc_id, &text, &cfg)?;
+    let embedding: SemanticEmbedding = semanticize(&doc_id, &text, &cfg).await?;
     println!("doc_id: {}", embedding.doc_id);
     println!("tier: {}", embedding.tier);
     println!("dim: {}", embedding.embedding_dim);

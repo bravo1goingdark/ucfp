@@ -104,7 +104,7 @@ mod backend;
 mod query;
 
 use crate::ann::AnnConfig;
-use std::sync::RwLock;
+use dashmap::DashMap;
 
 mod metadata_serde {
     use serde::de::Error as DeError;
@@ -343,16 +343,20 @@ impl IndexError {
     }
 }
 
-/// Index structure
+/// Index structure with lock-free concurrent access via DashMap and ANN support
 pub struct UfpIndex {
     /// The backend used for storage, abstracted behind a trait.
     backend: Box<dyn IndexBackend>,
     /// The configuration for index.
     cfg: IndexConfig,
-    /// Inverted index for MinHash signatures to enable O(log n) lookup instead of O(n) scan
-    perceptual_index: RwLock<hashbrown::HashMap<u64, Vec<String>>>,
-    /// Simple vector index for semantic embeddings to reduce full scans
-    semantic_index: RwLock<Vec<(String, QuantizedVec)>>,
+    /// Lock-free inverted index for MinHash signatures to enable concurrent O(1) lookup
+    perceptual_index: DashMap<u64, Vec<String>>,
+    /// Lock-free index for semantic embeddings enabling concurrent access
+    semantic_index: DashMap<String, QuantizedVec>,
+    /// ANN index for fast approximate semantic search (HNSW)
+    ann_index: std::sync::Mutex<Option<crate::ann::AnnIndex>>,
+    /// Tracks if ANN index needs rebuilding
+    ann_needs_rebuild: std::sync::atomic::AtomicBool,
 }
 
 impl UfpIndex {
@@ -366,11 +370,71 @@ impl UfpIndex {
     /// Build an index with a custom backend (e.g., in-memory for tests).
     /// This is useful for dependency injection and testing.
     pub fn with_backend(cfg: IndexConfig, backend: Box<dyn IndexBackend>) -> Self {
+        let ann_index = if cfg.ann.enabled {
+            // Initialize with placeholder dimension - will be set on first insert
+            Some(crate::ann::AnnIndex::new(0, cfg.ann))
+        } else {
+            None
+        };
+
         Self {
             backend,
             cfg,
-            perceptual_index: RwLock::new(hashbrown::HashMap::new()),
-            semantic_index: RwLock::new(Vec::new()),
+            perceptual_index: DashMap::new(),
+            semantic_index: DashMap::new(),
+            ann_index: std::sync::Mutex::new(ann_index),
+            ann_needs_rebuild: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Get the number of vectors in the semantic index.
+    pub fn semantic_vector_count(&self) -> usize {
+        self.semantic_index.len()
+    }
+
+    /// Check if ANN search should be used for the current dataset size.
+    pub fn should_use_ann(&self) -> bool {
+        self.cfg.ann.enabled && self.semantic_vector_count() >= self.cfg.ann.min_vectors_for_ann
+    }
+
+    /// Rebuild the ANN index if needed.
+    /// This should be called periodically after batch insertions.
+    pub fn rebuild_ann_if_needed(&self) {
+        if self
+            .ann_needs_rebuild
+            .load(std::sync::atomic::Ordering::Relaxed)
+            && self.should_use_ann()
+        {
+            if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+                if let Some(ref mut ann) = *ann_lock {
+                    // Collect all embeddings from DashMap
+                    let mut vectors_to_insert: Vec<(String, Vec<f32>)> = Vec::new();
+                    let mut dimension = 0;
+
+                    for entry in self.semantic_index.iter() {
+                        let hash = entry.key().clone();
+                        let quantized = entry.value();
+
+                        // Dequantize from i8 to f32 for ANN
+                        let float_vec: Vec<f32> =
+                            quantized.iter().map(|&v| v as f32 / 100.0).collect();
+                        dimension = float_vec.len();
+                        vectors_to_insert.push((hash, float_vec));
+                    }
+
+                    // Rebuild ANN index with correct dimension
+                    if dimension > 0 && !vectors_to_insert.is_empty() {
+                        *ann = crate::ann::AnnIndex::new(dimension, self.cfg.ann);
+                        for (hash, vec) in vectors_to_insert {
+                            let _ = ann.insert(hash, vec);
+                        }
+                        ann.build();
+                    }
+
+                    self.ann_needs_rebuild
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
         }
     }
 
@@ -393,20 +457,31 @@ impl UfpIndex {
     pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError> {
         let payload = self.encode_record(rec)?;
 
-        // Update auxiliary indexes for faster queries
+        // Update auxiliary indexes for faster queries using lock-free DashMap
         if let Some(ref perceptual) = rec.perceptual {
-            let mut p_index = self.perceptual_index.write().unwrap();
             for &hash_val in perceptual {
-                p_index
+                self.perceptual_index
                     .entry(hash_val)
-                    .or_insert_with(Vec::new)
-                    .push(rec.canonical_hash.clone());
+                    .and_modify(|v| v.push(rec.canonical_hash.clone()))
+                    .or_insert_with(|| vec![rec.canonical_hash.clone()]);
             }
         }
 
         if let Some(ref embedding) = rec.embedding {
-            let mut s_index = self.semantic_index.write().unwrap();
-            s_index.push((rec.canonical_hash.clone(), embedding.clone()));
+            self.semantic_index
+                .insert(rec.canonical_hash.clone(), embedding.clone());
+
+            // Also insert into ANN index if enabled
+            if self.cfg.ann.enabled {
+                if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+                    if let Some(ref mut ann) = *ann_lock {
+                        // Dequantize from i8 to f32 for ANN
+                        let float_vec: Vec<f32> =
+                            embedding.iter().map(|&v| v as f32 / 100.0).collect();
+                        let _ = ann.insert(rec.canonical_hash.clone(), float_vec);
+                    }
+                }
+            }
         }
 
         self.backend.put(&rec.canonical_hash, &payload)
@@ -465,22 +540,38 @@ impl UfpIndex {
             }
         }
 
-        if !perceptual_updates.is_empty() {
-            let mut p_index = self.perceptual_index.write().unwrap();
-            for (hash_val, canonical_hash) in perceptual_updates {
-                p_index
-                    .entry(hash_val)
-                    .or_insert_with(Vec::new)
-                    .push(canonical_hash.to_string());
+        // Update perceptual index using lock-free DashMap
+        for (hash_val, canonical_hash) in perceptual_updates {
+            self.perceptual_index
+                .entry(hash_val)
+                .and_modify(|v| v.push(canonical_hash.to_string()))
+                .or_insert_with(|| vec![canonical_hash.to_string()]);
+        }
+
+        // Update semantic index using lock-free DashMap
+        let mut ann_needs_rebuild = false;
+        for (canonical_hash, embedding) in semantic_updates {
+            self.semantic_index
+                .insert(canonical_hash.to_string(), embedding.clone());
+
+            // Also insert into ANN index if enabled
+            if self.cfg.ann.enabled {
+                if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+                    if let Some(ref mut ann) = *ann_lock {
+                        // Dequantize from i8 to f32 for ANN
+                        let float_vec: Vec<f32> =
+                            embedding.iter().map(|&v| v as f32 / 100.0).collect();
+                        let _ = ann.insert(canonical_hash.to_string(), float_vec);
+                        ann_needs_rebuild = true;
+                    }
+                }
             }
         }
 
-        if !semantic_updates.is_empty() {
-            let mut s_index = self.semantic_index.write().unwrap();
-            s_index.reserve(semantic_updates.len());
-            for (canonical_hash, embedding) in semantic_updates {
-                s_index.push((canonical_hash.to_string(), embedding.clone()));
-            }
+        // Mark ANN index for rebuild after batch insert
+        if ann_needs_rebuild {
+            self.ann_needs_rebuild
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.backend.batch_put(entries)

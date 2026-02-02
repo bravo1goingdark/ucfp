@@ -2,18 +2,28 @@ use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
-use ureq::AgentBuilder;
 
 use crate::circuit_breaker::{CircuitBreakerManager, CircuitState};
 use crate::normalize::l2_normalize_in_place;
 use crate::rate_limit::{RateLimitManager, RateLimitStats, TokenBucket};
-use crate::retry::{execute_with_retry, is_retryable_error, RetryConfig, RetryResult};
+use crate::retry::{execute_with_retry_async, is_retryable_error, RetryConfig, RetryResult};
 use crate::{SemanticConfig, SemanticEmbedding, SemanticError};
 
 // Global managers for resilience (lazy-initialized)
 static CIRCUIT_BREAKER_MANAGER: Lazy<CircuitBreakerManager> =
     Lazy::new(CircuitBreakerManager::default);
 static RATE_LIMIT_MANAGER: Lazy<RateLimitManager> = Lazy::new(RateLimitManager::default);
+
+// Global HTTP client with connection pooling
+static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+        .pool_max_idle_per_host(32)
+        .http2_prior_knowledge()
+        .build()
+        .expect("Failed to build HTTP client")
+});
 
 #[derive(Clone, Copy)]
 enum ApiProviderKind {
@@ -30,17 +40,8 @@ fn provider_name(cfg: &SemanticConfig) -> String {
         .to_ascii_lowercase()
 }
 
-/// Get or create the agent for this provider (with connection pooling).
-fn get_agent(cfg: &SemanticConfig) -> ureq::Agent {
-    let timeout = Duration::from_secs(cfg.api_timeout_secs.unwrap_or(30));
-    AgentBuilder::new()
-        .timeout(timeout)
-        .timeout_connect(Duration::from_secs(10))
-        .build()
-}
-
 /// Handles the API-based embedding generation with resilience.
-pub(crate) fn semanticize_via_api(
+pub(crate) async fn semanticize_via_api(
     doc_id: &str,
     text: &str,
     cfg: &SemanticConfig,
@@ -77,15 +78,18 @@ pub(crate) fn semanticize_via_api(
     // Execute with retry logic if resilience is enabled
     let response_result = if cfg.enable_resilience {
         let retry_cfg = cfg.retry_config.unwrap_or_default();
-        execute_api_request_with_retry(url, cfg, payload, &retry_cfg, &provider_name_str)
+        execute_api_request_with_retry(url, cfg, payload, &retry_cfg, &provider_name_str).await
     } else {
         // Direct request without retry
-        send_api_request(url, cfg, payload).map(|r| RetryResult {
-            result: Ok(r),
-            attempts: 1,
-            total_duration: Duration::from_millis(0),
-            succeeded: true,
-        })
+        match send_api_request(url, cfg, payload).await {
+            Ok(r) => Ok(RetryResult {
+                result: Ok(r),
+                attempts: 1,
+                total_duration: Duration::from_millis(0),
+                succeeded: true,
+            }),
+            Err(e) => Err(e),
+        }
     };
 
     // Handle response and record metrics
@@ -115,7 +119,7 @@ pub(crate) fn semanticize_via_api(
 }
 
 /// Handles batch API-based embedding generation with resilience.
-pub(crate) fn semanticize_batch_via_api<D, T>(
+pub(crate) async fn semanticize_batch_via_api<D, T>(
     docs: &[(D, T)],
     cfg: &SemanticConfig,
 ) -> Result<Vec<SemanticEmbedding>, SemanticError>
@@ -167,14 +171,17 @@ where
     // Execute with retry logic if resilience is enabled
     let response_result = if cfg.enable_resilience {
         let retry_cfg = cfg.retry_config.unwrap_or_default();
-        execute_api_request_with_retry(url, cfg, payload, &retry_cfg, &provider_name_str)
+        execute_api_request_with_retry(url, cfg, payload, &retry_cfg, &provider_name_str).await
     } else {
-        send_api_request(url, cfg, payload).map(|r| RetryResult {
-            result: Ok(r),
-            attempts: 1,
-            total_duration: Duration::from_millis(0),
-            succeeded: true,
-        })
+        match send_api_request(url, cfg, payload).await {
+            Ok(r) => Ok(RetryResult {
+                result: Ok(r),
+                attempts: 1,
+                total_duration: Duration::from_millis(0),
+                succeeded: true,
+            }),
+            Err(e) => Err(e),
+        }
     };
 
     // Handle response and record metrics
@@ -237,7 +244,7 @@ fn get_rate_limiter(cfg: &SemanticConfig, provider: &str) -> Arc<TokenBucket> {
 }
 
 /// Execute API request with retry logic.
-fn execute_api_request_with_retry(
+async fn execute_api_request_with_retry(
     url: &str,
     cfg: &SemanticConfig,
     payload: Value,
@@ -246,32 +253,34 @@ fn execute_api_request_with_retry(
 ) -> Result<RetryResult<Value>, SemanticError> {
     let url = url.to_string();
     let cfg = cfg.clone();
-    let payload_str = payload.to_string();
 
-    let result = execute_with_retry(retry_cfg, |attempt| {
-        // Log retry attempt
-        if attempt > 0 {
-            eprintln!("[semantic] Retry attempt {attempt} for provider '{provider}'");
-        }
+    let result = execute_with_retry_async(retry_cfg, |attempt| {
+        let url = url.clone();
+        let cfg = cfg.clone();
+        let payload = payload.clone();
 
-        match send_api_request(
-            &url,
-            &cfg,
-            serde_json::from_str(&payload_str).unwrap_or(json!({})),
-        ) {
-            Ok(response) => Ok(response),
-            Err(e) => {
-                let error_str = e.to_string();
-                // Only retry on retryable errors
-                if is_retryable_error(&error_str) {
-                    Err(error_str)
-                } else {
-                    // Non-retryable error - fail immediately
-                    Err(format!("Non-retryable error: {error_str}"))
+        async move {
+            // Log retry attempt
+            if attempt > 0 {
+                eprintln!("[semantic] Retry attempt {attempt} for provider '{provider}'");
+            }
+
+            match send_api_request(&url, &cfg, payload).await {
+                Ok(response) => Ok(response),
+                Err(e) => {
+                    let error_str = e.to_string();
+                    // Only retry on retryable errors
+                    if is_retryable_error(&error_str) {
+                        Err(error_str)
+                    } else {
+                        // Non-retryable error - fail immediately
+                        Err(format!("Non-retryable error: {error_str}"))
+                    }
                 }
             }
         }
-    });
+    })
+    .await;
 
     if result.succeeded {
         Ok(result)
@@ -365,27 +374,34 @@ fn build_api_payload(
     }
 }
 
-fn send_api_request(
+async fn send_api_request(
     url: &str,
     cfg: &SemanticConfig,
     payload: Value,
 ) -> Result<Value, SemanticError> {
-    let agent = get_agent(cfg);
-    let mut request = agent.post(url);
-    request = request.set("Content-Type", "application/json");
+    let mut request = HTTP_CLIENT.post(url);
+    request = request.header("Content-Type", "application/json");
     if let Some(header) = cfg.api_auth_header.as_deref() {
-        request = request.set("Authorization", header);
+        request = request.header("Authorization", header);
     }
 
-    let payload_body = payload.to_string();
     let response = request
-        .send_string(&payload_body)
+        .json(&payload)
+        .send()
+        .await
         .map_err(|e| SemanticError::Download(format!("HTTP request failed: {e}")))?;
 
-    let body = response
-        .into_string()
-        .map_err(|e| SemanticError::Download(format!("Failed to read response: {e}")))?;
-    serde_json::from_str(&body)
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(SemanticError::Download(format!(
+            "HTTP error {status}: {body}"
+        )));
+    }
+
+    response
+        .json::<Value>()
+        .await
         .map_err(|e| SemanticError::Inference(format!("Invalid JSON response: {e}")))
 }
 

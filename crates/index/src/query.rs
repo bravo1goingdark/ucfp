@@ -22,24 +22,81 @@ pub enum QueryMode {
     Perceptual,
 }
 
+/// Chunk size for SIMD-optimized operations
+const SIMD_CHUNK_SIZE: usize = 32;
+
 /// Provides semantic & perceptual retrieval methods
 impl UfpIndex {
     /// Compute cosine similarity between two quantized vectors.
     /// The dot product is computed on the i8 values, then normalized.
+    /// Uses chunked processing for better auto-vectorization.
     #[inline]
     fn cosine_similarity(a: &[i8], b: &[i8]) -> f32 {
         if a.len() != b.len() || a.is_empty() {
             return 0.0;
         }
-        // The dot product can be computed with integer arithmetic for performance.
-        let dot: i32 = a.iter().zip(b).map(|(&x, &y)| x as i32 * y as i32).sum();
-        // The norms are computed on the i32 values to avoid overflow.
-        let norm_a = (a.iter().map(|&x| (x as i32).pow(2)).sum::<i32>() as f32).sqrt();
-        let norm_b = (b.iter().map(|&x| (x as i32).pow(2)).sum::<i32>() as f32).sqrt();
-        if norm_a == 0.0 || norm_b == 0.0 {
+
+        let len = a.len();
+        let mut dot: i32 = 0;
+        let mut norm_a: i32 = 0;
+        let mut norm_b: i32 = 0;
+
+        // Process in chunks for better cache locality and auto-vectorization
+        let chunks = len / SIMD_CHUNK_SIZE;
+        let remainder = len % SIMD_CHUNK_SIZE;
+
+        // Process full chunks
+        for chunk_idx in 0..chunks {
+            let offset = chunk_idx * SIMD_CHUNK_SIZE;
+            let chunk_dot = Self::compute_dot_chunk(
+                &a[offset..offset + SIMD_CHUNK_SIZE],
+                &b[offset..offset + SIMD_CHUNK_SIZE],
+            );
+            let (chunk_norm_a, chunk_norm_b) = Self::compute_norms_chunk(
+                &a[offset..offset + SIMD_CHUNK_SIZE],
+                &b[offset..offset + SIMD_CHUNK_SIZE],
+            );
+            dot += chunk_dot;
+            norm_a += chunk_norm_a;
+            norm_b += chunk_norm_b;
+        }
+
+        // Process remainder
+        if remainder > 0 {
+            let offset = chunks * SIMD_CHUNK_SIZE;
+            let chunk_dot = Self::compute_dot_chunk(&a[offset..], &b[offset..]);
+            let (chunk_norm_a, chunk_norm_b) =
+                Self::compute_norms_chunk(&a[offset..], &b[offset..]);
+            dot += chunk_dot;
+            norm_a += chunk_norm_a;
+            norm_b += chunk_norm_b;
+        }
+
+        let norm_a_f = (norm_a as f32).sqrt();
+        let norm_b_f = (norm_b as f32).sqrt();
+
+        if norm_a_f == 0.0 || norm_b_f == 0.0 {
             return 0.0;
         }
-        dot as f32 / (norm_a * norm_b)
+
+        dot as f32 / (norm_a_f * norm_b_f)
+    }
+
+    /// Compute dot product for a chunk with auto-vectorization hints
+    #[inline(always)]
+    fn compute_dot_chunk(a: &[i8], b: &[i8]) -> i32 {
+        a.iter()
+            .zip(b.iter())
+            .map(|(&x, &y)| (x as i32) * (y as i32))
+            .sum()
+    }
+
+    /// Compute norms for a chunk with auto-vectorization hints
+    #[inline(always)]
+    fn compute_norms_chunk(a: &[i8], b: &[i8]) -> (i32, i32) {
+        let norm_a: i32 = a.iter().map(|&x| (x as i32) * (x as i32)).sum();
+        let norm_b: i32 = b.iter().map(|&x| (x as i32) * (x as i32)).sum();
+        (norm_a, norm_b)
     }
 
     /// Compute Jaccard similarity for perceptual fingerprints (MinHash).
@@ -115,13 +172,11 @@ impl UfpIndex {
         match mode {
             QueryMode::Perceptual => {
                 if let (Some(query_set), Some(_)) = (perceptual_set.as_ref(), query_perceptual) {
-                    let p_index = self.perceptual_index.read().unwrap();
-
-                    // Count candidate frequencies using the inverted index
+                    // Count candidate frequencies using the lock-free inverted index
                     let mut candidate_counts = std::collections::HashMap::new();
                     for &hash_val in query_set {
-                        if let Some(candidates) = p_index.get(&hash_val) {
-                            for candidate_hash in candidates {
+                        if let Some(candidates) = self.perceptual_index.get(&hash_val) {
+                            for candidate_hash in candidates.value() {
                                 *candidate_counts.entry(candidate_hash.clone()).or_insert(0) += 1;
                             }
                         }
@@ -152,22 +207,65 @@ impl UfpIndex {
                 }
             }
             QueryMode::Semantic => {
-                if let Some(query_embedding) = query_embedding {
-                    let s_index = self.semantic_index.read().unwrap();
+                // Try to use ANN if available and dataset is large enough
+                self.rebuild_ann_if_needed();
 
-                    // Simple vector search - in a real implementation this would use ANN
-                    for (candidate_hash, candidate_embedding) in s_index.iter() {
-                        let score = Self::cosine_similarity(query_embedding, candidate_embedding);
-                        if score > 0.0 {
-                            if let Some(rec_data) = self.backend.get(candidate_hash)? {
-                                let rec = self.decode_record(&rec_data);
-                                if let Ok(record) = rec {
-                                    results.push(QueryResult {
-                                        canonical_hash: candidate_hash.clone(),
-                                        score,
-                                        metadata: record.metadata.clone(),
-                                    });
-                                    processed_hashes.insert(candidate_hash.clone());
+                if let Some(query_embedding) = query_embedding {
+                    if self.should_use_ann() {
+                        // Use ANN for approximate search
+                        if let Ok(ann_lock) = self.ann_index.try_lock() {
+                            if let Some(ref ann) = *ann_lock {
+                                // Convert query from i8 to f32
+                                let query_f32: Vec<f32> =
+                                    query_embedding.iter().map(|&v| v as f32 / 100.0).collect();
+
+                                if let Ok(ann_results) = ann.search(&query_f32, top_k * 2) {
+                                    for ann_result in ann_results {
+                                        if let Some(candidate_hash) = ann.get_id(ann_result.index) {
+                                            if let Some(rec_data) =
+                                                self.backend.get(candidate_hash)?
+                                            {
+                                                if let Ok(record) = self.decode_record(&rec_data) {
+                                                    // Convert distance back to similarity
+                                                    let score =
+                                                        1.0 - ann_result.distance.clamp(0.0, 1.0);
+                                                    if score > 0.0 {
+                                                        results.push(QueryResult {
+                                                            canonical_hash: candidate_hash.clone(),
+                                                            score,
+                                                            metadata: record.metadata.clone(),
+                                                        });
+                                                        processed_hashes
+                                                            .insert(candidate_hash.clone());
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Fall back to linear scan if ANN not available or didn't return enough results
+                    if results.is_empty() {
+                        // Simple vector search using lock-free DashMap
+                        for entry in self.semantic_index.iter() {
+                            let candidate_hash = entry.key();
+                            let candidate_embedding = entry.value();
+                            let score =
+                                Self::cosine_similarity(query_embedding, candidate_embedding);
+                            if score > 0.0 && !processed_hashes.contains(candidate_hash) {
+                                if let Some(rec_data) = self.backend.get(candidate_hash)? {
+                                    let rec = self.decode_record(&rec_data);
+                                    if let Ok(record) = rec {
+                                        results.push(QueryResult {
+                                            canonical_hash: candidate_hash.clone(),
+                                            score,
+                                            metadata: record.metadata.clone(),
+                                        });
+                                        processed_hashes.insert(candidate_hash.clone());
+                                    }
                                 }
                             }
                         }
@@ -274,6 +372,37 @@ mod tests {
             .search(&query, QueryMode::Semantic, 0)
             .expect("semantic search");
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn cosine_similarity_chunked_matches_scalar() {
+        // Test that chunked implementation matches reference
+        let a = vec![10_i8, 20, 30, 40, 50];
+        let b = vec![5_i8, 10, 15, 20, 25];
+
+        let result = UfpIndex::cosine_similarity(&a, &b);
+
+        // Compute reference
+        let dot: i32 = a
+            .iter()
+            .zip(&b)
+            .map(|(&x, &y)| (x as i32) * (y as i32))
+            .sum();
+        let norm_a = (a.iter().map(|&x| (x as i32) * (x as i32)).sum::<i32>() as f32).sqrt();
+        let norm_b = (b.iter().map(|&x| (x as i32) * (x as i32)).sum::<i32>() as f32).sqrt();
+        let expected = dot as f32 / (norm_a * norm_b);
+
+        assert!((result - expected).abs() < 0.0001);
+    }
+
+    #[test]
+    fn cosine_similarity_large_vector() {
+        // Test with vector larger than chunk size
+        let a: Vec<i8> = (0..100).map(|i| (i % 127) as i8).collect();
+        let b: Vec<i8> = (0..100).map(|i| ((i + 10) % 127) as i8).collect();
+
+        let result = UfpIndex::cosine_similarity(&a, &b);
+        assert!((0.0..=1.0).contains(&result));
     }
 
     fn seed_index(records: Vec<IndexRecord>) -> UfpIndex {

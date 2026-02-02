@@ -10,7 +10,8 @@ use semantic::{semanticize, SemanticConfig};
 /// UFP_SEMANTIC_API_TOKEN=hf_xxx \
 /// cargo run -p semantic --example api_embed -- "doc-1" "Some text"
 /// ```
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let doc_id = args.next().unwrap_or_else(|| "api-doc".into());
     let text = args
@@ -34,7 +35,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("API env vars missing; falling back to deterministic stub.");
     }
 
-    let embedding = semanticize(&doc_id, &text, &cfg)?;
+    let embedding = semanticize(&doc_id, &text, &cfg).await?;
     println!("doc_id: {}", embedding.doc_id);
     println!("model: {}", embedding.model_name);
     println!("tier: {}", embedding.tier);

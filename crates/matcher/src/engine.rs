@@ -151,9 +151,13 @@ impl DefaultMatcher {
         let doc = canonicalize(&canonical_record.doc_id, text, &self.canonical_cfg)
             .map_err(|e| MatchError::Canonical(e.to_string()))?;
 
-        // Semantic stage
-        let embedding = semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg)
-            .map_err(|e| MatchError::Semantic(e.to_string()))?;
+        // Semantic stage - use block_on for async semanticize
+        let embedding = tokio::task::block_in_place(|| {
+            tokio::runtime::Runtime::new().unwrap().block_on(async {
+                semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg).await
+            })
+        })
+        .map_err(|e| MatchError::Semantic(e.to_string()))?;
 
         Ok(embedding)
     }

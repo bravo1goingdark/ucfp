@@ -1,6 +1,5 @@
 use std::{
-    fs::{self, File},
-    io,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -22,16 +21,19 @@ pub(crate) fn should_fallback_to_stub(err: &SemanticError) -> bool {
 }
 
 /// Ensures that the model and tokenizer exist locally, downloading them when URLs are provided.
-pub(crate) fn resolve_model_assets(cfg: &SemanticConfig) -> Result<ModelAssets, SemanticError> {
+pub(crate) async fn resolve_model_assets(
+    cfg: &SemanticConfig,
+) -> Result<ModelAssets, SemanticError> {
     let model_path = ensure_local_file(&cfg.model_path, cfg.model_url.as_deref(), || {
         SemanticError::ModelNotFound(cfg.model_path.display().to_string())
-    })?;
+    })
+    .await?;
 
     let tokenizer_target = tokenizer_storage_path(cfg)?;
-    let tokenizer_path =
-        ensure_local_file(&tokenizer_target, cfg.tokenizer_url.as_deref(), || {
-            SemanticError::TokenizerMissing(cfg.model_name.clone())
-        })?;
+    let tokenizer_path = ensure_local_file(&tokenizer_target, cfg.tokenizer_url.as_deref(), || {
+        SemanticError::TokenizerMissing(cfg.model_name.clone())
+    })
+    .await?;
 
     Ok(ModelAssets {
         model_path,
@@ -60,7 +62,7 @@ fn tokenizer_storage_path(cfg: &SemanticConfig) -> Result<PathBuf, SemanticError
 }
 
 /// Returns `target` if it already exists, otherwise attempts to download `remote_url`.
-fn ensure_local_file<F>(
+async fn ensure_local_file<F>(
     target: &Path,
     remote_url: Option<&str>,
     on_missing: F,
@@ -73,7 +75,7 @@ where
     }
 
     if let Some(url) = remote_url {
-        download_to_path(target, url)?;
+        download_to_path(target, url).await?;
         return Ok(target.to_path_buf());
     }
 
@@ -81,27 +83,31 @@ where
 }
 
 /// Downloads `url` into `target`, creating parent directories as needed.
-fn download_to_path(target: &Path, url: &str) -> Result<(), SemanticError> {
+async fn download_to_path(target: &Path, url: &str) -> Result<(), SemanticError> {
     if let Some(parent) = target.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent)?;
         }
     }
 
-    let response = ureq::get(url)
-        .call()
+    let response = reqwest::get(url)
+        .await
         .map_err(|e| SemanticError::Download(e.to_string()))?;
-    if !(200..400).contains(&response.status()) {
+
+    let status = response.status();
+    if !status.is_success() {
         return Err(SemanticError::Download(format!(
             "unexpected status {} while fetching {}",
-            response.status(),
-            url
+            status, url
         )));
     }
 
-    let mut reader = response.into_reader();
-    let mut file = File::create(target)?;
-    io::copy(&mut reader, &mut file)?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| SemanticError::Download(e.to_string()))?;
+
+    fs::write(target, &bytes)?;
     Ok(())
 }
 

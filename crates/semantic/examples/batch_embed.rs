@@ -8,7 +8,8 @@ use semantic::{semanticize_batch, SemanticConfig};
 /// ```bash
 /// cargo run -p semantic --example batch_embed -- "doc-1" "text one" "doc-2" "text two"
 /// ```
-fn main() -> Result<(), Box<dyn Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let mut docs = Vec::new();
 
@@ -26,7 +27,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ..SemanticConfig::default()
     };
 
-    let embeddings = semanticize_batch(&docs, &cfg)?;
+    let embeddings = semanticize_batch(&docs, &cfg).await?;
     println!("generated {} embeddings", embeddings.len());
 
     for embedding in embeddings {

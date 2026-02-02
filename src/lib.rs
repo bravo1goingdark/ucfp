@@ -739,11 +739,20 @@ pub fn semanticize_document(
 ) -> Result<SemanticEmbedding, PipelineError> {
     // --- Semantic Stage ---
     let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from_document(doc));
-    match semanticize(
-        doc.doc_id.as_str(),
-        doc.canonical_text.as_str(),
-        semantic_cfg,
-    ) {
+
+    // Use block_on for async semanticize call
+    let result = tokio::task::block_in_place(|| {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            semanticize(
+                doc.doc_id.as_str(),
+                doc.canonical_text.as_str(),
+                semantic_cfg,
+            )
+            .await
+        })
+    });
+
+    match result {
         Ok(embedding) => {
             if let Some(span) = span {
                 span.record_semantic(Ok(()));

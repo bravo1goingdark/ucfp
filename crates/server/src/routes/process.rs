@@ -4,6 +4,7 @@ use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::Utc;
+use futures::stream::{self, StreamExt};
 use ingest::{IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -287,114 +288,140 @@ pub async fn process_document(
     Ok(Json(response))
 }
 
-/// Process multiple documents in batch
+/// Process multiple documents in batch with parallel processing.
+///
+/// Documents are processed concurrently with a configurable concurrency limit (default: 10).
+/// Results are returned in the same order as the input documents.
 pub async fn process_batch(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<BatchProcessRequest>,
 ) -> ServerResult<impl IntoResponse> {
-    let mut results = Vec::new();
-    let mut successful = 0;
-    let mut failed = 0;
+    const CONCURRENCY: usize = 10;
 
     let ingest_cfg = IngestConfig::default();
     let canonical_cfg = CanonicalizeConfig::default();
+    let enable_perceptual = request.enable_perceptual;
+    let enable_semantic = request.enable_semantic;
 
-    for doc in request.documents {
-        let doc_id = doc
-            .doc_id
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        let tenant_id = doc.tenant_id.unwrap_or_else(|| {
-            state
-                .config
-                .api_keys
-                .iter()
-                .next()
-                .cloned()
-                .unwrap_or_default()
-        });
+    // Create a stream from documents with their indices to preserve order
+    let results: Vec<(usize, ProcessResponse)> =
+        stream::iter(request.documents.into_iter().enumerate().map(|(idx, doc)| {
+            let state = state.clone();
+            let ingest_cfg = ingest_cfg.clone();
+            let canonical_cfg = canonical_cfg.clone();
 
-        let raw = RawIngestRecord {
-            id: doc_id.clone(),
-            source: IngestSource::RawText,
-            metadata: IngestMetadata {
-                tenant_id: Some(tenant_id.clone()),
-                doc_id: Some(doc_id.clone()),
-                received_at: Some(Utc::now()),
-                original_source: Some("api".to_string()),
-                attributes: None,
-            },
-            payload: Some(IngestPayload::Text(doc.text)),
-        };
+            async move {
+                let doc_id = doc
+                    .doc_id
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                let tenant_id = doc.tenant_id.unwrap_or_else(|| {
+                    state
+                        .config
+                        .api_keys
+                        .iter()
+                        .next()
+                        .cloned()
+                        .unwrap_or_default()
+                });
 
-        let mut response = ProcessResponse {
-            doc_id: doc_id.clone(),
-            tenant_id: tenant_id.clone(),
-            status: "success".to_string(),
-            canonical_hash: None,
-            perceptual_fingerprint: None,
-            semantic_embedding: None,
-            error: None,
-        };
+                let raw = RawIngestRecord {
+                    id: doc_id.clone(),
+                    source: IngestSource::RawText,
+                    metadata: IngestMetadata {
+                        tenant_id: Some(tenant_id.clone()),
+                        doc_id: Some(doc_id.clone()),
+                        received_at: Some(Utc::now()),
+                        original_source: Some("api".to_string()),
+                        attributes: None,
+                    },
+                    payload: Some(IngestPayload::Text(doc.text)),
+                };
 
-        // Process document
-        if request.enable_perceptual {
-            let perceptual_cfg = PerceptualConfig::default();
-            match ucfp::process_record_with_perceptual_configs(
-                raw.clone(),
-                &ingest_cfg,
-                &canonical_cfg,
-                &perceptual_cfg,
-            ) {
-                Ok((doc, fingerprint)) => {
-                    response.canonical_hash = Some(doc.sha256_hex.clone());
-                    response.perceptual_fingerprint = Some(
-                        serde_json::to_value(fingerprint)
-                            .map_err(|e| ServerError::Internal(e.to_string()))?,
-                    );
-                }
-                Err(e) => {
-                    response.status = "error".to_string();
-                    response.error = Some(e.to_string());
-                    failed += 1;
-                    results.push(response);
-                    continue;
-                }
-            }
-        }
+                let mut response = ProcessResponse {
+                    doc_id: doc_id.clone(),
+                    tenant_id: tenant_id.clone(),
+                    status: "success".to_string(),
+                    canonical_hash: None,
+                    perceptual_fingerprint: None,
+                    semantic_embedding: None,
+                    error: None,
+                };
 
-        if request.enable_semantic {
-            let semantic_cfg = SemanticConfig::default();
-            match ucfp::process_record_with_semantic_configs(
-                raw.clone(),
-                &ingest_cfg,
-                &canonical_cfg,
-                &semantic_cfg,
-            ) {
-                Ok((doc, embedding)) => {
-                    if response.canonical_hash.is_none() {
-                        response.canonical_hash = Some(doc.sha256_hex.clone());
+                // Process perceptual fingerprinting
+                if enable_perceptual {
+                    let perceptual_cfg = PerceptualConfig::default();
+                    match ucfp::process_record_with_perceptual_configs(
+                        raw.clone(),
+                        &ingest_cfg,
+                        &canonical_cfg,
+                        &perceptual_cfg,
+                    ) {
+                        Ok((doc, fingerprint)) => {
+                            response.canonical_hash = Some(doc.sha256_hex.clone());
+                            response.perceptual_fingerprint = Some(
+                                serde_json::to_value(fingerprint)
+                                    .map_err(|e| ServerError::Internal(e.to_string()))
+                                    .unwrap_or(serde_json::Value::Null),
+                            );
+                        }
+                        Err(e) => {
+                            response.status = "error".to_string();
+                            response.error = Some(e.to_string());
+                            return (idx, response);
+                        }
                     }
-                    response.semantic_embedding = Some(
-                        serde_json::to_value(embedding)
-                            .map_err(|e| ServerError::Internal(e.to_string()))?,
-                    );
                 }
-                Err(e) => {
-                    response.status = "error".to_string();
-                    response.error = Some(e.to_string());
-                    failed += 1;
-                    results.push(response);
-                    continue;
+
+                // Process semantic embedding
+                if enable_semantic {
+                    let semantic_cfg = SemanticConfig::default();
+                    match ucfp::process_record_with_semantic_configs(
+                        raw.clone(),
+                        &ingest_cfg,
+                        &canonical_cfg,
+                        &semantic_cfg,
+                    ) {
+                        Ok((doc, embedding)) => {
+                            if response.canonical_hash.is_none() {
+                                response.canonical_hash = Some(doc.sha256_hex.clone());
+                            }
+                            response.semantic_embedding = Some(
+                                serde_json::to_value(embedding)
+                                    .map_err(|e| ServerError::Internal(e.to_string()))
+                                    .unwrap_or(serde_json::Value::Null),
+                            );
+                        }
+                        Err(e) => {
+                            response.status = "error".to_string();
+                            response.error = Some(e.to_string());
+                            return (idx, response);
+                        }
+                    }
                 }
+
+                (idx, response)
             }
-        }
+        }))
+        .buffer_unordered(CONCURRENCY)
+        .collect()
+        .await;
 
-        if response.status == "success" {
-            successful += 1;
-        }
+    // Sort results by index to preserve input order
+    let mut results_with_indices = results;
+    results_with_indices.sort_by_key(|(idx, _)| *idx);
 
-        results.push(response);
-    }
+    // Count successes and failures
+    let successful = results_with_indices
+        .iter()
+        .filter(|(_, r)| r.status == "success")
+        .count();
+    let failed = results_with_indices.len() - successful;
+
+    // Extract just the responses in order
+    let results: Vec<ProcessResponse> = results_with_indices
+        .into_iter()
+        .map(|(_, response)| response)
+        .collect();
 
     Ok(Json(BatchProcessResponse {
         processed: results.len(),

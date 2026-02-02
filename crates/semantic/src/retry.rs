@@ -1,10 +1,12 @@
 //! Retry logic with exponential backoff for API calls.
 //!
 //! Provides configurable retry policies for handling transient failures.
+//! Supports both synchronous and asynchronous execution.
 
 use serde::{Deserialize, Serialize};
 use std::thread;
 use std::time::Duration;
+use tokio::time::sleep;
 
 /// Configuration for retry behavior.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -215,6 +217,72 @@ pub fn is_retryable_error(error: &str) -> bool {
 
     // Default: retry unknown errors (conservative approach)
     true
+}
+
+/// Execute an async function with retry logic.
+///
+/// # Example
+/// ```
+/// use semantic::retry::{RetryConfig, execute_with_retry_async};
+/// use std::time::Duration;
+///
+/// async fn example() {
+///     let config = RetryConfig::default()
+///         .with_max_retries(3)
+///         .with_base_delay(Duration::from_millis(100));
+///
+///     let result = execute_with_retry_async(&config, |attempt| async move {
+///         if attempt == 0 {
+///             Err("transient error".to_string())
+///         } else {
+///             Ok("success")
+///         }
+///     }).await;
+///
+///     assert!(result.succeeded);
+/// }
+/// ```
+pub async fn execute_with_retry_async<T, F, Fut>(
+    config: &RetryConfig,
+    mut operation: F,
+) -> RetryResult<T>
+where
+    F: FnMut(u32) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let start = std::time::Instant::now();
+    let mut last_error = None;
+
+    for attempt in 0..=config.max_retries {
+        match operation(attempt).await {
+            Ok(value) => {
+                return RetryResult {
+                    result: Ok(value),
+                    attempts: attempt + 1,
+                    total_duration: start.elapsed(),
+                    succeeded: true,
+                };
+            }
+            Err(e) => {
+                last_error = Some(e);
+
+                // Don't sleep after the last attempt
+                if attempt < config.max_retries {
+                    let delay = config.calculate_delay(attempt + 1);
+                    if delay > Duration::from_millis(0) {
+                        sleep(delay).await;
+                    }
+                }
+            }
+        }
+    }
+
+    RetryResult {
+        result: Err(last_error.unwrap_or_else(|| "All retries exhausted".to_string())),
+        attempts: config.max_retries + 1,
+        total_duration: start.elapsed(),
+        succeeded: false,
+    }
 }
 
 #[cfg(test)]

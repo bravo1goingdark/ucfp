@@ -75,8 +75,12 @@ fn run_semantic_pipeline(
     // Canonical stage
     let doc = canonicalize(&canonical_record.doc_id, text, canonical_cfg)?;
 
-    // Semantic stage
-    let embedding = semanticize(&doc.doc_id, &doc.canonical_text, semantic_cfg)?;
+    // Semantic stage - use block_on for async semanticize
+    let embedding = tokio::task::block_in_place(|| {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { semanticize(&doc.doc_id, &doc.canonical_text, semantic_cfg).await })
+    })?;
 
     Ok((doc, embedding))
 }
