@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Github, GitCommit, Clock, Check, AlertCircle, FileText, Image, Music, Video, FileStack, Box, 
-         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, X, ArrowRight, ArrowDown } from 'lucide-react'
+         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, X } from 'lucide-react'
 import '../styles/LandingPage.css'
 import '../styles/Pipeline.css'
 
