@@ -67,14 +67,14 @@ Keep dependency versions consistent across all crates:
 
 ### Adding New Crates
 
-When adding new modality crates (image, audio, video, document):
+When adding new crates to the workspace:
 
 1. Place them in the `crates/` directory
-2. Follow the naming convention: `ufp_<modality>`
-3. Add to the workspace `Cargo.toml`
-4. Position them appropriately in the dependency chain
-5. Update `README.md` architecture diagrams
-6. Add comprehensive documentation in `crates/ufp_<modality>/doc/`
+2. Follow the naming convention: use short descriptive names (e.g., `ingest`, `canonical`, `perceptual`, `semantic`, `index`, `matcher`)
+3. Add to the workspace `Cargo.toml` in the root
+4. Position them appropriately in the dependency chain (see Architecture Guidelines above)
+5. Update `README.md` architecture section and the `ucfp.png` diagram
+6. Add comprehensive documentation in `crates/<name>/doc/<name>.md`
 
 ## Local development workflow
 
@@ -84,8 +84,8 @@ When adding new modality crates (image, audio, video, document):
 - **Keep commits focused**: prefer small, reviewable commits with actionable messages, e.g.
   `canonical: add Token::as_ref`.
 - **Stay up to date**: regularly `git fetch` and rebase on the latest `main` to minimize conflicts.
-- **Document as you go**: update `README.md`, `docs/architecture.svg`, and crate docs under
-  `crates/*/doc` whenever behavior changes.
+- **Document as you go**: update `README.md`, `ucfp.png` (architecture diagram), and crate docs under
+  `crates/<name>/doc/<name>.md` whenever behavior changes.
 
 ### Required checks (mirrors CI)
 
@@ -100,18 +100,6 @@ This script runs all the same checks as CI: formatting, linting, tests, builds, 
 If your change only touches a subset of crates, you can run individual commands while iterating, but make sure to run the full script before submitting a PR. CI executes the exact same checks defined in `.github/workflows/ci.yml`.
 
 ### Additional guidance
-
-- Avoid unnecessary allocations or clones on hot paths. If you need convenience helpers, prefer
-  borrowing APIs (see `Token: AsRef<str>` for reference) or scoped `impl`s.
-- Reuse the shared error enums (`PipelineError`, `IngestError`, etc.) instead of ad hoc string
-  errors so that telemetry remains consistent.
-- Update `PipelineMetrics` spans whenever you create new pipeline stages or metrics so latency
-  reporting stays accurate.
-- Keep public APIs documented with `///` comments and include examples or tests when behavior changes.
-- When touching `proto/` definitions, regenerate the artifacts and commit the updated files as part
-  of the same change.
-- **Document all public items**: Every `pub struct`, `pub enum`, `pub fn`, and `pub trait` must have
-  a doc comment explaining its purpose and usage.
 
 - Avoid unnecessary allocations or clones on hot paths. If you need convenience helpers, prefer
   borrowing APIs (see `Token: AsRef<str>` for reference) or scoped `impl`s.
@@ -144,12 +132,24 @@ Before submitting a PR:
 - [ ] `cargo test --all` passes
 - [ ] New tests added for new functionality
 - [ ] Documentation tests pass (`cargo test --doc`)
-- [ ] Examples run successfully
+- [ ] Examples run successfully (`cargo run --example <name>`)
+
+### Test Coverage Guidelines
+
+Each crate should have tests covering:
+
+- **Unit tests**: Test individual functions and types (in `src/` files)
+- **Integration tests**: Test component interactions (in `tests/` directory)
+- **Strategy tests**: For matcher crates, test all match modes (Semantic, Perceptual, Hybrid) and strategies (Weighted, And, Or, Exact)
+- **Edge cases**: Empty inputs, invalid configs, boundary conditions
+- **Error handling**: Verify error types and messages
+
+See `crates/matcher/src/engine/tests.rs` for examples of comprehensive matcher tests including semantic, perceptual, hybrid, and exact matching strategies.
 
 ## Documentation and diagrams
 
-- Update the architecture diagram (`docs/architecture.svg`) whenever you add or remove a stage or a
-  future modality summary. Keep the SVG in source control; do not check in generated PNGs.
+- Update the architecture diagram (`ucfp.png`) whenever you add or remove a stage or
+  future modality. The PNG is kept in source control at the repository root.
 - Each crate has documentation under `crates/<name>/doc/*.md`. Describe configuration knobs,
   error cases, and helper APIs there when they change.
 - Link new documentation from `README.md` (or relevant crate `README`s) to keep discovery simple.
@@ -171,7 +171,7 @@ All crate documentation should include:
 9. **Troubleshooting** - Common issues and solutions
 10. **Integration** - How to use with other crates
 
-See `crates/ingest/doc/ucfp_ingest.md` and `crates/canonical/doc/canonical.md` as examples.
+See `crates/ingest/doc/ingest.md` and `crates/canonical/doc/canonical.md` as examples.
 
 ## Future modalities
 
@@ -182,13 +182,13 @@ fingerprints/embeddings. If you prototype any of these:
 
 1. **Scaffold the crate**:
    ```bash
-   cargo new --lib crates/ufp_<modality>
+   cargo new --lib crates/<modality>
    ```
 
 2. **Configure Cargo.toml**:
    ```toml
    [package]
-   name = "ufp_<modality>"
+   name = "<modality>"
    version = "0.1.0"
    edition = "2021"
    
@@ -199,7 +199,7 @@ fingerprints/embeddings. If you prototype any of these:
    # ... other dependencies
    ```
 
-3. **Create documentation** at `crates/ufp_<modality>/doc/ufp_<modality>.md`:
+3. **Create documentation** at `crates/<modality>/doc/<modality>.md`:
    - Describe the data contract
    - Explain configuration knobs
    - Show integration points
@@ -209,7 +209,7 @@ fingerprints/embeddings. If you prototype any of these:
 4. **Update workspace**:
    - Add to root `Cargo.toml` workspace members
    - Update `README.md` architecture section
-   - Update `docs/architecture.svg`
+   - Update `ucfp.png` (architecture diagram) if structure changed
 
 5. **Follow existing patterns**:
    - Mirror the structure of `perceptual` or `semantic`
@@ -247,8 +247,8 @@ Include the following in every PR description:
 - [ ] Code formatted with `cargo fmt --all`
 - [ ] No clippy warnings: `cargo clippy --all --all-targets -- -D warnings`
 - [ ] All tests pass: `cargo test --all`
-- [ ] Documentation updated (crate docs, README.md if needed)
-- [ ] Architecture diagram updated if adding/removing crates
+- [ ] Documentation updated (crate docs at `crates/<name>/doc/<name>.md`, README.md if needed)
+- [ ] Architecture diagram (`ucfp.png`) updated if adding/removing crates
 - [ ] No circular dependencies introduced
 - [ ] Dependency versions consistent across crates
 
