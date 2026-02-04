@@ -1,34 +1,29 @@
 //! UCFP canonical text layer.
 //!
-//! `canonical` converts validated ingest text into a deterministic,
-//! versioned representation that downstream layers (perceptual, semantic,
-//! index) can rely on for stable identity and offsets.
+//! This module normalizes text into a deterministic, versioned format. Downstream
+//! stages (perceptual, semantic, index) can rely on this for stable identity.
 //!
-//! # Responsibilities
+//! ## What we do
 //!
-//! - Unicode normalization (NFKC by default, configurable per-record)
-//! - Casing and punctuation policy (lowercasing + optional stripping)
-//! - Whitespace collapsing to single ASCII spaces
-//! - Tokenization with UTF-8 byte offsets
-//! - Version-aware canonical hashes for identity
+//! - Unicode normalization (NFKC by default, configurable)
+//! - Casing and punctuation handling (lowercase, optional stripping)
+//! - Whitespace normalization (collapses to single spaces)
+//! - Tokenization with byte offsets for downstream accuracy
+//! - Versioned hashes so you can tell which canonicalization was used
 //!
-//! The canonical layer is *pure*: it does not perform any I/O, does not consult
-//! wall-clock time, and does not depend on OS/locale. For a fixed
-//! [`CanonicalizeConfig`] and input text, [`canonicalize`] will always produce
-//! the same [`CanonicalizedDocument`] on any machine.
+//! ## Pure function guarantee
 //!
-//! ## Invariants
+//! No I/O, no clock calls, no OS/locale dependence. Give us the same text
+//! and config, you get the same result on any machine.
 //!
-//! - Canonical input is a trusted, UTF-8 string (typically from
-//!   `CanonicalIngestRecord` in `ingest`).
-//! - Canonicalization never re-validates ingest constraints.
-//! - Outputs depend only on the input text and [`CanonicalizeConfig`].
-//! - `canonical_version` in [`CanonicalizedDocument`] must match the
-//!   configuration version used to produce it.
-//! - The canonical hash is defined as:
-//!   `SHA-256( canonical_version.to_be_bytes() || 0x00 || canonical_text_bytes )`.
+//! ## Invariants worth knowing
 //!
-//! Same input + same config → identical output, forever.
+//! - Input should be trusted UTF-8 (usually from ingest stage)
+//! - We don't re-validate ingest constraints here
+//! - Output depends only on text + config
+//! - Hash = SHA-256(version || 0x00 || canonical_text)
+//!
+//! Bottom line: same input + same config = same output forever.
 
 mod config;
 mod document;

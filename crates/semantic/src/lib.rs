@@ -1,41 +1,26 @@
-//! # UCFP Semantic Fingerprinting
+//! UCFP Semantic Fingerprinting
 //!
-//! This crate provides meaning-aware fingerprinting by converting canonicalized
-//! text into dense vector embeddings. It is designed for flexibility and
-//! resilience, supporting multiple inference modes and offering deterministic
-//! fallbacks.
+//! This crate handles turning text into meaning-aware vectors. Given canonicalized
+//! text, it spits out dense embeddings you can use for similarity search,
+//! clustering, or whatever semantic stuff you're into.
 //!
-//! ## Core Features
+//! We support a few modes:
 //!
-//! - **Multiple Inference Modes**:
-//!   - **ONNX**: Local inference using ONNX Runtime for full offline capability.
-//!   - **API**: Remote inference via HTTP, with support for Hugging Face, OpenAI,
-//!     and custom API endpoints.
-//!   - **Fast**: A deterministic stub generator for testing and development,
-//!     which produces reproducible vectors without requiring model assets.
-//! - **Resilience**: Automatically falls back to the "fast" mode if model assets
-//!   are missing or unreachable, ensuring the pipeline continues to operate.
-//! - **Performance**: Caches tokenizers and ONNX sessions on a per-thread basis
-//!   to minimize I/O and compilation overhead in hot paths. Batch processing
-//!   is supported to efficiently handle multiple documents.
-//! - **Configurability**: All behavior is controlled at runtime via the
-//!   [`SemanticConfig`] struct, allowing for different models, tiers (fast,
-//!   balanced, accurate), and post-processing options (e.g., L2 normalization).
+//! - **ONNX mode** - Run models locally. Requires model files.
+//! - **API mode** - Call out to Hugging Face (router endpoint is your friend)
+//! - **Stub mode** - For testing. Generates fake but consistent vectors.
 //!
-//! ## Key Concepts
+//! The nice thing is the fallback behavior. If a model file is missing or an API
+//! call fails, we fall back to stub mode instead of panicking. Saved our bacon
+//! more than once in production.
 //!
-//! The main entry point is the [`semanticize`] function, which orchestrates the
-//! entire process: asset resolution (including on-demand downloading),
-//! tokenization, inference, and normalization. The resulting [`SemanticEmbedding`]
-//! contains the vector and rich metadata for downstream use.
+//! ## Threading notes
 //!
-//! The implementation uses a thread-local cache for model handles, ensuring that
-//! expensive setup costs are paid only once per thread. This makes it suitable
-//! for high-throughput services.
+//! Tokenizers and ONNX sessions get cached per-thread. First call on any thread
+//! does the expensive setup. After that, it's fast. Batches work too.
 //!
-//! ## Example Usage
+//! ## Quick example
 //!
-//! ### Local ONNX Inference
 //! ```no_run
 //! use semantic::{semanticize, SemanticConfig};
 //! use std::path::PathBuf;
@@ -52,9 +37,7 @@
 //! }
 //! ```
 //!
-//! ### Remote API Inference
-//!
-//! Use Hugging Face Inference API for remote embedding generation:
+//! ## API mode example
 //!
 //! ```no_run
 //! use semantic::{semanticize, SemanticConfig};
@@ -63,7 +46,6 @@
 //! async fn main() {
 //!     let cfg = SemanticConfig {
 //!         mode: "api".into(),
-//!         // Primary endpoint (router.huggingface.co)
 //!         api_url: Some("https://router.huggingface.co/hf-inference/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction".into()),
 //!         api_auth_header: Some("Bearer YOUR_HF_TOKEN".into()),
 //!         api_provider: Some("auto".into()),
@@ -74,21 +56,18 @@
 //! }
 //! ```
 //!
-//! **Supported API Endpoints:**
-//! - **Hugging Face Router** (Recommended): `https://router.huggingface.co/hf-inference/models/{model}/pipeline/feature-extraction`
-//! - **Hugging Face API**: `https://api-inference.huggingface.co/models/{model}`
+//! ## Env vars to know
 //!
-//! **Environment Variables:**
-//! - `UFP_SEMANTIC_API_URL`: API endpoint URL
-//! - `UFP_SEMANTIC_API_TOKEN`: Hugging Face API token
+//! - `UFP_SEMANTIC_API_URL` - Override the API endpoint
+//! - `UFP_SEMANTIC_API_TOKEN` - Your HF token
 //!
-//! See the `api_embed` example for complete usage.
+//! Full example at `examples/api_embed.rs`.
 
 pub mod config;
 pub mod error;
 pub mod types;
 
-// Resilience modules
+// Resilience bits
 pub mod circuit_breaker;
 pub mod rate_limit;
 pub mod retry;

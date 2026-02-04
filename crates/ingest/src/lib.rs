@@ -1,37 +1,25 @@
-//! # UCFP Ingest Layer
+//! UCFP Ingest Layer
 //!
-//! This crate serves as the entry point for the Universal Content Fingerprinting
-//! (UCFP) pipeline. It is responsible for receiving raw content and metadata,
-//! validating it against a set of configurable policies, and normalizing it into
-//! a canonical format that can be consumed by downstream processing stages.
+//! This is where content enters the UCFP pipeline. We take raw data + metadata,
+//! run it through validation, and spit out a clean canonical format that
+//! downstream stages can handle.
 //!
-//! ## Core Responsibilities
+//! ## What we do here
 //!
-//! - **Metadata Validation and Normalization**: Enforces the presence of required
-//!   metadata fields (e.g., `tenant_id`, `doc_id`), applies default values when
-//!   they are missing, and sanitizes fields by stripping control characters.
-//! - **Deterministic ID Generation**: Derives a deterministic document ID (UUIDv5)
-//!   when one is not provided, ensuring content can be reliably traced.
-//! - **Payload Handling**: Accepts text and binary payloads, decodes UTF-8 from
-//!   byte streams, and normalizes whitespace in text payloads.
-//! - **Policy Enforcement**: Allows for the definition of strict metadata policies,
-//!   such as rejecting timestamps from the future or limiting the size of
-//!   arbitrary attribute blobs.
-//! - **Observability**: Emits structured logs with detailed context for both
-//!   successful and failed ingest operations, facilitating monitoring and debugging.
+//! - **Validate and normalize metadata** - Check required fields, apply defaults,
+//!   strip out control characters nobody wants
+//! - **Generate IDs** - If you don't provide a doc ID, we derive one using UUIDv5.
+//!   Same input = same ID, every time.
+//! - **Handle payloads** - Text or binary. Text gets whitespace normalized.
+//! - **Enforce policies** - Reject bad timestamps, limit attribute blob sizes, etc.
+//! - **Log everything** - Structured logs via tracing for debugging production issues.
 //!
-//! ## Key Concepts
+//! ## Main entry point
 //!
-//! The [`ingest`] function is the primary entry point. It takes a [`RawIngestRecord`]
-//! and an [`IngestConfig`] and produces a [`CanonicalIngestRecord`]. The process
-//! is designed to be robust and fault-tolerant, with clear error types to
-//! indicate the reason for failure.
+//! Call [`ingest`] with a [`RawIngestRecord`] and [`IngestConfig`], get back a
+//! [`CanonicalIngestRecord`]. Errors are typed so you can actually handle them.
 //!
-//! The design emphasizes a clean separation between the core ingestion logic and
-//! the surrounding observability infrastructure, using `tracing` to provide rich,
-//! contextual logs without cluttering the main business logic.
-//!
-//! ## Example Usage
+//! ## Example
 //!
 //! ```
 //! use ingest::{ingest, IngestConfig, RawIngestRecord, IngestSource, IngestMetadata, IngestPayload};
@@ -54,10 +42,9 @@
 //! let canonical_record = ingest(record, &config).unwrap();
 //!
 //! assert_eq!(canonical_record.tenant_id, "my-tenant");
-//! // The payload is normalized.
 //! // assert_eq!(canonical_record.normalized_payload, Some(ingest::CanonicalPayload::Text("Some text with extra whitespace.".into())));
 //! ```
-//
+//!
 use std::time::Instant;
 
 use tracing::{info, warn, Level};

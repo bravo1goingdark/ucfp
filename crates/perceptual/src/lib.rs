@@ -1,44 +1,26 @@
-//! # UCFP Perceptual Fingerprinting
+//! UCFP Perceptual Fingerprinting
 //!
-//! This crate provides perceptual fingerprinting capabilities for the Universal
-//! Content Fingerprinting (UCFP) framework. It takes a stream of canonicalized
-//! tokens and generates a compact, similarity-preserving signature that is robust
-//! to minor content modifications.
+//! This crate handles the "what does it look like" part of fingerprinting. Given
+//! canonical tokens, it produces a compact signature that captures similarity -
+//! so near-duplicates will have similar fingerprints even if they're not identical.
 //!
-//! ## Contract
+//! ## What you need to know
 //!
-//! - The perceptual layer **only** consumes canonical tokens produced by the
-//!   upstream canonicalization pipeline.
-//! - It never performs normalization, tokenization, or reads ingest metadata.
-//! - The API is a pure function of `(canonical_tokens, config)` with no I/O,
-//!   no network, and no reliance on clocks or global process state.
+//! - We only take canonical tokens. Don't send us raw text or ingest metadata.
+//! - Pure function: same input = same output. No I/O, no network, no randomness.
 //!
-//! Invariant: for the same canonical token sequence and the same
-//! [`PerceptualConfig`], the perceptual output is a bit identical.
+//! ## The pipeline (three stages)
 //!
-//! ## Core Pipeline
+//! 1. **Shingling** - Break tokens into overlapping windows of k tokens,
+//!    hash each window to a 64-bit value. Captures local structure.
 //!
-//! The perceptual fingerprinting process consists of three main stages:
+//! 2. **Winnowing** - Pick the minimum hash from each sliding window.
+//!    Reduces data size. This is just an optimization, not the actual LSH step.
 //!
-//! 1.  **Shingling**: The token stream is converted into a sequence of
-//!     overlapping k‑shingles (contiguous subsequences of `k` tokens). Each
-//!     shingle is hashed into a 64‑bit integer using a deterministic rolling
-//!     hash algorithm. This captures the local structure of the text.
+//! 3. **MinHash** - The real locality-sensitive hashing magic.
+//!    Produces a fixed-size signature you can compare for Jaccard similarity.
 //!
-//! 2.  **Winnowing** (Data Reduction): To improve performance, a winnowing
-//!     algorithm selects a subset of shingles by choosing the minimum hash value
-//!     within a sliding window. This reduces the number of shingles fed into
-//!     MinHash by approximately 1/w. **Note**: This is purely a preprocessing
-//!     optimization, NOT a locality-sensitive hashing technique.
-//!
-//! 3.  **MinHashing** (LSH): The actual LSH (Locality-Sensitive Hashing)
-//!     implementation that generates a fixed-size signature from the winnowed
-//!     shingles. The bands×rows structure (`minhash_bands` × `minhash_rows_per_band`)
-//!     provides the LSH properties for approximate Jaccard similarity search.
-//!     The resulting `minhash` field is the primary output used for similarity
-//!     comparison and indexing.
-//!
-//! ## Example Usage
+//! ## Quick example
 //!
 //! ```
 //! use perceptual::{perceptualize_tokens, PerceptualConfig};
@@ -51,14 +33,10 @@
 //!
 //! let fingerprint = perceptualize_tokens(&tokens, &config).unwrap();
 //!
-//! // The minhash field contains the LSH signature for similarity search
 //! assert!(!fingerprint.minhash.is_empty());
 //! assert_eq!(fingerprint.meta.k, 3);
-//!
-//! // For indexing and similarity comparison, use fingerprint.minhash (Vec<u64>)
-//! // The shingles and winnowed fields are intermediate artifacts for debugging
 //! ```
-//!
+
 pub mod config;
 pub mod fingerprint;
 mod minhash;

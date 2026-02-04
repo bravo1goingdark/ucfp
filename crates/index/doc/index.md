@@ -1,32 +1,23 @@
 # UCFP Index (`index`)
 
-## Purpose
+## What this is
 
-`index` is the storage layer for UCFP fingerprints + embeddings. It
-provides deterministic quantization, compression, and search primitives while
-remaining backend-agnostic so deployments can pick Redb for on-disk storage
-or the fast in-memory map for ephemeral workloads (and you can still inject a
-custom backend that implements the trait if you need one later).
+`index` handles storage for UCFP fingerprints and embeddings. It gives you quantization, compression, and search tools while staying backend-agnostic - pick Redb for disk storage or use a fast in-memory map for ephemeral stuff. Or roll your own backend if you need something custom.
 
-The crate exposes a single entry point (`UfpIndex`) that accepts a runtime
-[`IndexConfig`](#configuration) describing the backend, compression and
-quantization strategy, then offers CRUD and similarity search operations.
+Main entry point is `UfpIndex`. Give it an `IndexConfig` describing what backend you want, compression, and quantization, then do CRUD and similarity searches.
 
-## Features
-- Storage options: Redb (default) for durable indexing or the fast
-  in-memory backend when you only need ephemeral state (tests, demos, lambdas).
-- Redb lives behind the `backend-redb` feature so you can build a
-  dependency-light, in-memory-only binary when native libraries are
-  unavailable.
-- Runtime-configurable compression (zstd or none) and quantization strategies.
-- Perceptual MinHash storage with deterministic metadata.
-- Schema versioning via the exported `INDEX_SCHEMA_VERSION` constant for safe migrations.
-- Full-scan semantic/perceptual retrieval with SIMD-friendly cosine and fast
-  Jaccard scoring (HashSet reuse avoids per-record allocations).
-- ANN (Approximate Nearest Neighbor) search with HNSW for sub-linear semantic
-  search on large datasets (1000+ vectors).
+## What's included
 
-## Key Types
+- **Storage backends**: Redb (default, on-disk) or in-memory for tests/lambda-style stuff
+- **Redb is optional**: Disable `backend-redb` for dependency-light builds
+- **Compression**: zstd or none, configurable at runtime
+- **Quantization**: i8 conversion for semantic vectors, deterministic across runs
+- **MinHash storage** for perceptual fingerprints
+- **Schema versioning** via `INDEX_SCHEMA_VERSION` for safe upgrades
+- **Full-scan search** with SIMD cosine and fast Jaccard scoring
+- **ANN search** using HNSW for large datasets (1000+ vectors)
+
+## Key types
 
 ```rust
 pub struct IndexRecord {
@@ -60,11 +51,10 @@ pub trait IndexBackend: Send + Sync {
 }
 ```
 
-`QueryMode` covers cosine similarity for embeddings (`Semantic`) and Jaccard
-similarity for MinHash (`Perceptual`). The `QueryResult` always returns the
-matching canonical hash, score, and stored metadata blob.
+`QueryMode` has two flavors: `Semantic` for cosine similarity on embeddings, and `Perceptual` for Jaccard on MinHash. `QueryResult` gives you the matching hash, score, and any stored metadata.
 
 ## Quick start
+
 ```rust,ignore
 use serde_json::json;
 use index::{
@@ -80,52 +70,44 @@ index.upsert(&IndexRecord {
     perceptual: Some(vec![111, 222, 333]),
     embedding: Some(vec![10, -3, 7, 5]),
     metadata: json!({"source": "guide.md"}),
-})?;
+)?;
 
 let query = IndexRecord { 
     schema_version: INDEX_SCHEMA_VERSION,
     canonical_hash: "query-hash".into(),
-    perceptual: Some(vec![111, 222, 333]), // or populate from your query payload
-    embedding: None, // or populate semantic embedding if needed
+    perceptual: Some(vec![111, 222, 333]),
+    embedding: None,
     metadata: json!({}),
-};let hits = index.search(&query, QueryMode::Perceptual, 10)?;
+};
+let hits = index.search(&query, QueryMode::Perceptual, 10)?;
 ```
 
 ### Swapping backends
-Select the backend via the builder API or by injecting your own implementation:
 
 ```rust,ignore
 use index::{BackendConfig, IndexConfig, InMemoryBackend, UfpIndex};
 
-// In-memory (tests/demos)
+// In-memory for tests/demos
 let in_mem = UfpIndex::new(IndexConfig::new().with_backend(BackendConfig::InMemory))?;
 
-// Inject a custom backend instance (e.g., to reuse a shared connection pool)
+// Bring your own backend (e.g., shared connection pool)
 let cfg = IndexConfig::new().with_backend(BackendConfig::InMemory);
 let index = UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
 ```
 
-From the workspace root, run `cargo run -p index --example index_demo` to
-see end-to-end insert + semantic/perceptual queries with the default Redb
-backend. Switch to the fast in-memory backend by calling
-`IndexConfig::with_backend(...)` in your initialization code—no config files
-required.
+Run `cargo run -p index --example index_demo` to see insert + queries in action. Default is Redb; swap to in-memory with `IndexConfig::with_backend(...)`.
 
 ## ANN (Approximate Nearest Neighbor) Search
 
-UCFP implements HNSW (Hierarchical Navigable Small World) for efficient approximate nearest neighbor search on large vector collections:
+We use HNSW for efficient vector search on large collections:
 
-### HNSW Integration
+### How it works
 
-The index automatically switches between linear scan and HNSW based on collection size:
+- **Small datasets (< 1000 vectors)**: Linear scan, exact results
+- **Large datasets (1000+ vectors)**: HNSW, O(log n) queries
+- **Auto fallback**: Falls back to linear scan if ANN is disabled
 
-- **Small datasets (< 1000 vectors)**: Linear scan for exact results with minimal overhead
-- **Large datasets (1000+ vectors)**: HNSW for sub-linear O(log n) query complexity
-- **Automatic fallback**: Seamlessly returns to linear scan if HNSW is disabled or fails
-
-### Runtime Configurability
-
-All ANN parameters are runtime-configurable through `IndexConfig`:
+### Configure it
 
 ```rust
 use index::{AnnConfig, BackendConfig, IndexConfig, UfpIndex};
@@ -133,32 +115,32 @@ use index::{AnnConfig, BackendConfig, IndexConfig, UfpIndex};
 let cfg = IndexConfig::new()
     .with_backend(BackendConfig::redb("data/index"))
     .with_ann(AnnConfig {
-        enabled: true,                    // Enable/disable ANN entirely
-        min_vectors_for_ann: 1000,        // Auto-switch threshold
-        ef_construction: 100,             // HNSW build-time accuracy
-        ef_search: 50,                    // HNSW query-time accuracy
-        m: 16,                            // HNSW layer count
+        enabled: true,
+        min_vectors_for_ann: 1000,
+        ef_construction: 100,
+        ef_search: 50,
+        m: 16,
     });
 
 let index = UfpIndex::new(cfg)?;
 ```
 
-- `enabled`: Master switch for ANN (default: `true`)
-- `min_vectors_for_ann`: Threshold for automatic HNSW activation (default: 1000)
-- `ef_construction`: Higher = more accurate index, slower build (default: 100)
-- `ef_search`: Higher = more accurate search, slower queries (default: 50)
-- `m`: Number of bi-directional links per node (default: 16)
+- `enabled`: Master switch (default: true)
+- `min_vectors_for_ann`: When to switch to HNSW (default: 1000)
+- `ef_construction`: Build accuracy vs speed tradeoff
+- `ef_search`: Query accuracy vs speed tradeoff
+- `m`: HNSW layer connections
 
-### Automatic Linear Scan Fallback
+### Linear scan fallback
 
-When ANN is disabled or the dataset is small, the index automatically uses linear scan:
+When ANN is off or dataset is small:
 
-- Exact cosine similarity computation
-- Deterministic ordering for consistent pagination
-- Zero memory overhead from HNSW structures
-- SIMD-optimized distance calculations
+- Exact cosine similarity
+- Deterministic ordering for pagination
+- No HNSW memory overhead
+- SIMD-optimized distances
 
-### Configuring in IndexConfig
+### Full config example
 
 ```rust
 use index::{AnnConfig, BackendConfig, CompressionConfig, IndexConfig};
@@ -168,165 +150,75 @@ let cfg = IndexConfig::new()
     .with_compression(CompressionConfig::zstd())
     .with_ann(AnnConfig {
         enabled: true,
-        min_vectors_for_ann: 500,         // Use HNSW for 500+ vectors
+        min_vectors_for_ann: 500,
         ef_construction: 128,
         ef_search: 64,
         m: 24,
     });
 ```
 
-**Runtime updates**: Modify ANN configuration without restart via the control plane. Changes apply to new queries while existing HNSW indices remain valid.
+Update ANN config at runtime via control plane. Changes apply to new queries; existing HNSW indices stay valid.
 
-## Architecture at a glance
-- **Data model:** `IndexRecord` captures the canonical hash, optional perceptual
-  MinHash vector, optional quantized embedding, and an arbitrary JSON metadata
-  blob. The metadata is serialized as raw JSON bytes so additions do not require
-  schema migrations.
-- **Entry point:** `UfpIndex` owns a selected backend and exposes CRUD + search
-  via `upsert`, `batch_insert`, `get`, `delete`, `flush`, and `search`.
-- **Runtime wiring:** `IndexConfig` describes the backend, compression, and
-  quantization strategy. Clone it when you need to keep the same knobs in
-  application state or mirror them inside background workers.
-- **Storage abstraction:** The `IndexBackend` trait isolates persistence so you
-  can pick Redb or the in-memory map today (and keep the door open for
-  bespoke implementations later). Each backend only needs to implement six
-  methods.
-- **Compression + quantization:** `CompressionConfig` (currently none/zstd)
-  shrinks serialized payloads before they hit the backend; `QuantizationConfig`
-  performs deterministic `i8` conversion on semantic vectors so cosine scores
-  behave the same regardless of hardware.
-- **Query engine:** `QueryMode::Semantic` runs cosine similarity over
-  quantized embeddings; `QueryMode::Perceptual` runs Jaccard similarity over
-  MinHash shingles using scratch `HashSet`s that are reused across records for
-  allocation-free scans. Ties are broken lexicographically for deterministic
-  paging.
+## How it all fits together
 
-## Working with the upper layer (`ucfp`)
-The workspace root crate (`ucfp`) orchestrates ingest, canonical, perceptual,
-and semantic stages. `index` is the persistence/search layer that sits
-behind those stages:
+- **Data model**: `IndexRecord` has canonical hash, optional MinHash, optional quantized embedding, and a JSON metadata blob. Metadata is raw JSON bytes so you can add fields without migrations.
+- **Entry point**: `UfpIndex` owns the backend, exposes CRUD + search.
+- **Config**: `IndexConfig` describes backend, compression, quantization. Clone it to share settings across workers.
+- **Storage abstraction**: `IndexBackend` trait lets you swap implementations. Six methods to implement.
+- **Compression**: `CompressionConfig` (none/zstd) shrinks data before storage. `QuantizationConfig` converts semantic vectors to i8 deterministically.
+- **Query engine**: `QueryMode::Semantic` does cosine on embeddings. `QueryMode::Perceptual` does Jaccard on MinHash. Ties break lexicographically for consistent pagination.
 
-1. `ucfp::process_record_with_perceptual_configs` runs ingest +
-   canonicalization + perceptual fingerprinting and returns the canonical
-   document plus its MinHash values.
-2. `ucfp::semanticize_document` (or `process_record_with_semantic_configs`)
-   consumes that canonical document to produce a semantic embedding.
-3. The resulting structures are converted into an `IndexRecord` and written via
-   `UfpIndex::upsert`.
-4. When serving lookups or dedupe checks, `ucfp` builds a partial `IndexRecord`
-   (usually just perceptual hashes or a quantized embedding) and calls
-   `UfpIndex::search` in the desired `QueryMode`.
+## Using with the upper layer (`ucfp`)
 
-### Write path (ingest ➜ index)
-- `RawIngestRecord` enters the pipeline through `ucfp`.
-- After canonical/perceptual processing, capture the canonical hash
-  (`CanonicalizedDocument::sha256_hex`) and MinHash vector
-  (`PerceptualFingerprint::minhash`).
-- Produce a semantic embedding via `semanticize_document` and quantize it with
-  `UfpIndex::quantize_with_strategy` so the write path never stores full `f32`
-  vectors.
-- Persist everything with `index.upsert`, attaching any tenant/user metadata as
-  JSON so higher-level services can perform authorization or filtering without
-  another lookup.
+`ucfp` (workspace root crate) runs ingest, canonical, perceptual, semantic stages. `index` is the persistence layer behind them:
 
-### Read path (index ➜ upper layer)
-- Build a query `IndexRecord` that mirrors the modality you care about (provide
-  just `perceptual` or just `embedding`).
-- Choose `QueryMode::Perceptual` for near-duplicate detection or
-  `QueryMode::Semantic` for semantic similarity search.
-- The upper layer merges `QueryResult` metadata with its own domain objects
-  (e.g., fetches full documents, triggers alerts, or shows UI previews).
-- Because backends share the same trait, you can run the exact same read path
-  against in-memory, embedded, or remote stores depending on the deployment
-  tier.
+1. `ucfp::process_record_with_perceptual_configs` → canonical doc + MinHash
+2. `ucfp::semanticize_document` → semantic embedding
+3. Convert to `IndexRecord` and `upsert`
+4. Build partial record for lookups and `search`
 
-### Example: wiring the pipeline output
+### Write path
+
 ```rust,ignore
-use ndarray::Array1;
-use serde_json::json;
-use ucfp::{
-    CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig,
-    RawIngestRecord, PipelineError,
-    process_record_with_perceptual_configs, semanticize_document,
+// After processing with ucfp pipeline...
+let quantized = UfpIndex::quantize_with_strategy(
+    &Array1::from(embedding.vector.clone()),
+    &index_cfg.quantization,
+);
+
+let record = IndexRecord {
+    schema_version: INDEX_SCHEMA_VERSION,
+    canonical_hash: doc.sha256_hex.clone(),
+    perceptual: Some(fingerprint.minhash.clone()),
+    embedding: Some(quantized),
+    metadata: json!({ /* your metadata */ }),
 };
-use index::{
-    BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION,
-};
 
-fn upsert_pipeline_record(
-    index: &UfpIndex,
-    index_cfg: &IndexConfig,
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-    perceptual_cfg: &PerceptualConfig,
-    semantic_cfg: &SemanticConfig,
-) -> Result<(), PipelineError> {
-    let tenant = raw.metadata.tenant_id.clone();
-    let source = raw.source.clone();
-    let (doc, fingerprint) = process_record_with_perceptual_configs(
-        raw,
-        ingest_cfg,
-        canonical_cfg,
-        perceptual_cfg,
-    )?;
-    let embedding = semanticize_document(&doc, semantic_cfg)?;
-
-    let quantized = UfpIndex::quantize_with_strategy(
-        &Array1::from(embedding.vector.clone()),
-        &index_cfg.quantization,
-    );
-
-    let record = IndexRecord {
-        schema_version: INDEX_SCHEMA_VERSION,
-        canonical_hash: doc.sha256_hex.clone(),
-        perceptual: Some(fingerprint.minhash.clone()),
-        embedding: Some(quantized),
-        metadata: json!({
-            "tenant": tenant,
-            "doc_id": doc.doc_id,
-            "model": embedding.model_name,
-            "tier": embedding.tier,
-            "source": source,
-        }),
-    };
-
-    index.upsert(&record)?;
-    Ok(())
-}
-
-// Later, to surface candidates inside an API handler:
-let hits = index.search(&query_record, QueryMode::Perceptual, 10)?;
+index.upsert(&record)?;
 ```
 
-This pattern keeps the upper layer focused on pipeline orchestration and
-business logic while `index` handles storage details, compression,
-quantization, and query semantics in a single place.
+### Read path
 
-For a runnable walkthrough, run `cargo run -p ucfp --example full_pipeline` from the
-workspace root; it wires ingest + canonical + perceptual + semantic stages
-directly into the in-memory backend and prints both semantic and perceptual
-matches.
+Build a query `IndexRecord` with just the modality you need (perceptual OR embedding), pick your `QueryMode`, and get `QueryResult`s back.
 
-## Feature Flags
+## Feature flags
 
-| Feature | Enables |
-| --- | --- |
-| `backend-redb` *(default)* | Redb backend (requires pure Rust at build). |
+| Feature | What it does |
+|---------|--------------|
+| `backend-redb` *(default)* | Redb backend (pure Rust) |
 
-Disable default features (`--no-default-features`) to run purely in-memory
-without pulling in Redb or its pure Rust toolchain.
+Disable default features for purely in-memory runs: `cargo test -p index --no-default-features`
 
-## Testing
+## Tests
 
 ```bash
-# In-memory only (no Redb/pure Rust needed)
+# In-memory only
 cargo test -p index --no-default-features
 
-# Full suite with Redb enabled
+# Full suite with Redb
 cargo test -p index
 ```
 
-Unit tests cover serialization roundtrips, backend swaps, and query correctness.
-Integration tests/examples exercise both in-memory and Redb paths; enable the
-default feature set when you want parity with production deployments.
+Unit tests cover serialization, backend swaps, and query correctness. Integration tests exercise both paths.
+
+Runnable example: `cargo run -p ucfp --example full_pipeline`
