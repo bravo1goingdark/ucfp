@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react'
-import { motion } from 'framer-motion'
+import { useEffect, useState, useRef } from 'react'
+import { motion, useScroll, useTransform } from 'framer-motion'
 import { Github, GitCommit, Clock, Check, AlertCircle, FileText, Image, Music, Video, FileStack, Box, 
-         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, X } from 'lucide-react'
+         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, X, Sparkles } from 'lucide-react'
 import '../styles/LandingPage.css'
 import '../styles/Pipeline.css'
+import { ParticlesBackground, FloatingShapes, NoiseOverlay } from '../components/VisualEffects'
+import { useScrollReveal, useTilt } from '../hooks/useAnimations'
 
 interface CommitInfo {
   sha: string
@@ -223,8 +225,56 @@ const problemCards = [
     }
   ]
 
+function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
+  const [count, setCount] = useState(0)
+  const { ref, isRevealed } = useScrollReveal<HTMLSpanElement>({ threshold: 0.5 })
+
+  useEffect(() => {
+    if (!isRevealed) return
+
+    const duration = 2000
+    const startTime = performance.now()
+
+    const animate = (currentTime: number) => {
+      const elapsed = currentTime - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      const easeOut = 1 - Math.pow(1 - progress, 3)
+      setCount(Math.floor(value * easeOut))
+
+      if (progress < 1) {
+        requestAnimationFrame(animate)
+      }
+    }
+
+    requestAnimationFrame(animate)
+  }, [isRevealed, value])
+
+  return (
+    <span ref={ref}>
+      {count}
+      {suffix}
+    </span>
+  )
+}
+
+function TiltCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  const cardRef = useRef<HTMLElement>(null)
+  useTilt(cardRef as React.RefObject<HTMLElement | null>, 8)
+
+  return (
+    <div ref={cardRef as React.RefObject<HTMLDivElement>} className={`tilt-3d ${className}`} style={{ transformStyle: 'preserve-3d' }}>
+      {children}
+    </div>
+  )
+}
+
+
+
 export default function LandingPage() {
   const [commit, setCommit] = useState<CommitInfo | null>(null)
+  const { scrollYProgress } = useScroll()
+  const heroY = useTransform(scrollYProgress, [0, 0.3], [0, -100])
+  const heroOpacity = useTransform(scrollYProgress, [0, 0.3], [1, 0])
 
   useEffect(() => {
     fetch('https://api.github.com/repos/bravo1goingdark/ucfp/commits?per_page=1')
@@ -244,16 +294,22 @@ export default function LandingPage() {
   }, [])
 
   return (
-    <div className="landing-page">
+    <div className="landing-page" style={{ position: 'relative' }}>
+      <ParticlesBackground />
+      <FloatingShapes />
+      <NoiseOverlay />
       {/* 1. HERO SECTION */}
-      <section className="hero-section">
+      <motion.section 
+        className="hero-section"
+        style={{ y: heroY, opacity: heroOpacity }}
+      >
         <motion.div 
           className="hero-badge-container"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
+          initial={{ opacity: 0, y: 30, scale: 0.9 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         >
-          <div className="badge-group">
+          <div className="badge-group glow-sm">
             <span className="hero-badge open-source-badge">
               <span className="pulse-dot" />
               Open Source
@@ -265,9 +321,10 @@ export default function LandingPage() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hero-badge commit-badge"
-                initial={{ opacity: 0, x: -10 }}
+                initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
+                transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                whileHover={{ scale: 1.02 }}
               >
                 <GitCommit size={14} />
                 <code className="commit-hash">{commit.sha}</code>
@@ -283,20 +340,28 @@ export default function LandingPage() {
         </motion.div>
 
         <motion.h1
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
+          transition={{ duration: 0.8, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
         >
           Universal Content
           <br />
-          <span className="gradient-text">Fingerprinting</span>
+          <span className="gradient-text">
+            Fingerprinting
+            <Sparkles className="float" size={32} style={{ 
+              display: 'inline-block', 
+              marginLeft: '12px',
+              color: 'var(--accent-amber)',
+              verticalAlign: 'middle'
+            }} />
+          </span>
         </motion.h1>
 
         <motion.p
           className="hero-subtitle"
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
+          transition={{ duration: 0.8, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
         >
           Deterministic fingerprints for text, images, audio, video, and documents.
           Built in Rust for teams that need exact matching, near-duplicate detection,
@@ -304,25 +369,30 @@ export default function LandingPage() {
         </motion.p>
 
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
+          transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
         >
-          <a href="https://github.com/bravo1goingdark/ucfp" className="btn btn-primary btn-large">
+          <motion.a 
+            href="https://github.com/bravo1goingdark/ucfp" 
+            className="btn btn-gradient btn-large"
+            whileHover={{ scale: 1.05, y: -3 }}
+            whileTap={{ scale: 0.98 }}
+          >
             <Github size={18} />
             Get Started on GitHub
-          </a>
+          </motion.a>
         </motion.div>
 
         <motion.p
           className="hero-note"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.5, delay: 0.5 }}
+          transition={{ duration: 0.8, delay: 0.5 }}
         >
           ~2ms per 1K words · 6-stage pipeline · REST API included
         </motion.p>
-      </section>
+      </motion.section>
 
       {/* 2. THE PROBLEM */}
       <section id="problem" className="problem">
@@ -451,40 +521,55 @@ export default function LandingPage() {
           
           <div className="pipeline-grid">
             {pipelineStages.map((stage, index) => (
-              <motion.div 
-                key={stage.name}
-                className="pipeline-card"
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-50px" }}
-                transition={{ duration: 0.4, delay: index * 0.05 }}
-              >
-                <div className="pipeline-card-header">
-                  <div className="pipeline-icon">
-                    <stage.icon size={22} strokeWidth={1.5} />
+              <TiltCard key={stage.name} className="pipeline-card-wrapper">
+                <motion.div 
+                  className="pipeline-card card-gradient-border"
+                  initial={{ opacity: 0, y: 30 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: "-50px" }}
+                  transition={{ duration: 0.6, delay: index * 0.08, ease: [0.16, 1, 0.3, 1] }}
+                  whileHover={{ 
+                    scale: 1.02,
+                    transition: { duration: 0.3 }
+                  }}
+                >
+                  <div className="pipeline-card-header">
+                    <motion.div 
+                      className="pipeline-icon"
+                      whileHover={{ rotate: 360, scale: 1.1 }}
+                      transition={{ duration: 0.5 }}
+                    >
+                      <stage.icon size={22} strokeWidth={1.5} />
+                    </motion.div>
+                    <span className="pipeline-step">{stage.step}</span>
                   </div>
-                  <span className="pipeline-step">{stage.step}</span>
-                </div>
-                
-                <div className="pipeline-card-body">
-                  <h3>{stage.name}</h3>
-                  <p className="pipeline-description">{stage.description}</p>
                   
-                  <ul className="pipeline-features">
-                    {stage.features.map((feature, fIndex) => (
-                      <li key={fIndex}>
-                        <Check size={14} />
-                        {feature}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                  <div className="pipeline-card-body">
+                    <h3>{stage.name}</h3>
+                    <p className="pipeline-description">{stage.description}</p>
+                    
+                    <ul className="pipeline-features">
+                      {stage.features.map((feature, fIndex) => (
+                        <motion.li 
+                          key={fIndex}
+                          initial={{ opacity: 0, x: -10 }}
+                          whileInView={{ opacity: 1, x: 0 }}
+                          viewport={{ once: true }}
+                          transition={{ delay: index * 0.08 + fIndex * 0.05 }}
+                        >
+                          <Check size={14} />
+                          {feature}
+                        </motion.li>
+                      ))}
+                    </ul>
+                  </div>
 
-                <div className="pipeline-card-footer">
-                  <span className="pipeline-metric">{stage.metric}</span>
-                  <span className="pipeline-metric-label">avg latency</span>
-                </div>
-              </motion.div>
+                  <div className="pipeline-card-footer">
+                    <span className="pipeline-metric">{stage.metric}</span>
+                    <span className="pipeline-metric-label">avg latency</span>
+                  </div>
+                </motion.div>
+              </TiltCard>
             ))}
           </div>
         </motion.div>
@@ -656,74 +741,114 @@ export default function LandingPage() {
           </p>
           
           <div className="status-stats-large">
-            <motion.div 
-              className="stat-card-large"
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0 }}
-            >
-              <div className="stat-icon">
-                <Zap size={32} />
-              </div>
-              <span className="stat-value">~2ms</span>
-              <span className="stat-label">per 1K words</span>
-              <span className="stat-sublabel">End-to-end processing</span>
-            </motion.div>
+            <TiltCard className="stat-card-wrapper">
+              <motion.div 
+                className="stat-card-large glow-sm"
+                initial={{ opacity: 0, scale: 0.8, y: 30 }}
+                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: 0, ease: [0.16, 1, 0.3, 1] }}
+                whileHover={{ scale: 1.05, y: -5 }}
+              >
+                <motion.div 
+                  className="stat-icon pulse-glow"
+                  whileHover={{ rotate: 15 }}
+                >
+                  <Zap size={32} />
+                </motion.div>
+                <span className="stat-value">~2ms</span>
+                <span className="stat-label">per 1K words</span>
+                <span className="stat-sublabel">End-to-end processing</span>
+              </motion.div>
+            </TiltCard>
             
-            <motion.div 
-              className="stat-card-large"
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-            >
-              <div className="stat-icon">
-                <Layers size={32} />
-              </div>
-              <span className="stat-value">6</span>
-              <span className="stat-label">pipeline stages</span>
-              <span className="stat-sublabel">Independent & modular</span>
-            </motion.div>
+            <TiltCard className="stat-card-wrapper">
+              <motion.div 
+                className="stat-card-large glow-sm"
+                initial={{ opacity: 0, scale: 0.8, y: 30 }}
+                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+                whileHover={{ scale: 1.05, y: -5 }}
+              >
+                <motion.div 
+                  className="stat-icon"
+                  whileHover={{ rotate: 15 }}
+                >
+                  <Layers size={32} />
+                </motion.div>
+                <span className="stat-value"><AnimatedCounter value={6} /></span>
+                <span className="stat-label">pipeline stages</span>
+                <span className="stat-sublabel">Independent & modular</span>
+              </motion.div>
+            </TiltCard>
             
-            <motion.div 
-              className="stat-card-large"
-              initial={{ opacity: 0, scale: 0.9 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-            >
-              <div className="stat-icon ready">
-                <Check size={32} />
-              </div>
-              <span className="stat-value">1</span>
-              <span className="stat-label">ready modality</span>
-              <span className="stat-sublabel">Text pipeline stable</span>
-            </motion.div>
+            <TiltCard className="stat-card-wrapper">
+              <motion.div 
+                className="stat-card-large glow-sm"
+                initial={{ opacity: 0, scale: 0.8, y: 30 }}
+                whileInView={{ opacity: 1, scale: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                whileHover={{ scale: 1.05, y: -5 }}
+              >
+                <motion.div 
+                  className="stat-icon ready pulse-glow"
+                  animate={{ 
+                    boxShadow: [
+                      '0 0 20px rgba(34, 197, 94, 0.3)',
+                      '0 0 40px rgba(34, 197, 94, 0.5)',
+                      '0 0 20px rgba(34, 197, 94, 0.3)'
+                    ]
+                  }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                >
+                  <Check size={32} />
+                </motion.div>
+                <span className="stat-value"><AnimatedCounter value={1} /></span>
+                <span className="stat-label">ready modality</span>
+                <span className="stat-sublabel">Text pipeline stable</span>
+              </motion.div>
+            </TiltCard>
           </div>
 
           <div className="modalities-grid-large">
             {modalities.map((modality, index) => (
-              <motion.div
-                key={modality.name}
-                className="modality-card-large"
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: index * 0.05 }}
-              >
-                <div className="modality-header-large">
-                  <div className="modality-icon-large">
-                    <modality.icon size={28} strokeWidth={1.5} />
+              <TiltCard key={modality.name} className="modality-card-wrapper">
+                <motion.div
+                  className={`modality-card-large ${modality.status === 'Ready' ? 'card-gradient-border' : ''}`}
+                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                  whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: index * 0.08, ease: [0.16, 1, 0.3, 1] }}
+                  whileHover={{ 
+                    scale: 1.03,
+                    transition: { duration: 0.3 }
+                  }}
+                >
+                  <div className="modality-header-large">
+                    <motion.div 
+                      className="modality-icon-large"
+                      whileHover={{ rotate: 360, scale: 1.1 }}
+                      transition={{ duration: 0.6 }}
+                    >
+                      <modality.icon size={28} strokeWidth={1.5} />
+                    </motion.div>
+                    <motion.span 
+                      className={`modality-status ${modality.status.toLowerCase()}`}
+                      initial={{ scale: 0 }}
+                      whileInView={{ scale: 1 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: index * 0.08 + 0.2, type: "spring", stiffness: 300 }}
+                    >
+                      {modality.status === 'Ready' ? <Check size={14} /> : <Clock size={14} />}
+                      {modality.status}
+                    </motion.span>
                   </div>
-                  <span className={`modality-status ${modality.status.toLowerCase()}`}>
-                    {modality.status === 'Ready' ? <Check size={14} /> : <Clock size={14} />}
-                    {modality.status}
-                  </span>
-                </div>
-                <h4>{modality.name}</h4>
-                <p>{modality.description}</p>
-              </motion.div>
+                  <h4>{modality.name}</h4>
+                  <p>{modality.description}</p>
+                </motion.div>
+              </TiltCard>
             ))}
           </div>
         </motion.div>
@@ -760,27 +885,59 @@ export default function LandingPage() {
       {/* 9. FINAL CTA */}
       <section className="final-cta-section">
         <motion.div
-          initial={{ opacity: 0, y: 30 }}
+          initial={{ opacity: 0, y: 50 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
+          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         >
-          <h2>Built for teams that need content matching they can trust.</h2>
+          <motion.h2
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.1 }}
+          >
+            Built for teams that need
+            <br />
+            <span className="gradient-text">content matching</span> they can trust.
+          </motion.h2>
           
-          <p>
+          <motion.p
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+          >
             If you are building deduplication, plagiarism detection, or semantic search
             into your product and want one system that handles exact, similar, and semantic
             matching, UCFP is designed for you.
-          </p>
+          </motion.p>
           
-          <a href="https://github.com/bravo1goingdark/ucfp" className="btn btn-primary btn-large">
-            <Github size={18} />
-            Get Started on GitHub
-          </a>
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.3 }}
+          >
+            <motion.a 
+              href="https://github.com/bravo1goingdark/ucfp" 
+              className="btn btn-gradient btn-large pulse-glow"
+              whileHover={{ scale: 1.05, y: -3 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <Github size={18} />
+              Get Started on GitHub
+            </motion.a>
+          </motion.div>
           
-           <p className="cta-note">
-             Apache 2.0 licensed · Text pipeline ready · SaaS launch coming soon · Other modalities in development
-           </p>
+          <motion.p 
+            className="cta-note"
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.6, delay: 0.5 }}
+          >
+            Apache 2.0 licensed · Text pipeline ready · SaaS launch coming soon · Other modalities in development
+          </motion.p>
         </motion.div>
       </section>
     </div>
