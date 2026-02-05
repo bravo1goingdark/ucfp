@@ -21,12 +21,56 @@ thiserror = "2.0.17"
 tokio = { version = "1.42", features = ["rt", "rt-multi-thread"] }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tempfile = "3"
 ndarray = "0.17"
+server = { path = "crates/server" }
+rand = "0.8"
+futures = "0.3"
+rayon = "1.10"
 
 [[bench]]
 name = "pipeline"
+harness = false
+
+[[bench]]
+name = "canonicalize_bench"
+harness = false
+
+[[bench]]
+name = "perceptual_bench"
+harness = false
+
+[[bench]]
+name = "index_bench"
+harness = false
+
+[[bench]]
+name = "semantic_bench"
+harness = false
+
+[[bench]]
+name = "ingest_bench"
+harness = false
+
+[[bench]]
+name = "matcher_bench"
+harness = false
+
+[[bench]]
+name = "storage_bench"
+harness = false
+
+[[bench]]
+name = "ann_bench"
+harness = false
+
+[[bench]]
+name = "scalability_bench"
+harness = false
+
+[[bench]]
+name = "concurrency_bench"
 harness = false
 
 [workspace]
@@ -45,3 +89,8 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 panic = "abort"
+
+[profile.bench]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
