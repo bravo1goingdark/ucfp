@@ -67,6 +67,19 @@ matcher:
   oversample_factor: 3.0  # Higher for better recall
   explain: false  # Disable in production for speed
 
+# HTTP Server Configuration
+server:
+  bind_addr: "0.0.0.0"
+  port: 8080
+  timeout_secs: 60
+  max_body_size_mb: 100
+  rate_limit_per_minute: 100
+  api_keys:
+    - "demo-key-12345"
+  enable_cors: true
+  log_level: "info"
+  metrics_enabled: true
+
 # Environment overrides for secrets
 env_overrides:
   UCFP_SEMANTIC_API_KEY: "${SEMANTIC_API_KEY}"

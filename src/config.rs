@@ -111,6 +111,10 @@ pub struct UcfpConfig {
     #[serde(default)]
     pub matcher: MatchYamlConfig,
 
+    /// HTTP server configuration
+    #[serde(default)]
+    pub server: ServerYamlConfig,
+
     /// Optional environment variable overrides
     #[serde(default)]
     pub env_overrides: HashMap<String, String>,
@@ -145,6 +149,7 @@ impl UcfpConfig {
         self.semantic.validate()?;
         self.index.validate()?;
         self.matcher.validate()?;
+        self.server.validate()?;
 
         Ok(())
     }
@@ -161,6 +166,7 @@ impl Default for UcfpConfig {
             semantic: SemanticYamlConfig::default(),
             index: IndexYamlConfig::default(),
             matcher: MatchYamlConfig::default(),
+            server: ServerYamlConfig::default(),
             env_overrides: HashMap::new(),
         }
     }
@@ -531,6 +537,88 @@ impl Default for MatchYamlConfig {
     }
 }
 
+/// HTTP server YAML configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerYamlConfig {
+    /// Server bind address
+    #[serde(default = "default_server_bind_addr")]
+    pub bind_addr: String,
+
+    /// Server port
+    #[serde(default = "default_server_port")]
+    pub port: u16,
+
+    /// Request timeout in seconds
+    #[serde(default = "default_server_timeout_secs")]
+    pub timeout_secs: u64,
+
+    /// Maximum request body size in MB
+    #[serde(default = "default_server_max_body_size_mb")]
+    pub max_body_size_mb: usize,
+
+    /// Rate limit: requests per minute per API key
+    #[serde(default = "default_server_rate_limit")]
+    pub rate_limit_per_minute: u32,
+
+    /// API keys for authentication
+    #[serde(default)]
+    pub api_keys: Vec<String>,
+
+    /// Enable CORS
+    #[serde(default = "true_value")]
+    pub enable_cors: bool,
+
+    /// Log level
+    #[serde(default = "default_server_log_level")]
+    pub log_level: String,
+
+    /// Metrics endpoint enabled
+    #[serde(default = "true_value")]
+    pub metrics_enabled: bool,
+}
+
+impl ServerYamlConfig {
+    fn validate(&self) -> Result<(), ConfigLoadError> {
+        if self.port == 0 {
+            return Err(ConfigLoadError::Validation(
+                "server.port must be >= 1".to_string(),
+            ));
+        }
+        if self.timeout_secs == 0 {
+            return Err(ConfigLoadError::Validation(
+                "server.timeout_secs must be >= 1".to_string(),
+            ));
+        }
+        if self.max_body_size_mb == 0 {
+            return Err(ConfigLoadError::Validation(
+                "server.max_body_size_mb must be >= 1".to_string(),
+            ));
+        }
+        if self.rate_limit_per_minute == 0 {
+            return Err(ConfigLoadError::Validation(
+                "server.rate_limit_per_minute must be >= 1".to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl Default for ServerYamlConfig {
+    fn default() -> Self {
+        Self {
+            bind_addr: default_server_bind_addr(),
+            port: default_server_port(),
+            timeout_secs: default_server_timeout_secs(),
+            max_body_size_mb: default_server_max_body_size_mb(),
+            rate_limit_per_minute: default_server_rate_limit(),
+            api_keys: vec!["demo-key-12345".to_string()],
+            enable_cors: true,
+            log_level: default_server_log_level(),
+            metrics_enabled: true,
+        }
+    }
+}
+
 // Helper functions for serde defaults
 fn default_version() -> u32 {
     1
@@ -600,6 +688,24 @@ fn default_max_results() -> usize {
 }
 fn default_oversample() -> f32 {
     2.0
+}
+fn default_server_bind_addr() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_server_port() -> u16 {
+    8080
+}
+fn default_server_timeout_secs() -> u64 {
+    30
+}
+fn default_server_max_body_size_mb() -> usize {
+    10
+}
+fn default_server_rate_limit() -> u32 {
+    100
+}
+fn default_server_log_level() -> String {
+    "info".to_string()
 }
 
 #[cfg(test)]

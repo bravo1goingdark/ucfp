@@ -194,19 +194,11 @@ async fn test_batch_process_request() {
 }
 
 #[tokio::test]
-async fn test_tenant_isolation() {
+async fn test_api_key_exists_in_config() {
     let state = create_test_state();
 
-    // Verify tenant ID resolution from config when not provided
-    let resolved_tenant = state
-        .config
-        .api_keys
-        .iter()
-        .next()
-        .cloned()
-        .unwrap_or_default();
-    assert!(!resolved_tenant.is_empty());
-    assert_eq!(resolved_tenant, "test-api-key");
+    // Verify the test API key exists in config
+    assert!(state.config.api_keys.contains("test-api-key"));
 }
 
 #[tokio::test]

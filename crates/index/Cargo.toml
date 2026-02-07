@@ -29,7 +29,3 @@ hnsw_rs = "0.3.1"
 [dev-dependencies]
 tempfile = "3.13"
 criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "index_bench"
-harness = false

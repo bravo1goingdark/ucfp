@@ -121,7 +121,7 @@ impl<T> RetryResult<T> {
 ///
 /// # Example
 /// ```
-/// use semantic::retry::{RetryConfig, execute_with_retry};
+/// use semantic::resilience::{RetryConfig, execute_with_retry};
 /// use std::time::Duration;
 ///
 /// let config = RetryConfig::default()
@@ -223,7 +223,7 @@ pub fn is_retryable_error(error: &str) -> bool {
 ///
 /// # Example
 /// ```
-/// use semantic::retry::{RetryConfig, execute_with_retry_async};
+/// use semantic::resilience::{RetryConfig, execute_with_retry_async};
 /// use std::time::Duration;
 ///
 /// async fn example() {

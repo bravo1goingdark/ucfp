@@ -191,7 +191,7 @@ fn bench_quantization(c: &mut Criterion) {
     let dim = 384;
     let scale = 127.0;
 
-    for size in [100, 1000, 10000].iter() {
+    for size in [100, 1000, 5000].iter() {
         let vectors: Vec<Array1<f32>> = (0..*size)
             .map(|_| Array1::from(random_vector(dim)))
             .collect();
@@ -220,7 +220,7 @@ fn bench_ann_degradation(c: &mut Criterion) {
         ..Default::default()
     };
 
-    for size in [100, 1000, 5000, 10000].iter() {
+    for size in [100, 1000, 10000].iter() {
         let vectors: Vec<(String, Vec<f32>)> = (0..*size)
             .map(|i| (format!("vec-{}", i), random_vector(dim)))
             .collect();

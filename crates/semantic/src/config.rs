@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::circuit_breaker::CircuitBreakerConfig;
-use crate::rate_limit::RateLimitConfig;
-use crate::retry::RetryConfig;
+use crate::resilience::{CircuitBreakerConfig, RateLimitConfig, RetryConfig};
 
 /// Runtime configuration describing which model/tokenizer to use and how to post-process vectors.
 ///

@@ -55,3 +55,16 @@ matcher:
   strategy: "weighted"
   oversample_factor: 1.5
   explain: true  # Enable explanations for debugging
+
+# HTTP Server Configuration (Development)
+server:
+  bind_addr: "127.0.0.1"
+  port: 3000
+  timeout_secs: 30
+  max_body_size_mb: 50
+  rate_limit_per_minute: 1000
+  api_keys:
+    - "dev-key"
+  enable_cors: true
+  log_level: "debug"
+  metrics_enabled: true

@@ -3,10 +3,11 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::circuit_breaker::{CircuitBreakerManager, CircuitState};
 use crate::normalize::l2_normalize_in_place;
-use crate::rate_limit::{RateLimitManager, RateLimitStats, TokenBucket};
-use crate::retry::{execute_with_retry_async, is_retryable_error, RetryConfig, RetryResult};
+use crate::resilience::{
+    execute_with_retry_async, is_retryable_error, CircuitBreakerManager, CircuitState,
+    RateLimitManager, RateLimitStats, RetryConfig, RetryResult, TokenBucket,
+};
 use crate::{SemanticConfig, SemanticEmbedding, SemanticError};
 
 // Global managers for resilience (lazy-initialized)
@@ -510,9 +511,7 @@ pub fn is_provider_healthy(provider: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::circuit_breaker::CircuitBreakerConfig;
-    use crate::rate_limit::RateLimitConfig;
-    use crate::retry::RetryConfig;
+    use crate::resilience::{CircuitBreaker, CircuitBreakerConfig, RateLimitConfig, RetryConfig};
     use std::time::Duration;
 
     fn test_config() -> SemanticConfig {
@@ -581,8 +580,6 @@ mod tests {
 
     #[test]
     fn test_circuit_breaker_tracks_failures() {
-        use crate::circuit_breaker::CircuitBreaker;
-
         // Create a circuit breaker with custom config (low threshold for testing)
         let cb = Arc::new(CircuitBreaker::new(
             CircuitBreakerConfig::default()

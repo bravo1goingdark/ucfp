@@ -67,10 +67,9 @@ pub mod config;
 pub mod error;
 pub mod types;
 
-// Resilience bits
-pub mod circuit_breaker;
-pub mod rate_limit;
-pub mod retry;
+// Resilience patterns for API calls
+pub mod resilience;
+
 mod serde_millis;
 
 mod api;
