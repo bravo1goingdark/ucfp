@@ -7,3 +7,7 @@ architecture.md
 nul
 web/node_modules
 web/dist
+
+# Profiling artifacts
+perf.data
+perf.data.*
