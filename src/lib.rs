@@ -609,13 +609,6 @@ pub fn process_record_with_configs(
                 }
             }
         }
-        CanonicalPayload::Binary(_) => {
-            let err = PipelineError::NonTextPayload;
-            if let Some(span) = canonical_metrics.take() {
-                span.record_canonical(Err(err.clone()));
-            }
-            Err(err)
-        }
         _ => {
             let err = PipelineError::NonTextPayload;
             if let Some(span) = canonical_metrics.take() {
@@ -740,8 +733,19 @@ pub fn semanticize_document(
     // --- Semantic Stage ---
     let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from_document(doc));
 
-    // Use block_on for async semanticize call
-    let result = tokio::task::block_in_place(|| {
+    // Use existing runtime if available, otherwise create one
+    let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| {
+            handle.block_on(async {
+                semanticize(
+                    doc.doc_id.as_str(),
+                    doc.canonical_text.as_str(),
+                    semantic_cfg,
+                )
+                .await
+            })
+        })
+    } else {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             semanticize(
                 doc.doc_id.as_str(),
@@ -750,7 +754,7 @@ pub fn semanticize_document(
             )
             .await
         })
-    });
+    };
 
     match result {
         Ok(embedding) => {
@@ -864,8 +868,6 @@ pub fn match_document_with_metrics(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex, OnceLock, RwLock};
-    use std::time::Duration;
 
     fn base_record(payload: IngestPayload) -> RawIngestRecord {
         RawIngestRecord {

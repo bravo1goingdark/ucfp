@@ -15,6 +15,9 @@ use semantic::{semanticize, SemanticConfig, SemanticEmbedding};
 use crate::metrics::metrics_recorder;
 use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, MatchRequest};
 
+#[cfg(test)]
+mod tests;
+
 /// Trait for a matching engine.
 pub trait Matcher: Send + Sync {
     /// Run a single match request and return ordered hits.
@@ -427,6 +430,3 @@ impl Matcher for DefaultMatcher {
         Ok(hits)
     }
 }
-
-#[cfg(test)]
-mod tests;

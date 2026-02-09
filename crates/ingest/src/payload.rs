@@ -66,16 +66,6 @@ pub(crate) fn normalize_payload_value(
             if bytes.is_empty() {
                 Err(IngestError::EmptyBinaryPayload)
             } else {
-                // Validate binary payload size
-                if let Some(max_bytes) = cfg.max_payload_bytes {
-                    if bytes.len() > max_bytes {
-                        return Err(IngestError::PayloadTooLarge(format!(
-                            "binary payload too large: {} bytes",
-                            bytes.len()
-                        )));
-                    }
-                }
-
                 // Scan for suspicious patterns in binary data
                 if bytes.len() > 1024 {
                     let suspicious_patterns = [b'\x00', b'\xFF', b'\xFE'];

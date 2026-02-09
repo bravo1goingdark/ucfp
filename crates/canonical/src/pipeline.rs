@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use unicode_categories::UnicodeCategories;
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
@@ -31,10 +33,11 @@ pub fn canonicalize(
     let doc_id = doc_id.to_string();
 
     // Unicode normalization is the first step, as it can affect character boundaries.
-    let normalized_text = if cfg.normalize_unicode {
-        input.nfkc().collect::<String>()
+    // Use Cow to avoid allocation when normalization is disabled.
+    let normalized_text: Cow<str> = if cfg.normalize_unicode {
+        Cow::Owned(input.nfkc().collect::<String>())
     } else {
-        input.to_string()
+        Cow::Borrowed(input)
     };
 
     // Pre-allocate for efficiency, assuming canonical text is roughly the same size as normalized input.
@@ -45,7 +48,7 @@ pub fn canonicalize(
     let mut current_token_start: Option<usize> = None;
 
     process_chars(
-        &normalized_text,
+        normalized_text.as_ref(),
         cfg,
         &mut canonical_text,
         &mut tokens,
