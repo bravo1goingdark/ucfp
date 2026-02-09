@@ -25,12 +25,18 @@ pub fn canonicalize(
     }
 
     // A document ID is required for traceability.
-    let doc_id = doc_id.into();
-    let doc_id = doc_id.trim();
-    if doc_id.is_empty() {
+    let doc_id: String = doc_id.into();
+    let trimmed = doc_id.trim();
+    if trimmed.is_empty() {
         return Err(CanonicalError::MissingDocId);
     }
-    let doc_id = doc_id.to_string();
+    let doc_id = if doc_id.len() == trimmed.len() {
+        // No trimming needed, reuse the original String
+        doc_id
+    } else {
+        // Only allocate a new String if trimming actually removed something
+        trimmed.to_string()
+    };
 
     // Unicode normalization is the first step, as it can affect character boundaries.
     // Use Cow to avoid allocation when normalization is disabled.

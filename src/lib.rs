@@ -291,7 +291,13 @@ impl PipelineEvent {
     }
 
     fn format_key_values(&self, include_timestamp: bool) -> String {
-        let mut parts = Vec::new();
+        // Pre-allocate: base fields (stage, status, latency_us, record_id) + optional fields
+        let capacity = 4
+            + (include_timestamp as usize)
+            + self.doc_id.as_ref().map_or(0, |_| 1)
+            + self.tenant_id.as_ref().map_or(0, |_| 1)
+            + self.error.as_ref().map_or(0, |_| 1);
+        let mut parts = Vec::with_capacity(capacity);
         if include_timestamp {
             let ts = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
             parts.push(format!("timestamp=\"{ts}\""));
