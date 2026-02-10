@@ -1,8 +1,11 @@
 //! API resilience patterns: circuit breaker, rate limiting, and retry logic.
+//!
+//! These handle transient failures
+//! and prevent cascading failures when external services are overloaded.
 
-pub mod circuit_breaker;
-pub mod rate_limit;
-pub mod retry;
+mod circuit_breaker;
+mod rate_limit;
+mod retry;
 
 pub use circuit_breaker::{
     CircuitBreaker, CircuitBreakerConfig, CircuitBreakerManager, CircuitState,

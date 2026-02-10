@@ -1,19 +1,18 @@
 use once_cell::sync::OnceCell;
 use onnxruntime::{environment::Environment, session::Session};
-use std::{cell::RefCell, path::PathBuf, rc::Rc};
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
 use tokenizers::Tokenizer;
 
 use crate::assets::ModelAssets;
 use crate::SemanticError;
 
 static ORT_ENV: OnceCell<Environment> = OnceCell::new();
-const ORT_NAME: &str = "semantic";
 
 thread_local! {
-    static MODEL_CACHE: RefCell<lru::LruCache<ModelCacheKey, Rc<CachedModel>>> =
-        RefCell::new(lru::LruCache::new(
-            std::num::NonZeroUsize::new(8).expect("Non-zero cache size")
-        ));
+    static MODEL_CACHE: RefCell<std::collections::HashMap<ModelCacheKey, Rc<CachedModel>>> =
+        RefCell::new(std::collections::HashMap::new());
 }
 
 #[derive(Hash, PartialEq, Eq, Clone)]
@@ -55,23 +54,21 @@ pub(crate) fn get_or_load_model_handle(
     };
 
     MODEL_CACHE.with(|cache| {
-        // Check cache first
-        if let Some(handle) = cache.borrow_mut().get(&key).cloned() {
-            return Ok(handle);
+        let mut cache = cache.borrow_mut();
+        if let Some(handle) = cache.get(&key) {
+            return Ok(handle.clone());
         }
 
-        // Load new model and add to cache
         let handle = Rc::new(CachedModel::load(assets)?);
-        cache.borrow_mut().put(key.clone(), handle.clone());
+        cache.insert(key, handle.clone());
         Ok(handle)
     })
 }
 
-/// Lazily constructs a global ONNX Runtime environment that can be shared by all calls.
 fn ort_environment() -> Result<&'static Environment, SemanticError> {
     ORT_ENV.get_or_try_init(|| {
         Environment::builder()
-            .with_name(ORT_NAME)
+            .with_name("semantic")
             .build()
             .map_err(|e| SemanticError::Inference(e.to_string()))
     })

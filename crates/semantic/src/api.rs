@@ -512,32 +512,6 @@ pub fn is_provider_healthy(provider: &str) -> bool {
 mod tests {
     use super::*;
     use crate::resilience::{CircuitBreaker, CircuitBreakerConfig, RateLimitConfig, RetryConfig};
-    use std::time::Duration;
-
-    fn test_config() -> SemanticConfig {
-        SemanticConfig {
-            mode: "api".into(),
-            api_url: Some("https://api.example.com/embed".into()),
-            api_provider: Some("test".into()),
-            enable_resilience: true,
-            retry_config: Some(
-                RetryConfig::default()
-                    .with_max_retries(2)
-                    .with_base_delay(Duration::from_millis(10)),
-            ),
-            circuit_breaker_config: Some(
-                CircuitBreakerConfig::default()
-                    .with_failure_threshold(2)
-                    .with_reset_timeout(Duration::from_millis(50)),
-            ),
-            rate_limit_config: Some(
-                RateLimitConfig::default()
-                    .with_requests_per_second(100.0)
-                    .with_burst_size(10),
-            ),
-            ..SemanticConfig::default()
-        }
-    }
 
     #[test]
     fn test_provider_name_extraction() {
@@ -634,5 +608,30 @@ mod tests {
         let result3 = parse_embedding_collection(json!([]));
         assert!(result3.is_ok());
         assert!(result3.unwrap().is_empty());
+    }
+
+    fn test_config() -> SemanticConfig {
+        SemanticConfig {
+            mode: "api".into(),
+            api_url: Some("https://api.example.com/embed".into()),
+            api_provider: Some("test".into()),
+            enable_resilience: true,
+            retry_config: Some(
+                RetryConfig::default()
+                    .with_max_retries(2)
+                    .with_base_delay(Duration::from_millis(10)),
+            ),
+            circuit_breaker_config: Some(
+                CircuitBreakerConfig::default()
+                    .with_failure_threshold(2)
+                    .with_reset_timeout(Duration::from_millis(50)),
+            ),
+            rate_limit_config: Some(
+                RateLimitConfig::default()
+                    .with_requests_per_second(100.0)
+                    .with_burst_size(10),
+            ),
+            ..SemanticConfig::default()
+        }
     }
 }

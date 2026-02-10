@@ -24,6 +24,7 @@ lru = "0.12"
 # --- Resilience dependencies ---
 tokio = { version = "1.42", features = ["time", "sync", "rt", "rt-multi-thread", "macros"] }
 dashmap = "6.1"
+fastrand = "2"
 
 [dev-dependencies]
 anyhow = "1"

@@ -22,54 +22,26 @@ pub enum QueryMode {
     Perceptual,
 }
 
-/// Chunk size for SIMD-optimized operations
-const SIMD_CHUNK_SIZE: usize = 32;
-
 /// Provides semantic & perceptual retrieval methods
 impl UfpIndex {
     /// Compute cosine similarity between two quantized vectors.
-    /// The dot product is computed on the i8 values, then normalized.
-    /// Uses chunked processing for better auto-vectorization.
+    /// Simple implementation that the compiler can auto-vectorize.
     #[inline]
     fn cosine_similarity(a: &[i8], b: &[i8]) -> f32 {
         if a.len() != b.len() || a.is_empty() {
             return 0.0;
         }
 
-        let len = a.len();
         let mut dot: i32 = 0;
         let mut norm_a: i32 = 0;
         let mut norm_b: i32 = 0;
 
-        // Process in chunks for better cache locality and auto-vectorization
-        let chunks = len / SIMD_CHUNK_SIZE;
-        let remainder = len % SIMD_CHUNK_SIZE;
-
-        // Process full chunks
-        for chunk_idx in 0..chunks {
-            let offset = chunk_idx * SIMD_CHUNK_SIZE;
-            let chunk_dot = Self::compute_dot_chunk(
-                &a[offset..offset + SIMD_CHUNK_SIZE],
-                &b[offset..offset + SIMD_CHUNK_SIZE],
-            );
-            let (chunk_norm_a, chunk_norm_b) = Self::compute_norms_chunk(
-                &a[offset..offset + SIMD_CHUNK_SIZE],
-                &b[offset..offset + SIMD_CHUNK_SIZE],
-            );
-            dot += chunk_dot;
-            norm_a += chunk_norm_a;
-            norm_b += chunk_norm_b;
-        }
-
-        // Process remainder
-        if remainder > 0 {
-            let offset = chunks * SIMD_CHUNK_SIZE;
-            let chunk_dot = Self::compute_dot_chunk(&a[offset..], &b[offset..]);
-            let (chunk_norm_a, chunk_norm_b) =
-                Self::compute_norms_chunk(&a[offset..], &b[offset..]);
-            dot += chunk_dot;
-            norm_a += chunk_norm_a;
-            norm_b += chunk_norm_b;
+        for (&x, &y) in a.iter().zip(b.iter()) {
+            let xi = x as i32;
+            let yi = y as i32;
+            dot += xi * yi;
+            norm_a += xi * xi;
+            norm_b += yi * yi;
         }
 
         let norm_a_f = (norm_a as f32).sqrt();
@@ -80,23 +52,6 @@ impl UfpIndex {
         }
 
         dot as f32 / (norm_a_f * norm_b_f)
-    }
-
-    /// Compute dot product for a chunk with auto-vectorization hints
-    #[inline(always)]
-    fn compute_dot_chunk(a: &[i8], b: &[i8]) -> i32 {
-        a.iter()
-            .zip(b.iter())
-            .map(|(&x, &y)| (x as i32) * (y as i32))
-            .sum()
-    }
-
-    /// Compute norms for a chunk with auto-vectorization hints
-    #[inline(always)]
-    fn compute_norms_chunk(a: &[i8], b: &[i8]) -> (i32, i32) {
-        let norm_a: i32 = a.iter().map(|&x| (x as i32) * (x as i32)).sum();
-        let norm_b: i32 = b.iter().map(|&x| (x as i32) * (x as i32)).sum();
-        (norm_a, norm_b)
     }
 
     /// Compute Jaccard similarity for perceptual fingerprints (MinHash).
@@ -375,8 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn cosine_similarity_chunked_matches_scalar() {
-        // Test that chunked implementation matches reference
+    fn cosine_similarity_basic() {
         let a = vec![10_i8, 20, 30, 40, 50];
         let b = vec![5_i8, 10, 15, 20, 25];
 

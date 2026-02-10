@@ -18,14 +18,8 @@ use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, Matc
 #[cfg(test)]
 mod tests;
 
-/// Trait for a matching engine.
-pub trait Matcher: Send + Sync {
-    /// Run a single match request and return ordered hits.
-    fn match_document(&self, req: &MatchRequest) -> Result<Vec<MatchHit>, MatchError>;
-}
-
-/// Production-grade matcher implementation.
-pub struct DefaultMatcher {
+/// Matcher for finding similar documents in the index.
+pub struct Matcher {
     index: Arc<UfpIndex>,
     ingest_cfg: IngestConfig,
     canonical_cfg: CanonicalizeConfig,
@@ -33,7 +27,7 @@ pub struct DefaultMatcher {
     semantic_cfg: SemanticConfig,
 }
 
-impl DefaultMatcher {
+impl Matcher {
     /// Construct a matcher from an existing index and explicit configs.
     pub fn new(
         index: UfpIndex,
@@ -327,14 +321,14 @@ impl DefaultMatcher {
                 alpha * s + (1.0 - alpha) * p
             }
             MatchExpr::And { left, right } => {
-                let (left_score, _) = self.calculate_final_score(
+                let (left_score, _): (f32, _) = self.calculate_final_score(
                     left,
                     semantic_score,
                     perceptual_score,
                     canonical_hash,
                     query_canonical_hash,
                 );
-                let (right_score, _) = self.calculate_final_score(
+                let (right_score, _): (f32, _) = self.calculate_final_score(
                     right,
                     semantic_score,
                     perceptual_score,
@@ -344,14 +338,14 @@ impl DefaultMatcher {
                 left_score.min(right_score)
             }
             MatchExpr::Or { left, right } => {
-                let (left_score, _) = self.calculate_final_score(
+                let (left_score, _): (f32, _) = self.calculate_final_score(
                     left,
                     semantic_score,
                     perceptual_score,
                     canonical_hash,
                     query_canonical_hash,
                 );
-                let (right_score, _) = self.calculate_final_score(
+                let (right_score, _): (f32, _) = self.calculate_final_score(
                     right,
                     semantic_score,
                     perceptual_score,
@@ -382,8 +376,9 @@ impl DefaultMatcher {
     }
 }
 
-impl Matcher for DefaultMatcher {
-    fn match_document(&self, req: &MatchRequest) -> Result<Vec<MatchHit>, MatchError> {
+impl Matcher {
+    /// Run a single match request and return ordered hits.
+    pub fn match_document(&self, req: &MatchRequest) -> Result<Vec<MatchHit>, MatchError> {
         if req.tenant_id.trim().is_empty() {
             return Err(MatchError::InvalidConfig(
                 "tenant_id must not be empty".into(),

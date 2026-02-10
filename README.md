@@ -39,7 +39,7 @@ cargo run --package perceptual --example fingerprint_demo
 ```rust
 use ucfp::{
     CanonicalizeConfig, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, process_record_with_perceptual,
+    PerceptualConfig, RawIngestRecord, process_perceptual,
 };
 
 let record = RawIngestRecord {
@@ -49,7 +49,7 @@ let record = RawIngestRecord {
     ..Default::default()
 };
 
-let (doc, fingerprint) = process_record_with_perceptual(
+let (doc, fingerprint) = process_perceptual(
     record,
     &CanonicalizeConfig::default(),
     &PerceptualConfig::default(),
@@ -69,10 +69,10 @@ Complete workflow from ingest to matching:
 use ucfp::{
     CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
     PerceptualConfig, RawIngestRecord, SemanticConfig,
-    process_record_with_perceptual, semanticize_document,
+    process_perceptual, semanticize_document,
 };
 use ucfp_index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex};
-use ucfp_matcher::{DefaultMatcher, MatchConfig, MatchRequest, Matcher};
+use ucfp_matcher::{Matcher, MatchConfig, MatchRequest};
 
 // 1. Configure all stages
 let ingest_cfg = IngestConfig::default();
@@ -98,7 +98,7 @@ let record = RawIngestRecord {
 
 // 4. Process through pipeline (ingest -> canonical -> perceptual)
 let (doc, fingerprint) =
-    process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
+    process_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
 
 // 5. Generate semantic embedding
 let embedding = semanticize_document(&doc, &semantic_cfg)?;
@@ -115,7 +115,7 @@ let record = IndexRecord {
 index.upsert(record)?;
 
 // 7. Search with matcher
-let matcher = DefaultMatcher::new(
+let matcher = Matcher::new(
     index,
     ingest_cfg,
     canonical_cfg,
@@ -143,7 +143,7 @@ println!("Found {} matches", hits.len());
 | **perceptual** | Rolling-hash shingles, winnowing, MinHash LSH | `PerceptualFingerprint` |
 | **semantic** | Dense embeddings via ONNX | `SemanticEmbedding` |
 | **index** | Storage with HNSW ANN search | `UfpIndex`, `QueryResult` |
-| **match** | Query-time matching | `DefaultMatcher`, `MatchResult` |
+| **match** | Query-time matching | `Matcher`, `MatchResult` |
 
 ![UCFP Architecture Diagram](ucfp.png)
 

@@ -2,7 +2,7 @@ use canonical::CanonicalizeConfig;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use index::{IndexRecord, INDEX_SCHEMA_VERSION};
 use ingest::IngestConfig;
-use matcher::{DefaultMatcher, MatchConfig, MatchMode, MatchRequest, Matcher};
+use matcher::{MatchConfig, MatchMode, MatchRequest, Matcher};
 use perceptual::PerceptualConfig;
 use semantic::SemanticConfig;
 use serde_json::json;
@@ -11,7 +11,7 @@ mod common;
 use common::{create_sample_records, setup_in_memory_index};
 
 /// Setup matcher with pre-populated index
-fn setup_matcher_with_index(record_count: usize) -> DefaultMatcher {
+fn setup_matcher_with_index(record_count: usize) -> Matcher {
     let index = setup_in_memory_index();
     let records = create_sample_records(record_count);
 
@@ -28,7 +28,7 @@ fn setup_matcher_with_index(record_count: usize) -> DefaultMatcher {
     };
     let semantic_cfg = SemanticConfig::default();
 
-    DefaultMatcher::new(
+    Matcher::new(
         index,
         ingest_cfg,
         canonical_cfg,
@@ -216,7 +216,7 @@ fn bench_tenant_filtering(c: &mut Criterion) {
     };
     let semantic_cfg = SemanticConfig::default();
 
-    let matcher = DefaultMatcher::new(
+    let matcher = Matcher::new(
         index,
         ingest_cfg,
         canonical_cfg,

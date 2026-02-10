@@ -172,8 +172,8 @@ Update ANN config at runtime via control plane. Changes apply to new queries; ex
 
 `ucfp` (workspace root crate) runs ingest, canonical, perceptual, semantic stages. `index` is the persistence layer behind them:
 
-1. `ucfp::process_record_with_perceptual_configs` → canonical doc + MinHash
-2. `ucfp::semanticize_document` → semantic embedding
+1. `ucfp::process_perceptual` → canonical doc + MinHash
+2. `ucfp::process_semantic` → canonical doc + semantic embedding
 3. Convert to `IndexRecord` and `upsert`
 4. Build partial record for lookups and `search`
 

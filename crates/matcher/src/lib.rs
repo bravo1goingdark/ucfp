@@ -26,8 +26,7 @@
 //! - [`MatchRequest`]: tenant id + query text + configuration.
 //! - [`MatchHit`]: canonical hash, final score, optional per-mode scores,
 //!   and stored metadata.
-//! - [`DefaultMatcher`]: production-focused implementation of the [`Matcher`]
-//!   trait that wires `ucfp` and `index` together.
+//! - [`Matcher`]: production-ready implementation that wires `ucfp` and `index` together.
 //!
 //! ## Example Usage
 //!
@@ -39,7 +38,7 @@
 //! use semantic::SemanticConfig;
 //! use index::{BackendConfig, IndexConfig, UfpIndex};
 //! use matcher::{
-//!     DefaultMatcher, MatchConfig, MatchExpr, MatchMode, MatchRequest, Matcher,
+//!     Matcher, MatchConfig, MatchExpr, MatchMode, MatchRequest,
 //! };
 //!
 //! // Build or open the index
@@ -51,7 +50,7 @@
 //! let perceptual_cfg = PerceptualConfig::default();
 //! let semantic_cfg = SemanticConfig::default();
 //!
-//! let matcher = DefaultMatcher::new(index, ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg);
+//! let matcher = Matcher::new(index, ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg);
 //!
 //! let req = MatchRequest {
 //!     tenant_id: "tenant-a".into(),
@@ -84,7 +83,7 @@
 //!
 //! Install a [`MatchMetrics`] implementation via [`set_match_metrics`] to record
 //! per-request latency and hit counts. This is typically done once during
-//! service startup so all calls through [`DefaultMatcher`] share the same
+//! service startup so all calls through [`Matcher`] share the same
 //! metrics backend.
 
 pub mod engine;
@@ -94,6 +93,6 @@ pub mod types;
 #[doc(hidden)]
 pub mod demo_utils;
 
-pub use crate::engine::{DefaultMatcher, Matcher};
+pub use crate::engine::Matcher;
 pub use crate::metrics::{set_match_metrics, MatchMetrics};
 pub use crate::types::{MatchConfig, MatchError, MatchExpr, MatchHit, MatchMode, MatchRequest};

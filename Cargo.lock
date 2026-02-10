@@ -2864,6 +2864,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dashmap",
+ "fastrand",
  "fxhash",
  "lru",
  "once_cell",

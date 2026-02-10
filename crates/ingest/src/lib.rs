@@ -67,55 +67,11 @@ pub use crate::types::{
     RawIngestRecord,
 };
 
-/// Observer hook for ingest operations.
-///
-/// Implementors can use this trait to attach custom metrics or logging
-/// without having to wrap or fork the ingest logic. All callback methods
-/// have default no-op implementations so you can override only what you need.
-pub trait IngestObserver {
-    /// Called after a successful ingest.
-    ///
-    /// `elapsed_micros` measures the time spent in [`ingest_with_observer`],
-    /// including validation and normalization.
-    fn on_success(&self, _record: &CanonicalIngestRecord, _elapsed_micros: u128) {}
-
-    /// Called after a failed ingest.
-    ///
-    /// `elapsed_micros` measures the time spent in [`ingest_with_observer`]
-    /// up to the point of failure.
-    fn on_failure(&self, _error: &IngestError, _elapsed_micros: u128) {}
-}
-
-struct NoopObserver;
-
-impl IngestObserver for NoopObserver {}
-
-/// Public ingest function. It validates metadata, normalizes payload (trims and collapses
-/// whitespace), and returns a canonical record for the canonical stage.
-///
-/// This convenience wrapper delegates to [`ingest_with_observer`] with an internal
-/// no-op observer.
+/// Ingest a raw record: validates metadata, normalizes payload, and returns a canonical record.
 pub fn ingest(
     raw: RawIngestRecord,
     cfg: &IngestConfig,
 ) -> Result<CanonicalIngestRecord, IngestError> {
-    ingest_with_observer(raw, cfg, &NoopObserver)
-}
-
-/// Ingest function with an explicit observer hook.
-///
-/// This variant behaves like [`ingest`], but additionally notifies the supplied
-/// [`IngestObserver`] of successes and failures, making it easy to integrate
-/// with metrics or custom logging.
-pub fn ingest_with_observer<O>(
-    raw: RawIngestRecord,
-    cfg: &IngestConfig,
-    observer: &O,
-) -> Result<CanonicalIngestRecord, IngestError>
-where
-    O: IngestObserver + ?Sized,
-{
-    // Start timer for observability.
     let start = Instant::now();
     let RawIngestRecord {
         id,
@@ -124,22 +80,18 @@ where
         payload,
     } = raw;
 
-    // Keep hints for logging in case of failure.
     let tenant_hint = metadata.tenant_id.clone();
     let doc_hint = metadata.doc_id.clone();
 
-    // The record ID is crucial for tracing, so it's sanitized and validated first.
     let record_id = match metadata::sanitize_required_field("id", id, cfg.strip_control_chars) {
         Ok(id) => id,
         Err(err) => {
             let elapsed_micros = start.elapsed().as_micros();
             warn!(error = %err, elapsed_micros, "ingest_failure");
-            observer.on_failure(&err, elapsed_micros);
             return Err(err);
         }
     };
 
-    // Create a tracing span to group all logs related to this ingest operation.
     let span = tracing::span!(
         Level::INFO,
         "ingest.ingest",
@@ -148,7 +100,6 @@ where
     );
     let _guard = span.enter();
 
-    // The core logic is in a separate function to keep this one focused on observability.
     match ingest_inner(record_id.clone(), source, metadata, payload, cfg) {
         Ok(record) => {
             let elapsed_micros = start.elapsed().as_micros();
@@ -160,7 +111,6 @@ where
                 elapsed_micros,
                 "ingest_success"
             );
-            observer.on_success(&record, elapsed_micros);
             Ok(record)
         }
         Err(err) => {
@@ -172,7 +122,6 @@ where
                 elapsed_micros,
                 "ingest_failure"
             );
-            observer.on_failure(&err, elapsed_micros);
             Err(err)
         }
     }

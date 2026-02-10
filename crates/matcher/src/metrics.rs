@@ -1,7 +1,7 @@
 // Metrics hooks for the `match` crate.
 //
 // Callers install a global `MatchMetrics` implementation via [`set_match_metrics`],
-// then `DefaultMatcher` will report per-request latency and hit counts for each
+// then `Matcher` will report per-request latency and hit counts for each
 // call to [`Matcher::match_document`]. This keeps instrumentation decoupled from
 // any specific metrics backend.
 use std::sync::{Arc, RwLock};
@@ -36,7 +36,7 @@ pub(crate) fn metrics_recorder() -> Option<Arc<dyn MatchMetrics>> {
 
 /// Install or clear the global match metrics recorder.
 ///
-/// This is typically called once during service startup so all `DefaultMatcher`
+/// This is typically called once during service startup so all `Matcher`
 /// instances share the same metrics backend.
 pub fn set_match_metrics(recorder: Option<Arc<dyn MatchMetrics>>) {
     let lock = metrics_lock();

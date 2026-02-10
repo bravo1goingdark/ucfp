@@ -171,7 +171,7 @@ pub async fn search_index(
     Query(query): Query<IndexSearchQuery>,
 ) -> ServerResult<impl IntoResponse> {
     use matcher::types::MetricId;
-    use matcher::{MatchConfig, MatchExpr, MatchMode, MatchRequest, Matcher};
+    use matcher::{MatchConfig, MatchExpr, MatchMode, MatchRequest};
 
     // Determine strategy and mode
     let (mode, strategy) = match query.strategy.as_str() {

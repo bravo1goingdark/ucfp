@@ -96,17 +96,16 @@ pub struct MatchExplanation {
     pub token_overlap: Option<f32>,
 }
 
-pub trait Matcher {
-    fn match_document(&self, req: &MatchRequest) -> Result<Vec<MatchHit>, MatchError>;
-}
+pub struct Matcher { /* ... */ }
 
-pub struct DefaultMatcher { /* ... */ }
+impl Matcher {
+    pub fn match_document(&self, req: &MatchRequest) -> Result<Vec<MatchHit>, MatchError>;
+}
 ```
 
-`DefaultMatcher` wires the individual pipeline crates (`ingest`, 
+`Matcher` wires the individual pipeline crates (`ingest`, 
 `canonical`, `perceptual`, `semantic`) and `index` together
-and is suitable for production use in most services. You can implement your 
-own `Matcher` on top of a different index or metric strategy if needed.
+and is suitable for production use in most services.
 
 ## Error Types
 
@@ -167,7 +166,7 @@ The `MatchExpr` enum provides declarative control over matching logic:
 
 ### Tenant isolation
 
-When `tenant_enforce` is `true` (the default), `DefaultMatcher` filters all
+When `tenant_enforce` is `true` (the default), `Matcher` filters all
 results so that only hits with `metadata["tenant"] == req.tenant_id` are
 returned. This is critical for SaaS-style multi-tenant deployments.
 
@@ -184,7 +183,7 @@ before returning the final `max_results` list.
 
 ## Scoring model
 
-`DefaultMatcher` combines per-mode scores into a single `score` field that is
+`Matcher` combines per-mode scores into a single `score` field that is
 used for ranking and filtering. Given a semantic score `s` and a perceptual
 score `p` (both treated as `f32`), the final score is:
 
@@ -225,7 +224,7 @@ use canonical::CanonicalizeConfig;
 use perceptual::PerceptualConfig;
 use semantic::SemanticConfig;
 use index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex, INDEX_SCHEMA_VERSION};
-use match::{DefaultMatcher, MatchConfig, MatchMode, MatchRequest, MatchHit, Matcher};
+use matcher::{Matcher, MatchConfig, MatchMode, MatchRequest, MatchHit};
 use serde_json::json;
 
 // Build an in-memory index and ingest a single demo document.
@@ -256,7 +255,7 @@ let index = UfpIndex::new(index_cfg.clone())?;
 // Note: In a real scenario, you'd run the pipeline and upsert the document
 // For this example, we assume the index is already populated
 
-let matcher = DefaultMatcher::new(
+let matcher = Matcher::new(
     index,
     ingest_cfg,
     canonical_cfg,
@@ -330,7 +329,7 @@ The crate includes unit tests for:
 
 - `MatchConfig` validation and defaults.
 - `MatchExpr` strategy validation.
-- End-to-end `DefaultMatcher` behavior over an in-memory `index`:
+- End-to-end `Matcher` behavior over an in-memory `index`:
   - Basic semantic matching.
   - Tenant isolation enforcement.
   - Metrics recording via a test `MatchMetrics` implementation.
@@ -341,7 +340,7 @@ You can run the tests with:
 cargo test -p match
 ```
 
-Since `DefaultMatcher::in_memory_default` uses only the in-memory backend, no
+Since `Matcher::in_memory_default` uses only the in-memory backend, no
 external services or Redb toolchain are required to execute the test suite.
 
 ## Integration with Pipeline
@@ -358,12 +357,12 @@ external services or Redb toolchain are required to execute the test suite.
 
 2. **Query phase** (handled by `match`):
    ```
-   MatchRequest → DefaultMatcher
-   → runs query through pipeline → index::search()
-   → MatchHit results
-   ```
+MatchRequest → Matcher
+    → runs query through pipeline → index::search()
+    → MatchHit results
+    ```
 
-The `DefaultMatcher` handles the entire query pipeline internally, using the
+The `Matcher` handles the entire query pipeline internally, using the
 individual crate dependencies to process the query text the same way documents
 were processed during indexing.
 
@@ -378,6 +377,6 @@ match = { path = "../match" }
 index = { path = "../index" }
 ```
 
-The `DefaultMatcher` now directly orchestrates the individual pipeline crates
+The `Matcher` now directly orchestrates the individual pipeline crates
 instead of going through the `ucfp` umbrella crate, ensuring a clean linear
 dependency graph.

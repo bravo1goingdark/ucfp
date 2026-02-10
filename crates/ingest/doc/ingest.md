@@ -250,29 +250,18 @@ pub fn ingest(
     cfg: &IngestConfig
 ) -> Result<CanonicalIngestRecord, IngestError>;
 
-/// Ingest with an observer for custom instrumentation.
-pub fn ingest_with_observer<O>(
-    record: RawIngestRecord,
-    cfg: &IngestConfig,
-    observer: &O,
-) -> Result<CanonicalIngestRecord, IngestError>
-where
-    O: IngestObserver + ?Sized;
-
 /// Normalize whitespace in text (collapse multiple spaces, trim ends).
 pub fn normalize_payload(text: &str) -> String;
 ```
 
-### Observer Trait
+### Metrics and Observability
 
-```rust
-pub trait IngestObserver {
-    fn on_success(&self, record: &CanonicalIngestRecord, elapsed_micros: u128);
-    fn on_failure(&self, error: &IngestError, elapsed_micros: u128);
-}
-```
+The ingest function uses `tracing` for structured logging. Each ingest attempt creates a span with:
+- `record_id` - The unique record identifier
+- `source` - The ingest source type
+- Success/failure events with timing information
 
-The observer trait allows you to hook into ingest events for metrics, logging, or custom instrumentation without modifying the core ingest logic.
+You can capture metrics by subscribing to tracing events or using the `tracing-subscriber` crate with your preferred backend (Prometheus, OpenTelemetry, etc.).
 
 ### Config Validation
 
@@ -366,39 +355,6 @@ let cfg = IngestConfig {
     max_payload_bytes: Some(10 * 1024 * 1024), // 10MB
     max_normalized_bytes: Some(5 * 1024 * 1024), // 5MB
 };
-```
-
-### With Observer for Metrics
-
-```rust
-use ingest::{ingest_with_observer, IngestObserver, CanonicalIngestRecord, IngestError};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-struct MetricsObserver {
-    success_count: AtomicU64,
-    failure_count: AtomicU64,
-    total_micros: AtomicU64,
-}
-
-impl IngestObserver for MetricsObserver {
-    fn on_success(&self, _record: &CanonicalIngestRecord, elapsed_micros: u128) {
-        self.success_count.fetch_add(1, Ordering::Relaxed);
-        self.total_micros.fetch_add(elapsed_micros as u64, Ordering::Relaxed);
-    }
-    
-    fn on_failure(&self, _error: &IngestError, elapsed_micros: u128) {
-        self.failure_count.fetch_add(1, Ordering::Relaxed);
-        self.total_micros.fetch_add(elapsed_micros as u64, Ordering::Relaxed);
-    }
-}
-
-let observer = MetricsObserver {
-    success_count: AtomicU64::new(0),
-    failure_count: AtomicU64::new(0),
-    total_micros: AtomicU64::new(0),
-};
-
-let result = ingest_with_observer(record, &cfg, &observer)?;
 ```
 
 ### Binary File Ingest

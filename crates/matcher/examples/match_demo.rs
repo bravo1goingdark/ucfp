@@ -5,7 +5,7 @@ use index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex, INDEX_SCHEMA_VERS
 use ingest::{IngestConfig, RawIngestRecord};
 use matcher::{
     demo_utils::{demo_base_record, quantize_with_scale},
-    DefaultMatcher, MatchConfig, MatchExpr, MatchHit, MatchMode, MatchRequest, Matcher,
+    MatchConfig, MatchExpr, MatchHit, MatchMode, MatchRequest, Matcher,
 };
 use perceptual::PerceptualConfig;
 use semantic::SemanticConfig;
@@ -152,8 +152,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     index.upsert(&rec_a)?;
     index.upsert(&rec_b)?;
 
-    // Wire the index into a DefaultMatcher.
-    let matcher = DefaultMatcher::new(
+    // Wire the index into a Matcher.
+    let matcher = Matcher::new(
         index,
         ingest_cfg,
         canonical_cfg,

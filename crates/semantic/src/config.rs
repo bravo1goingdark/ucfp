@@ -51,18 +51,6 @@ pub struct SemanticConfig {
     pub normalize: bool,
     /// Compute device (currently only `"cpu"` is implemented, but the field keeps the config forward-compatible).
     pub device: String,
-    /// Retry configuration for API calls.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_config: Option<RetryConfig>,
-    /// Circuit breaker configuration for API resilience.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub circuit_breaker_config: Option<CircuitBreakerConfig>,
-    /// Rate limiting configuration for API providers.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rate_limit_config: Option<RateLimitConfig>,
-    /// Whether to enable resilience features (retry, circuit breaker, rate limiting).
-    /// Defaults to true for production safety.
-    pub enable_resilience: bool,
     /// Maximum sequence length (in tokens) for the model.
     /// Texts longer than this will be truncated or chunked (if chunking is enabled).
     /// Default is 512 for BERT-based models, but can be increased for models
@@ -85,6 +73,18 @@ pub struct SemanticConfig {
     /// "max" (element-wise maximum), "first" (use first chunk only).
     #[serde(default = "default_pooling_strategy")]
     pub pooling_strategy: String,
+    /// Retry configuration for API calls.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_config: Option<RetryConfig>,
+    /// Circuit breaker configuration for API resilience.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker_config: Option<CircuitBreakerConfig>,
+    /// Rate limiting configuration for API providers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_config: Option<RateLimitConfig>,
+    /// Whether to enable resilience features (retry, circuit breaker, rate limiting).
+    /// Defaults to true for production safety.
+    pub enable_resilience: bool,
 }
 
 fn default_max_sequence_length() -> usize {
@@ -115,14 +115,14 @@ impl Default for SemanticConfig {
             tokenizer_url: None,
             normalize: true,
             device: "cpu".into(),
-            retry_config: None,           // Uses defaults when None
-            circuit_breaker_config: None, // Uses defaults when None
-            rate_limit_config: None,      // Uses defaults when None
-            enable_resilience: true,
             max_sequence_length: default_max_sequence_length(),
             enable_chunking: false,
             chunk_overlap_ratio: default_chunk_overlap_ratio(),
             pooling_strategy: default_pooling_strategy(),
+            retry_config: None,
+            circuit_breaker_config: None,
+            rate_limit_config: None,
+            enable_resilience: true,
         }
     }
 }
@@ -189,11 +189,11 @@ mod tests {
             tokenizer_url: Some("https://example.com/tokenizer.json".into()),
             normalize: false,
             device: "cuda".into(),
+            max_sequence_length: 512,
             retry_config: None,
             circuit_breaker_config: None,
             rate_limit_config: None,
             enable_resilience: true,
-            max_sequence_length: 512,
             ..Default::default()
         };
 

@@ -93,7 +93,7 @@ pub async fn match_documents(
     Json(request): Json<MatchRequest>,
 ) -> ServerResult<impl IntoResponse> {
     use matcher::types::MetricId;
-    use matcher::{MatchConfig, MatchExpr, MatchMode, MatchRequest as MatcherRequest, Matcher};
+    use matcher::{MatchConfig, MatchExpr, MatchMode, MatchRequest as MatcherRequest};
 
     // Parse strategy
     let (mode, strategy) = match request.strategy.as_str() {

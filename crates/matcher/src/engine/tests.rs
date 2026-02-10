@@ -74,7 +74,7 @@ fn run_semantic_pipeline_helper(
     Ok((doc, embedding))
 }
 
-fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchError> {
+fn build_index_with_docs() -> Result<(Matcher, String, String), MatchError> {
     let ingest_cfg = IngestConfig::default();
     let canonical_cfg = CanonicalizeConfig::default();
     // Use a smaller k so that short demo texts can still produce perceptual fingerprints.
@@ -201,7 +201,7 @@ fn build_index_with_docs() -> Result<(DefaultMatcher, String, String), MatchErro
     index.upsert(&rec_a).expect("upsert a");
     index.upsert(&rec_b).expect("upsert b");
 
-    let matcher = DefaultMatcher::new(
+    let matcher = Matcher::new(
         index,
         ingest_cfg,
         canonical_cfg,
@@ -619,7 +619,7 @@ fn empty_tenant_id_rejected() {
     let semantic_cfg = SemanticConfig::default();
 
     let matcher =
-        DefaultMatcher::in_memory_default(ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg)
+        Matcher::in_memory_default(ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg)
             .expect("in-memory matcher");
 
     let req = MatchRequest {
@@ -648,7 +648,7 @@ fn empty_query_text_rejected() {
     let semantic_cfg = SemanticConfig::default();
 
     let matcher =
-        DefaultMatcher::in_memory_default(ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg)
+        Matcher::in_memory_default(ingest_cfg, canonical_cfg, perceptual_cfg, semantic_cfg)
             .expect("in-memory matcher");
 
     let req = MatchRequest {

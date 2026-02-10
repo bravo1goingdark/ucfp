@@ -167,18 +167,6 @@ pub fn is_provider_healthy(provider: &str) -> bool;
 - `normalize` - set true for unit vectors (good for cosine similarity)
 - `device` - "cpu" for now. GPU later maybe.
 
-### Resilience settings (API mode)
-
-- `enable_resilience` - master switch (default: false)
-- `circuit_breaker_failure_threshold` - failures before opening (5)
-- `circuit_breaker_reset_timeout_secs` - seconds before retrying (30)
-- `retry_max_retries` - max retry attempts (3)
-- `retry_base_delay_ms` - first retry delay (100ms)
-- `retry_max_delay_ms` - max delay between retries (10s)
-- `retry_jitter` - add randomness? (true)
-- `rate_limit_requests_per_second` - sustained rate (10.0)
-- `rate_limit_burst_size` - spike allowance (5)
-
 ### Chunking long documents
 
 When text exceeds the model's token limit:
@@ -202,6 +190,18 @@ When text exceeds the model's token limit:
 **Speed tradeoff:** chunking means N inference calls for N chunks. A 1000-word doc with 512-token chunks needs ~3-4 calls.
 
 Drop ONNX models in `models/<name>/onnx/<file>.onnx` alongside the tokenizer JSON. Check `test_real_model_inference` for the expected layout. Sessions cache per-thread after first load.
+
+### Resilience settings (API mode)
+
+- `enable_resilience` - master switch (default: false)
+- `circuit_breaker_failure_threshold` - failures before opening (default: 5)
+- `circuit_breaker_reset_timeout_secs` - seconds before retrying (default: 30)
+- `retry_max_retries` - max retry attempts (default: 3)
+- `retry_base_delay_ms` - first retry delay (default: 100ms)
+- `retry_max_delay_ms` - max delay between retries (default: 10s)
+- `retry_jitter` - add randomness? (default: true)
+- `rate_limit_requests_per_second` - sustained rate (default: 10.0)
+- `rate_limit_burst_size` - spike allowance (default: 5)
 
 ### API mode
 

@@ -2,7 +2,7 @@ use crate::config::ServerConfig;
 use crate::error::ServerResult;
 use dashmap::DashMap;
 use index::{IndexConfig, UfpIndex};
-use matcher::DefaultMatcher;
+use matcher::Matcher;
 use std::sync::Arc;
 
 /// Shared application state
@@ -18,7 +18,7 @@ pub struct ServerState {
     pub index: Arc<UfpIndex>,
 
     /// Matcher instance (shared across requests)
-    pub matcher: Arc<DefaultMatcher>,
+    pub matcher: Arc<Matcher>,
 }
 
 impl ServerState {
@@ -30,7 +30,7 @@ impl ServerState {
         let index = Arc::new(UfpIndex::new(index_config)?);
 
         // Initialize matcher with shared index and default configs
-        let matcher = Arc::new(DefaultMatcher::with_index_arc(
+        let matcher = Arc::new(Matcher::with_index_arc(
             index.clone(),
             Default::default(),
             Default::default(),

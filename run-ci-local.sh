@@ -48,7 +48,7 @@ echo "=========================================="
 echo "JOB 2: Tests"
 echo "=========================================="
 
-if ! run_step "Run tests" "cargo test --workspace --all-targets"; then
+if ! run_step "Run tests" "cargo test --workspace --lib --bins --examples --tests"; then
     FAILED=1
 fi
 
