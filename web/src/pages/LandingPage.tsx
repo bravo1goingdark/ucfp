@@ -1,11 +1,11 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { motion, useScroll, useTransform } from 'framer-motion'
 import { Github, GitCommit, Clock, Check, AlertCircle, FileText, Image, Music, Video, FileStack, Box, 
-         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, X, Sparkles } from 'lucide-react'
+         Inbox, TextQuote, Fingerprint, Brain, Database, Search, Zap, Layers, Sparkles } from 'lucide-react'
 import '../styles/LandingPage.css'
 import '../styles/Pipeline.css'
 import { ParticlesBackground, FloatingShapes, NoiseOverlay } from '../components/VisualEffects'
-import { useScrollReveal, useTilt } from '../hooks/useAnimations'
+import { useScrollReveal } from '../hooks/useAnimations'
 
 interface CommitInfo {
   sha: string
@@ -147,83 +147,7 @@ const faqs = [
   }
 ]
 
-const problemCards = [
-  {
-    icon: X,
-    name: 'HashX',
-    description: 'Exact hashes fail on minor changes',
-    features: [
-      'Whitespace changes break SHA-256',
-      'JSON reordering creates new hash',
-      'Encoding differences invisible to hashes'
-    ],
-    impact: '100% miss',
-    step: '01'
-  },
-  {
-    icon: Fingerprint,
-    name: 'Perceptual',
-    description: 'Perceptual hashes miss paraphrases',
-    features: [
-      'Byte-level algorithms only',
-      'Cannot detect rewritten content',
-      'Fails on translations'
-    ],
-    impact: '50% miss',
-    step: '02'
-  },
-  {
-    icon: Brain,
-    name: 'Semantic',
-    description: 'Semantic search is too slow',
-    features: [
-      'OpenAI API: 100-300ms per call',
-      'Self-hosted: 50-200ms on GPU',
-      'Not suitable for real-time'
-    ],
-    impact: '100-300ms',
-    step: '03'
-  },
-  {
-    icon: Layers,
-    name: 'Integration',
-    description: 'Three systems do not integrate',
-    features: [
-      'Different APIs and schemas',
-      'Multiple failure modes',
-      'Complex glue code required'
-    ],
-    impact: '3× systems',
-    step: '04'
-  }
-]
 
-  const unifiedFeatures = [
-    {
-      icon: Layers,
-      title: 'Unified Pipeline',
-      description: 'One input, three fingerprints. All generated in a single pass through the pipeline.',
-      benefits: ['Single API call for all match types', 'Shared preprocessing (tokenization, normalization)', 'Consistent error handling and observability']
-    },
-    {
-      icon: Zap,
-      title: 'Sub-2ms Total',
-      description: 'Combined latency under 2ms for 1K words. Fast enough for real-time deduplication.',
-      benefits: ['~49μs ingest', '~195μs canonical', '~82μs perceptual', '~1.1ms semantic (optional)']
-    },
-    {
-      icon: GitCommit,
-      title: 'Deterministic',
-      description: 'Same input always produces identical fingerprints. Reproducible across environments.',
-      benefits: ['Canonical text form (NFKC)', 'Versioned algorithms', 'Audit-friendly provenance']
-    },
-    {
-      icon: Box,
-      title: 'Modular Crates',
-      description: 'Use individual stages or the full pipeline. Deploy as library or REST API.',
-      benefits: ['Standalone crates for each stage', 'Pluggable storage backends', 'Library or server deployment']
-    }
-  ]
 
 function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
   const [count, setCount] = useState(0)
@@ -256,19 +180,6 @@ function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: strin
     </span>
   )
 }
-
-function TiltCard({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  const cardRef = useRef<HTMLElement>(null)
-  useTilt(cardRef as React.RefObject<HTMLElement | null>, 8)
-
-  return (
-    <div ref={cardRef as React.RefObject<HTMLDivElement>} className={`tilt-3d ${className}`} style={{ transformStyle: 'preserve-3d' }}>
-      {children}
-    </div>
-  )
-}
-
-
 
 export default function LandingPage() {
   const [commit, setCommit] = useState<CommitInfo | null>(null)
@@ -394,123 +305,9 @@ export default function LandingPage() {
         </motion.p>
       </motion.section>
 
-      {/* 2. THE PROBLEM */}
-      <section id="problem" className="problem">
-        <div className="section-header">
-          <h2 className="section-title">
-            The <span className="gradient-text">Problem</span>
-          </h2>
-          <p className="section-subtitle">
-            Content matching is broken. Teams waste months building brittle systems.
-          </p>
-        </div>
-
-        <div className="problem-grid">
-          {problemCards.map((card, index) => (
-            <motion.div
-              key={card.name}
-              className="pipeline-card"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true, margin: "-50px" }}
-              transition={{ duration: 0.4, delay: index * 0.05 }}
-            >
-              <div className="pipeline-card-header">
-                <div className="pipeline-icon">
-                  <card.icon size={22} strokeWidth={1.5} />
-                </div>
-                <span className="pipeline-step">{card.step}</span>
-              </div>
-              
-              <div className="pipeline-card-body">
-                <h3>{card.name}</h3>
-                <p className="pipeline-description">{card.description}</p>
-                
-                <ul className="pipeline-features">
-                  {card.features.map((feature, fIndex) => (
-                    <li key={fIndex}>
-                      <Check size={14} />
-                      {feature}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="pipeline-card-footer">
-                <span className="pipeline-metric">{card.impact}</span>
-                <span className="pipeline-metric-label">impact</span>
-              </div>
-            </motion.div>
-          ))}
-        </div>
-      </section>
-
-      {/* 3. THE SOLUTION */}
-      <section id="solution" className="solution">
-        <div className="section-header">
-          <h2 className="section-title">
-            The <span className="gradient-text">Solution</span>
-          </h2>
-          <p className="section-subtitle">
-            Three fingerprinting strategies unified into one deterministic pipeline.
-          </p>
-        </div>
-
-        <div className="solution-text">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.5 }}
-          >
-            <p>
-              UCFP solves the fundamental problem that content systems face when trying to match content at scale. Traditional approaches force a choice between exact matching, which breaks on minor changes, and semantic understanding, which introduces latency and operational complexity through separate AI-powered systems.
-            </p>
-            <p>
-              UCFP unifies these approaches into a single pipeline that generates three complementary fingerprints in one pass: cryptographic hashes for exact matching, perceptual fingerprints for near-duplicate detection, and vector embeddings for semantic similarity. All three strategies work together with consistent APIs, error handling, and observability, eliminating the need to integrate and maintain multiple separate systems.
-            </p>
-            <p>
-              The result is a deterministic, reproducible content matching system that processes documents in under 2 milliseconds while supporting exact, similar, and semantic matching through a single API call.
-            </p>
-          </motion.div>
-
-          <div className="solution-benefits">
-            {unifiedFeatures.map((feature, index) => (
-              <motion.div
-                key={feature.title}
-                className="benefit-card"
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-50px" }}
-                transition={{ duration: 0.4, delay: index * 0.1 }}
-              >
-                <div className="benefit-icon">
-                  <feature.icon size={24} strokeWidth={1.5} />
-                </div>
-                <h3>{feature.title}</h3>
-                <p className="benefit-description">{feature.description}</p>
-                <ul className="benefit-list">
-                  {feature.benefits.map((benefit, bIndex) => (
-                    <li key={bIndex}>
-                      <Check size={14} />
-                      {benefit}
-                    </li>
-                  ))}
-                </ul>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* 4. HOW IT WORKS - 6 Pipeline Stages */}
+      {/* 2. HOW IT WORKS - 6 Pipeline Stages */}
       <section id="pipeline" className="content-section how-it-works-section">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
+        <div>
           <div className="section-header">
             <h2>Six Stage <span className="gradient-text">Pipeline</span></h2>
             <p className="section-subtitle">
@@ -520,27 +317,13 @@ export default function LandingPage() {
           </div>
           
           <div className="pipeline-grid">
-            {pipelineStages.map((stage, index) => (
-              <TiltCard key={stage.name} className="pipeline-card-wrapper">
-                <motion.div 
-                  className="pipeline-card card-gradient-border"
-                  initial={{ opacity: 0, y: 30 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true, margin: "-50px" }}
-                  transition={{ duration: 0.6, delay: index * 0.08, ease: [0.16, 1, 0.3, 1] }}
-                  whileHover={{ 
-                    scale: 1.02,
-                    transition: { duration: 0.3 }
-                  }}
-                >
+            {pipelineStages.map((stage) => (
+              <div key={stage.name} className="pipeline-card-wrapper">
+                <div className="pipeline-card card-gradient-border">
                   <div className="pipeline-card-header">
-                    <motion.div 
-                      className="pipeline-icon"
-                      whileHover={{ rotate: 360, scale: 1.1 }}
-                      transition={{ duration: 0.5 }}
-                    >
+                    <div className="pipeline-icon">
                       <stage.icon size={22} strokeWidth={1.5} />
-                    </motion.div>
+                    </div>
                     <span className="pipeline-step">{stage.step}</span>
                   </div>
                   
@@ -550,16 +333,10 @@ export default function LandingPage() {
                     
                     <ul className="pipeline-features">
                       {stage.features.map((feature, fIndex) => (
-                        <motion.li 
-                          key={fIndex}
-                          initial={{ opacity: 0, x: -10 }}
-                          whileInView={{ opacity: 1, x: 0 }}
-                          viewport={{ once: true }}
-                          transition={{ delay: index * 0.08 + fIndex * 0.05 }}
-                        >
+                        <li key={fIndex}>
                           <Check size={14} />
                           {feature}
-                        </motion.li>
+                        </li>
                       ))}
                     </ul>
                   </div>
@@ -568,170 +345,105 @@ export default function LandingPage() {
                     <span className="pipeline-metric">{stage.metric}</span>
                     <span className="pipeline-metric-label">avg latency</span>
                   </div>
-                </motion.div>
-              </TiltCard>
+                </div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </section>
 
       {/* 5. KEY BENEFITS */}
       <section id="benefits" className="content-section benefits-section">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
+        <div>
           <h2>Key Benefits</h2>
           
           <ul className="benefits-list">
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0 }}
-            >
+            <li>
               <strong>Three matching strategies in one call.</strong>
               Exact cryptographic hashes, perceptual fingerprints for near-duplicates,
               and semantic embeddings for paraphrase detection. No need to run separate systems.
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.05 }}
-            >
+            <li>
               <strong>Predictable performance.</strong>
               ~8ms end-to-end for 1,000 words on commodity hardware.
               Lock-free indexing and parallel processing keep latency consistent under load.
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-            >
+            <li>
               <strong>Deterministic and reproducible.</strong>
               Same input produces identical fingerprints across environments.
               Essential for content provenance and audit trails.
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.15 }}
-            >
+            <li>
               <strong>Pluggable architecture.</strong>
               Each stage is a standalone crate. Use only what you need.
               Swap storage backends (in-memory, Redb) without code changes.
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-            >
+            <li>
               <strong>Resilient by design.</strong>
               Circuit breakers, exponential backoff, and rate limiting for external embedding APIs.
               Your pipeline stays up even when upstream services degrade.
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.25 }}
-            >
+            <li>
               <strong>Available as library or server.</strong>
               Embed directly in your Rust application or deploy the HTTP server
               for teams using other languages.
-            </motion.li>
+            </li>
           </ul>
-        </motion.div>
+        </div>
       </section>
 
       {/* 6. LIMITATIONS / NON-GOALS */}
       <section className="content-section limitations-section">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
+        <div>
           <h2>What UCFP Does Not Do</h2>
           
           <ul className="limitations-list">
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0 }}
-            >
+            <li>
               <AlertCircle size={20} />
               <div>
                 <strong>Only text is production-ready.</strong>
                 Image, audio, video, document, and 3D model support are on the roadmap
                 but not yet implemented.
               </div>
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.05 }}
-            >
+            <li>
               <AlertCircle size={20} />
               <div>
                 <strong>Not a general-purpose vector database.</strong>
                 UCFP indexes content fingerprints, not arbitrary vectors.
                 Use Pinecone, Weaviate, or pgvector if you need generic vector search.
               </div>
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-            >
+            <li>
               <AlertCircle size={20} />
               <div>
                 <strong>No built-in distributed coordination.</strong>
                 Single-node deployment only. Clustering and replication are not supported yet.
               </div>
-            </motion.li>
+            </li>
             
-            <motion.li
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.4, delay: 0.15 }}
-            >
+            <li>
               <AlertCircle size={20} />
               <div>
                 <strong>Not a content management system.</strong>
                 UCFP generates and matches fingerprints. It does not store original content,
                 handle user permissions, or manage content workflows.
               </div>
-            </motion.li>
+            </li>
           </ul>
-        </motion.div>
+        </div>
       </section>
 
       {/* 7. SOCIAL PROOF / STATUS - Bigger Cards */}
       <section id="status" className="content-section status-section">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
+        <div>
           <h2>Current Status</h2>
           
           <p className="status-text">
@@ -741,204 +453,107 @@ export default function LandingPage() {
           </p>
           
           <div className="status-stats-large">
-            <TiltCard className="stat-card-wrapper">
-              <motion.div 
-                className="stat-card-large glow-sm"
-                initial={{ opacity: 0, scale: 0.8, y: 30 }}
-                whileInView={{ opacity: 1, scale: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: 0, ease: [0.16, 1, 0.3, 1] }}
-                whileHover={{ scale: 1.05, y: -5 }}
-              >
-                <motion.div 
-                  className="stat-icon pulse-glow"
-                  whileHover={{ rotate: 15 }}
-                >
+            <div className="stat-card-wrapper">
+              <div className="stat-card-large glow-sm">
+                <div className="stat-icon pulse-glow">
                   <Zap size={32} />
-                </motion.div>
+                </div>
                 <span className="stat-value">~2ms</span>
                 <span className="stat-label">per 1K words</span>
                 <span className="stat-sublabel">End-to-end processing</span>
-              </motion.div>
-            </TiltCard>
+              </div>
+            </div>
             
-            <TiltCard className="stat-card-wrapper">
-              <motion.div 
-                className="stat-card-large glow-sm"
-                initial={{ opacity: 0, scale: 0.8, y: 30 }}
-                whileInView={{ opacity: 1, scale: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
-                whileHover={{ scale: 1.05, y: -5 }}
-              >
-                <motion.div 
-                  className="stat-icon"
-                  whileHover={{ rotate: 15 }}
-                >
+            <div className="stat-card-wrapper">
+              <div className="stat-card-large glow-sm">
+                <div className="stat-icon">
                   <Layers size={32} />
-                </motion.div>
-                <span className="stat-value"><AnimatedCounter value={6} /></span>
+                </div>
+                <span className="stat-value">6</span>
                 <span className="stat-label">pipeline stages</span>
                 <span className="stat-sublabel">Independent & modular</span>
-              </motion.div>
-            </TiltCard>
+              </div>
+            </div>
             
-            <TiltCard className="stat-card-wrapper">
-              <motion.div 
-                className="stat-card-large glow-sm"
-                initial={{ opacity: 0, scale: 0.8, y: 30 }}
-                whileInView={{ opacity: 1, scale: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                whileHover={{ scale: 1.05, y: -5 }}
-              >
-                <motion.div 
-                  className="stat-icon ready pulse-glow"
-                  animate={{ 
-                    boxShadow: [
-                      '0 0 20px rgba(34, 197, 94, 0.3)',
-                      '0 0 40px rgba(34, 197, 94, 0.5)',
-                      '0 0 20px rgba(34, 197, 94, 0.3)'
-                    ]
-                  }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                >
+            <div className="stat-card-wrapper">
+              <div className="stat-card-large glow-sm">
+                <div className="stat-icon ready pulse-glow">
                   <Check size={32} />
-                </motion.div>
-                <span className="stat-value"><AnimatedCounter value={1} /></span>
+                </div>
+                <span className="stat-value">1</span>
                 <span className="stat-label">ready modality</span>
                 <span className="stat-sublabel">Text pipeline stable</span>
-              </motion.div>
-            </TiltCard>
+              </div>
+            </div>
           </div>
 
           <div className="modalities-grid-large">
-            {modalities.map((modality, index) => (
-              <TiltCard key={modality.name} className="modality-card-wrapper">
-                <motion.div
-                  className={`modality-card-large ${modality.status === 'Ready' ? 'card-gradient-border' : ''}`}
-                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
-                  whileInView={{ opacity: 1, y: 0, scale: 1 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.5, delay: index * 0.08, ease: [0.16, 1, 0.3, 1] }}
-                  whileHover={{ 
-                    scale: 1.03,
-                    transition: { duration: 0.3 }
-                  }}
-                >
+            {modalities.map((modality) => (
+              <div key={modality.name} className="modality-card-wrapper">
+                <div className={`modality-card-large ${modality.status === 'Ready' ? 'card-gradient-border' : ''}`}>
                   <div className="modality-header-large">
-                    <motion.div 
-                      className="modality-icon-large"
-                      whileHover={{ rotate: 360, scale: 1.1 }}
-                      transition={{ duration: 0.6 }}
-                    >
+                    <div className="modality-icon-large">
                       <modality.icon size={28} strokeWidth={1.5} />
-                    </motion.div>
-                    <motion.span 
-                      className={`modality-status ${modality.status.toLowerCase()}`}
-                      initial={{ scale: 0 }}
-                      whileInView={{ scale: 1 }}
-                      viewport={{ once: true }}
-                      transition={{ delay: index * 0.08 + 0.2, type: "spring", stiffness: 300 }}
-                    >
+                    </div>
+                    <span className={`modality-status ${modality.status.toLowerCase()}`}>
                       {modality.status === 'Ready' ? <Check size={14} /> : <Clock size={14} />}
                       {modality.status}
-                    </motion.span>
+                    </span>
                   </div>
                   <h4>{modality.name}</h4>
                   <p>{modality.description}</p>
-                </motion.div>
-              </TiltCard>
+                </div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </section>
 
       {/* 8. FAQ */}
       <section id="faq" className="content-section faq-section">
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.6 }}
-        >
+        <div>
           <h2>FAQ</h2>
           
           <div className="faq-list">
             {faqs.map((faq, index) => (
-              <motion.div
-                key={index}
-                className="faq-item"
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: index * 0.05 }}
-              >
+              <div key={index} className="faq-item">
                 <h3>{faq.question}</h3>
                 <p>{faq.answer}</p>
-              </motion.div>
+              </div>
             ))}
           </div>
-        </motion.div>
+        </div>
       </section>
 
       {/* 9. FINAL CTA */}
       <section className="final-cta-section">
-        <motion.div
-          initial={{ opacity: 0, y: 50 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        >
-          <motion.h2
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.1 }}
-          >
+        <div>
+          <h2>
             Built for teams that need
             <br />
             <span className="gradient-text">content matching</span> they can trust.
-          </motion.h2>
+          </h2>
           
-          <motion.p
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-          >
+          <p>
             If you are building deduplication, plagiarism detection, or semantic search
             into your product and want one system that handles exact, similar, and semantic
             matching, UCFP is designed for you.
-          </motion.p>
+          </p>
           
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-          >
-            <motion.a 
+          <div>
+            <a 
               href="https://github.com/bravo1goingdark/ucfp" 
               className="btn btn-gradient btn-large pulse-glow"
-              whileHover={{ scale: 1.05, y: -3 }}
-              whileTap={{ scale: 0.98 }}
             >
               <Github size={18} />
               Get Started on GitHub
-            </motion.a>
-          </motion.div>
+            </a>
+          </div>
           
-          <motion.p 
-            className="cta-note"
-            initial={{ opacity: 0 }}
-            whileInView={{ opacity: 1 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6, delay: 0.5 }}
-          >
+          <p className="cta-note">
             Apache 2.0 licensed · Text pipeline ready · SaaS launch coming soon · Other modalities in development
-          </motion.p>
-        </motion.div>
+          </p>
+        </div>
       </section>
     </div>
   )

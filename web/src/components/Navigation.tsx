@@ -13,8 +13,6 @@ export default function Navigation({ scrolled, theme, toggleTheme }: NavigationP
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const navLinks = [
-    { href: '#problem', label: 'Problem' },
-    { href: '#solution', label: 'Solution' },
     { href: '#pipeline', label: 'Pipeline' },
     { href: '#benefits', label: 'Benefits' },
     { href: '#status', label: 'Status' },

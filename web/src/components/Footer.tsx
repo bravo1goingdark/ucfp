@@ -22,8 +22,6 @@ export default function Footer() {
           </div>
 
           <div className="footer-links">
-            <a href="#problem">Problem</a>
-            <a href="#solution">Solution</a>
             <a href="#pipeline">Pipeline</a>
             <a href="#benefits">Benefits</a>
             <a href="#status">Status</a>
