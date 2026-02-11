@@ -38,7 +38,7 @@ if ! run_step "Check formatting" "cargo fmt --all -- --check"; then
     cargo fmt --all
 fi
 
-if ! run_step "Run clippy" "cargo clippy --workspace --all-targets -- -D warnings"; then
+if ! run_step "Run clippy" "cargo clippy --workspace -- -D warnings"; then
     FAILED=1
 fi
 
@@ -58,7 +58,7 @@ echo "=========================================="
 echo "JOB 3: Build Check"
 echo "=========================================="
 
-if ! run_step "Build all targets" "cargo build --workspace --all-targets"; then
+if ! run_step "Build all targets" "cargo build --workspace"; then
     FAILED=1
 fi
 

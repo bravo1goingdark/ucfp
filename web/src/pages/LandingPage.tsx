@@ -5,7 +5,7 @@ import { Github, GitCommit, Clock, Check, AlertCircle, FileText, Image, Music, V
 import '../styles/LandingPage.css'
 import '../styles/Pipeline.css'
 import { ParticlesBackground, FloatingShapes, NoiseOverlay } from '../components/VisualEffects'
-import { useScrollReveal } from '../hooks/useAnimations'
+
 
 interface CommitInfo {
   sha: string
@@ -146,40 +146,6 @@ const faqs = [
     answer: 'With all stages enabled: ~125 docs/second for 1K-word documents on a typical 4-core machine. Disabling semantic stage: ~10,000 docs/second. Batch processing and lock-free indexing help maintain throughput under concurrent load.'
   }
 ]
-
-
-
-function AnimatedCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
-  const [count, setCount] = useState(0)
-  const { ref, isRevealed } = useScrollReveal<HTMLSpanElement>({ threshold: 0.5 })
-
-  useEffect(() => {
-    if (!isRevealed) return
-
-    const duration = 2000
-    const startTime = performance.now()
-
-    const animate = (currentTime: number) => {
-      const elapsed = currentTime - startTime
-      const progress = Math.min(elapsed / duration, 1)
-      const easeOut = 1 - Math.pow(1 - progress, 3)
-      setCount(Math.floor(value * easeOut))
-
-      if (progress < 1) {
-        requestAnimationFrame(animate)
-      }
-    }
-
-    requestAnimationFrame(animate)
-  }, [isRevealed, value])
-
-  return (
-    <span ref={ref}>
-      {count}
-      {suffix}
-    </span>
-  )
-}
 
 export default function LandingPage() {
   const [commit, setCommit] = useState<CommitInfo | null>(null)
