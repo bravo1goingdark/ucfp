@@ -1,8 +1,8 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use ucfp::{
-    canonicalize, process_record_with_perceptual, CanonicalizeConfig, IngestMetadata,
-    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
+    canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
 };
 
 const BIG_TEXT: &str = include_str!("../crates/canonical/examples/big_text.txt");
@@ -48,12 +48,20 @@ fn perceptual_bench(c: &mut Criterion) {
 fn pipeline_bench(c: &mut Criterion) {
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig::default();
+    let ingest_cfg = IngestConfig::default();
 
     c.bench_function("process_record_with_perceptual_big_text", |b| {
         b.iter(|| {
             let raw = demo_raw_record();
-            let result =
-                process_record_with_perceptual(raw, &canonical_cfg, &perceptual_cfg).unwrap();
+            let result = process_pipeline(
+                raw,
+                PipelineStageConfig::Perceptual,
+                &ingest_cfg,
+                &canonical_cfg,
+                Some(&perceptual_cfg),
+                None,
+            )
+            .unwrap();
             black_box(result);
         });
     });
@@ -178,6 +186,7 @@ fn pipeline_various_text_sizes(c: &mut Criterion) {
     let mut group = c.benchmark_group("pipeline_throughput");
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig::default();
+    let ingest_cfg = IngestConfig::default();
 
     let inputs = [
         ("small", SMALL_TEXT),
@@ -190,10 +199,13 @@ fn pipeline_various_text_sizes(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("full_pipeline", *name), text, |b, text| {
             let raw = create_raw_record(text);
             b.iter(|| {
-                let result = process_record_with_perceptual(
+                let result = process_pipeline(
                     black_box(raw.clone()),
+                    PipelineStageConfig::Perceptual,
+                    &ingest_cfg,
                     &canonical_cfg,
-                    &perceptual_cfg,
+                    Some(&perceptual_cfg),
+                    None,
                 )
                 .unwrap();
                 black_box(result);

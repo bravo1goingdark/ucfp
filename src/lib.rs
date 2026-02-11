@@ -2,25 +2,22 @@
 //!
 //! The `ucfp` crate re-exports the ingest, canonical, perceptual, and semantic
 //! layers so applications can drive the full pipeline through a single
-//! dependency. Helpers such as [`process_record_with_configs`],
-//! [`process_document_with_configs`], and [`process_record_with_semantic`]
-//! orchestrate the stages end-to-end, while lighter wrappers like
-//! [`process_document`] and [`process_semantic_document`] provide the common
-//! "just give me the fingerprint/embedding" entry points.
+//! dependency. The unified [`process_pipeline`] function with [`PipelineStageConfig`]
+//! orchestrates all stages end-to-end, providing a single entry point for
+//! canonicalization, perceptual fingerprinting, and semantic embedding.
 //!
 //! ## Quick start
 //!
-//! The pipeline helpers accept a raw ingest record plus the configuration
-//! bundles that describe how each stage should behave. [`process_record_with_configs`]
-//! returns the canonical document, while [`process_record_with_perceptual_configs`]
-//! and [`process_record_with_semantic_configs`] keep running the canonical output
-//! through the fingerprinting and embedding layers when you need those signals.
+//! The [`process_pipeline`] helper accepts a raw ingest record, a stage configuration,
+//! and the configuration bundles that describe how each stage should behave.
+//! Use [`PipelineStageConfig::Canonical`] for ingest + canonicalization only,
+//! [`PipelineStageConfig::Perceptual`] to include perceptual fingerprinting,
+//! or [`PipelineStageConfig::Semantic`] for semantic embeddings.
 //!
 //! ```ignore
 //! use chrono::Utc;
 //! use ucfp::{
-//!     process_record_with_configs, process_record_with_perceptual_configs,
-//!     process_record_with_semantic_configs, CanonicalizeConfig, IngestConfig,
+//!     process_pipeline, PipelineStageConfig, CanonicalizeConfig, IngestConfig,
 //!     IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
 //!     SemanticConfig,
 //! };
@@ -44,34 +41,41 @@
 //!     payload: Some(IngestPayload::Text("Hello, world!".into())),
 //! };
 //!
-//! let canonical = process_record_with_configs(
+//! // Canonical only
+//! let (canonical, _, _) = process_pipeline(
 //!     record.clone(),
+//!     PipelineStageConfig::Canonical,
 //!     &ingest_config,
 //!     &canonical_config,
+//!     None,
+//!     None,
 //! )?;
 //!
-//! let (_, fingerprint) = process_record_with_perceptual_configs(
+//! // With perceptual fingerprint
+//! let (_, fingerprint, _) = process_pipeline(
 //!     record.clone(),
+//!     PipelineStageConfig::Perceptual,
 //!     &ingest_config,
 //!     &canonical_config,
-//!     &perceptual_config,
+//!     Some(&perceptual_config),
+//!     None,
 //! )?;
 //!
-//! let (_, embedding) = process_record_with_semantic_configs(
+//! // With semantic embedding
+//! let (_, _, embedding) = process_pipeline(
 //!     record,
+//!     PipelineStageConfig::Semantic,
 //!     &ingest_config,
 //!     &canonical_config,
-//!     &semantic_config,
+//!     None,
+//!     Some(&semantic_config),
 //! )?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! For workloads that already carry canonicalized tokens you can call
-//! [`process_record_with_perceptual_configs`] or [`process_record_with_semantic`]
-//! to begin at later stages. Document-centric helpers such as
-//! [`process_document_with_configs`] and [`process_document`] wrap the ingest
-//! step for caller convenience.
+//! For workloads that need both perceptual and semantic outputs, use
+//! [`PipelineStageConfig::Perceptual`] with both config options provided.
 //!
 //! ## Observability
 //!
@@ -89,19 +93,17 @@
 //!
 //! In typical services these hooks are registered once during startup alongside
 //! construction of the ingest/canonical/perceptual/semantic configs, ensuring
-//! that every call to [`process_record_with_configs`] (and the helpers layered
-//! on top of it) shares a consistent view of pipeline behaviour and instrumentation.
+//! that every call to [`process_pipeline`] shares a consistent view of pipeline
+//! behaviour and instrumentation.
 //!
 //! ## Indexing and downstream integration
 //!
 //! The canonical document, perceptual fingerprint, and optional semantic
-//! embedding produced by these helpers map directly into the index types exposed
-//! by the companion [`index`](https://docs.rs/index) crate. The
+//! embedding produced by [`process_pipeline`] map directly into the index types
+//! exposed by the companion [`index`](https://docs.rs/index) crate. The
 //! [`IndexRecord`](https://docs.rs/index/latest/index/struct.IndexRecord.html)
-//! struct mirrors the combined outputs returned by
-//! [`process_record_with_perceptual_configs`] and
-//! [`process_record_with_semantic_configs`] so search or deduplication services
-//! can ingest them without translation.
+//! struct mirrors the combined outputs returned by [`process_pipeline`] so
+//! search or deduplication services can ingest them without translation.
 //! When semantic embeddings are disabled the struct fields simply remain
 //! `None`, allowing downstream systems to handle mixed-mode deployments.
 //!
@@ -738,206 +740,6 @@ pub fn process_pipeline(
     Ok((doc, fingerprint, embedding))
 }
 
-/// Convenience: process through canonical stage only.
-pub fn process_record(
-    raw: RawIngestRecord,
-    canonical_cfg: &CanonicalizeConfig,
-) -> Result<CanonicalizedDocument, PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Canonical,
-        &IngestConfig::default(),
-        canonical_cfg,
-        None,
-        None,
-    )
-    .map(|(doc, _, _)| doc)
-}
-
-/// Convenience: process through perceptual stage.
-pub fn process_perceptual(
-    raw: RawIngestRecord,
-    canonical_cfg: &CanonicalizeConfig,
-    perceptual_cfg: &PerceptualConfig,
-) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
-        canonical_cfg,
-        Some(perceptual_cfg),
-        None,
-    )
-    .map(|(doc, fp, _)| (doc, fp.unwrap()))
-}
-
-/// Convenience: process through semantic stage.
-pub fn process_semantic(
-    raw: RawIngestRecord,
-    canonical_cfg: &CanonicalizeConfig,
-    semantic_cfg: &SemanticConfig,
-) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Semantic,
-        &IngestConfig::default(),
-        canonical_cfg,
-        None,
-        Some(semantic_cfg),
-    )
-    .map(|(doc, _, emb)| (doc, emb.unwrap()))
-}
-
-/// Backward-compatible: Process a raw ingest record end-to-end with explicit configuration.
-/// This is a thin wrapper around process_pipeline for backward compatibility.
-pub fn process_record_with_configs(
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-) -> Result<CanonicalizedDocument, PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Canonical,
-        ingest_cfg,
-        canonical_cfg,
-        None,
-        None,
-    )
-    .map(|(doc, _, _)| doc)
-}
-
-/// Backward-compatible: Run ingest, canonicalization, and perceptual fingerprinting.
-pub fn process_record_with_perceptual_configs(
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-    perceptual_cfg: &PerceptualConfig,
-) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        ingest_cfg,
-        canonical_cfg,
-        Some(perceptual_cfg),
-        None,
-    )
-    .map(|(doc, fp, _)| (doc, fp.unwrap()))
-}
-
-/// Backward-compatible: Run ingest, canonicalization, and semantic embedding generation.
-pub fn process_record_with_semantic_configs(
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-    semantic_cfg: &SemanticConfig,
-) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
-    process_pipeline(
-        raw,
-        PipelineStageConfig::Semantic,
-        ingest_cfg,
-        canonical_cfg,
-        None,
-        Some(semantic_cfg),
-    )
-    .map(|(doc, _, emb)| (doc, emb.unwrap()))
-}
-
-/// Generate a semantic embedding from an existing canonical document.
-pub fn semanticize_document(
-    doc: &CanonicalizedDocument,
-    semantic_cfg: &SemanticConfig,
-) -> Result<SemanticEmbedding, PipelineError> {
-    // Build a minimal raw record
-    let raw = RawIngestRecord {
-        id: doc.doc_id.clone(),
-        source: IngestSource::RawText,
-        metadata: IngestMetadata {
-            tenant_id: None,
-            doc_id: Some(doc.doc_id.clone()),
-            received_at: None,
-            original_source: None,
-            attributes: None,
-        },
-        payload: Some(IngestPayload::Text(doc.canonical_text.clone())),
-    };
-
-    let (_, _, embedding) = process_pipeline(
-        raw,
-        PipelineStageConfig::Semantic,
-        &IngestConfig::default(),
-        &CanonicalizeConfig::default(),
-        None,
-        Some(semantic_cfg),
-    )?;
-
-    embedding.ok_or(PipelineError::Semantic(SemanticError::Inference(
-        "Semantic embedding generation failed".into(),
-    )))
-}
-
-/// Backward-compatible: Run ingest, canonicalization, and perceptual fingerprinting.
-/// Uses default ingest config.
-pub fn process_record_with_perceptual(
-    raw: RawIngestRecord,
-    canonical_cfg: &CanonicalizeConfig,
-    perceptual_cfg: &PerceptualConfig,
-) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    process_record_with_perceptual_configs(
-        raw,
-        &IngestConfig::default(),
-        canonical_cfg,
-        perceptual_cfg,
-    )
-}
-
-/// Backward-compatible: Run ingest, canonicalization, and semantic embedding.
-/// Uses default ingest config.
-pub fn process_record_with_semantic(
-    raw: RawIngestRecord,
-    canonical_cfg: &CanonicalizeConfig,
-    semantic_cfg: &SemanticConfig,
-) -> Result<(CanonicalizedDocument, SemanticEmbedding), PipelineError> {
-    process_record_with_semantic_configs(raw, &IngestConfig::default(), canonical_cfg, semantic_cfg)
-}
-
-/// Backward-compatible: Process document with perceptual fingerprinting.
-pub fn process_document(
-    raw: RawIngestRecord,
-    perceptual_cfg: &PerceptualConfig,
-) -> Result<PerceptualFingerprint, PipelineError> {
-    process_perceptual(raw, &CanonicalizeConfig::default(), perceptual_cfg).map(|(_, fp)| fp)
-}
-
-/// Backward-compatible: Process document with perceptual configs.
-pub fn process_document_with_configs(
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-    perceptual_cfg: &PerceptualConfig,
-) -> Result<PerceptualFingerprint, PipelineError> {
-    process_record_with_perceptual_configs(raw, ingest_cfg, canonical_cfg, perceptual_cfg)
-        .map(|(_, fp)| fp)
-}
-
-/// Backward-compatible: Process semantic document.
-pub fn process_semantic_document(
-    raw: RawIngestRecord,
-    semantic_cfg: &SemanticConfig,
-) -> Result<SemanticEmbedding, PipelineError> {
-    process_semantic(raw, &CanonicalizeConfig::default(), semantic_cfg).map(|(_, emb)| emb)
-}
-
-/// Backward-compatible: Process semantic document with configs.
-pub fn process_semantic_document_with_configs(
-    raw: RawIngestRecord,
-    ingest_cfg: &IngestConfig,
-    canonical_cfg: &CanonicalizeConfig,
-    semantic_cfg: &SemanticConfig,
-) -> Result<SemanticEmbedding, PipelineError> {
-    process_record_with_semantic_configs(raw, ingest_cfg, canonical_cfg, semantic_cfg)
-        .map(|(_, emb)| emb)
-}
-
 fn demo_timestamp() -> DateTime<Utc> {
     let Some(date) = NaiveDate::from_ymd_opt(2025, 1, 1) else {
         panic!("invalid demo date components");
@@ -968,7 +770,15 @@ pub fn big_text_demo(
         payload: Some(IngestPayload::Text(BIG_TEXT.to_string())),
     };
 
-    process_perceptual(raw, &CanonicalizeConfig::default(), perceptual_cfg)
+    process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(perceptual_cfg),
+        None,
+    )
+    .map(|(doc, fp, _)| (doc, fp.unwrap()))
 }
 
 /// Execute an index upsert operation with metrics tracking.
@@ -1031,10 +841,19 @@ mod tests {
 
     #[test]
     fn process_record_canonicalizes_text() {
-        let cfg = CanonicalizeConfig::default();
+        let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let record = base_record(IngestPayload::Text(" Hello   Rust ".into()));
 
-        let doc = process_record(record, &cfg).expect("canonicalization should succeed");
+        let (doc, _, _) = process_pipeline(
+            record,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        )
+        .expect("canonicalization should succeed");
         assert_eq!(doc.canonical_text, "hello rust");
         assert_eq!(doc.tokens.len(), 2);
         assert_eq!(doc.tokens[0].text, "hello");
@@ -1044,7 +863,8 @@ mod tests {
 
     #[test]
     fn process_record_rejects_binary_payload() {
-        let cfg = CanonicalizeConfig::default();
+        let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let record = RawIngestRecord {
             id: "ingest-binary".into(),
             source: IngestSource::File {
@@ -1061,13 +881,21 @@ mod tests {
             payload: Some(IngestPayload::Binary(vec![0, 1, 2])),
         };
 
-        let result = process_record(record, &cfg);
+        let result = process_pipeline(
+            record,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        );
         assert!(matches!(result, Err(PipelineError::NonTextPayload)));
     }
 
     #[test]
     fn process_record_requires_payload() {
-        let cfg = CanonicalizeConfig::default();
+        let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let record = RawIngestRecord {
             id: "ingest-empty".into(),
             source: IngestSource::RawText,
@@ -1081,7 +909,14 @@ mod tests {
             payload: Some(IngestPayload::Text("   ".into())),
         };
 
-        let result = process_record(record, &cfg);
+        let result = process_pipeline(
+            record,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        );
         assert!(matches!(
             result,
             Err(PipelineError::Ingest(IngestError::EmptyNormalizedText))
@@ -1090,12 +925,29 @@ mod tests {
 
     #[test]
     fn process_record_deterministic_output() {
-        let cfg = CanonicalizeConfig::default();
+        let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let record_a = base_record(IngestPayload::Text(" Caf\u{00E9}\nRust ".into()));
         let record_b = base_record(IngestPayload::Text("Cafe\u{0301} RUST".into()));
 
-        let doc_a = process_record(record_a, &cfg).expect("first canonicalization");
-        let doc_b = process_record(record_b, &cfg).expect("second canonicalization");
+        let (doc_a, _, _) = process_pipeline(
+            record_a,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        )
+        .expect("first canonicalization");
+        let (doc_b, _, _) = process_pipeline(
+            record_b,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        )
+        .expect("second canonicalization");
 
         assert_eq!(doc_a.canonical_text, doc_b.canonical_text);
         assert_eq!(doc_a.sha256_hex, doc_b.sha256_hex);
@@ -1104,6 +956,7 @@ mod tests {
     #[test]
     fn process_record_with_perceptual_produces_fingerprint() {
         let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let perceptual_cfg = PerceptualConfig {
             k: 3, // ensure tokens >= k for the short input
             ..Default::default()
@@ -1112,8 +965,16 @@ mod tests {
             "The quick brown fox jumps over the lazy dog".into(),
         ));
 
-        let (doc, fp) = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)
-            .expect("pipeline should succeed");
+        let (doc, fp, _) = process_pipeline(
+            record,
+            PipelineStageConfig::Perceptual,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        )
+        .expect("pipeline should succeed");
+        let fp = fp.unwrap();
 
         assert!(!doc.canonical_text.is_empty());
         assert!(!fp.shingles.is_empty());
@@ -1123,6 +984,7 @@ mod tests {
     #[test]
     fn process_record_with_semantic_produces_embedding() {
         let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let semantic_cfg = SemanticConfig {
             tier: "fast".into(),
             mode: "fast".into(),
@@ -1130,8 +992,16 @@ mod tests {
         };
         let record = base_record(IngestPayload::Text("Embeddings make search easier".into()));
 
-        let (doc, embedding) = process_record_with_semantic(record, &canonical_cfg, &semantic_cfg)
-            .expect("semantic pipeline should succeed");
+        let (doc, _, embedding) = process_pipeline(
+            record,
+            PipelineStageConfig::Semantic,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            Some(&semantic_cfg),
+        )
+        .expect("semantic pipeline should succeed");
+        let embedding = embedding.unwrap();
 
         assert_eq!(embedding.doc_id, doc.doc_id);
         assert!(!embedding.vector.is_empty());
@@ -1234,6 +1104,7 @@ mod tests {
         set_pipeline_metrics(Some(metrics.clone()));
 
         let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let perceptual_cfg = PerceptualConfig {
             k: 2,
             ..Default::default()
@@ -1242,7 +1113,14 @@ mod tests {
             "This is a metrics validation payload".into(),
         ));
 
-        let result = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+        let result = process_pipeline(
+            record,
+            PipelineStageConfig::Perceptual,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        );
 
         assert!(result.is_ok());
 
@@ -1255,8 +1133,14 @@ mod tests {
             "Semantic metrics validation payload".into(),
         ));
 
-        let semantic_result =
-            process_record_with_semantic(semantic_record, &canonical_cfg, &semantic_cfg);
+        let semantic_result = process_pipeline(
+            semantic_record,
+            PipelineStageConfig::Semantic,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            Some(&semantic_cfg),
+        );
         assert!(semantic_result.is_ok());
 
         let events = metrics.snapshot();
@@ -1277,6 +1161,7 @@ mod tests {
         set_pipeline_logger(Some(logger.clone()));
 
         let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let perceptual_cfg = PerceptualConfig {
             k: 2,
             ..Default::default()
@@ -1294,7 +1179,14 @@ mod tests {
             payload: Some(IngestPayload::Text("Structured logging validation".into())),
         };
 
-        let result = process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+        let result = process_pipeline(
+            record,
+            PipelineStageConfig::Perceptual,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        );
         assert!(result.is_ok());
 
         let stages: Vec<_> = logger
@@ -1325,6 +1217,7 @@ mod tests {
         set_pipeline_logger(Some(logger.clone()));
 
         let canonical_cfg = CanonicalizeConfig::default();
+        let ingest_cfg = IngestConfig::default();
         let semantic_cfg = SemanticConfig {
             mode: "fast".into(),
             tier: "fast".into(),
@@ -1345,7 +1238,14 @@ mod tests {
             )),
         };
 
-        let result = process_record_with_semantic(record, &canonical_cfg, &semantic_cfg);
+        let result = process_pipeline(
+            record,
+            PipelineStageConfig::Semantic,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            Some(&semantic_cfg),
+        );
         assert!(result.is_ok());
 
         let stages: Vec<_> = logger

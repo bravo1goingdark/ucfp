@@ -1,6 +1,6 @@
 use ucfp::{
-    CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord,
+    process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload,
+    IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
 };
 
 fn canonical_defaults() -> CanonicalizeConfig {
@@ -64,7 +64,17 @@ fn process_document_with_all_configs(
     canonical_cfg: &CanonicalizeConfig,
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<ucfp::PerceptualFingerprint, ucfp::PipelineError> {
-    ucfp::process_document_with_configs(raw, ingest_cfg, canonical_cfg, perceptual_cfg)
+    let (_, fingerprint, _) = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        ingest_cfg,
+        canonical_cfg,
+        Some(perceptual_cfg),
+        None,
+    )?;
+    fingerprint.ok_or_else(|| {
+        ucfp::PipelineError::Perceptual(ucfp::PerceptualError::InvalidConfigVersion { version: 0 })
+    })
 }
 
 // Expanded determinism tests

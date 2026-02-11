@@ -4,8 +4,7 @@ use ingest::{IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawInges
 use ndarray::Array1;
 use serde_json::json;
 use ucfp::{
-    process_record_with_perceptual_configs, semanticize_document, CanonicalizeConfig,
-    PerceptualConfig, SemanticConfig,
+    process_pipeline, CanonicalizeConfig, PerceptualConfig, PipelineStageConfig, SemanticConfig,
 };
 
 #[tokio::main]
@@ -53,12 +52,15 @@ async fn main() -> anyhow::Result<()> {
     println!("\nPhase 1: Ingest + Canonical + Perceptual...");
     for (i, (tenant, doc_id, text)) in corpus.iter().enumerate() {
         let raw = build_raw_record(tenant, doc_id, text);
-        let (doc, fingerprint) = process_record_with_perceptual_configs(
+        let (doc, fingerprint, _) = process_pipeline(
             raw,
+            PipelineStageConfig::Perceptual,
             &ingest_cfg,
             &canonical_cfg,
-            &perceptual_cfg,
+            Some(&perceptual_cfg),
+            None,
         )?;
+        let fingerprint = fingerprint.unwrap();
 
         processed_docs.push((
             tenant.to_string(),
@@ -158,27 +160,27 @@ async fn main() -> anyhow::Result<()> {
     println!("\nSearching for: '{}'", query_text);
 
     let query_raw = build_raw_record("query", "q1", query_text);
-    let (query_doc, query_fingerprint) = process_record_with_perceptual_configs(
+    let (query_doc, query_fingerprint, query_embedding) = process_pipeline(
         query_raw,
+        PipelineStageConfig::Perceptual,
         &ingest_cfg,
         &canonical_cfg,
-        &perceptual_cfg,
+        Some(&perceptual_cfg),
+        Some(&semantic_cfg),
     )?;
 
     println!(
         "  Query: {} minhash values",
-        query_fingerprint.minhash.len()
+        query_fingerprint.as_ref().unwrap().minhash.len()
     );
 
-    let query_semantic = match semanticize_document(&query_doc, &semantic_cfg) {
-        Ok(emb) => emb,
-        Err(_) => make_stub_embedding(&query_doc.sha256_hex, "query"),
-    };
+    let query_semantic =
+        query_embedding.unwrap_or_else(|| make_stub_embedding(&query_doc.sha256_hex, "query"));
 
     let query = IndexRecord {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: "query-1".into(),
-        perceptual: Some(query_fingerprint.minhash.clone()),
+        perceptual: Some(query_fingerprint.unwrap().minhash.clone()),
         embedding: Some(UfpIndex::quantize(
             &Array1::from(query_semantic.vector.clone()),
             127.0,

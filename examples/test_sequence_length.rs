@@ -1,5 +1,8 @@
 use std::path::PathBuf;
-use ucfp::{canonicalize, semanticize_document, CanonicalizeConfig, SemanticConfig};
+use ucfp::{
+    process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload,
+    IngestSource, PipelineStageConfig, RawIngestRecord, SemanticConfig,
+};
 
 fn main() {
     let text = "The quick brown fox jumps over the lazy dog. ".repeat(100); // ~500 words
@@ -11,7 +14,7 @@ fn main() {
     );
 
     let canonical_cfg = CanonicalizeConfig::default();
-    let doc = canonicalize("test", &text, &canonical_cfg).unwrap();
+    let ingest_cfg = IngestConfig::default();
 
     // Test 1: Default 512 tokens (BERT-based models)
     println!("1. Default max_sequence_length (512 tokens):");
@@ -24,12 +27,22 @@ fn main() {
         max_sequence_length: 512, // Default for BERT
         ..Default::default()
     };
-    match semanticize_document(&doc, &cfg_512) {
-        Ok(emb) => println!(
+    let raw_512 = create_raw_record(&text);
+    let (_, _, emb_512) = process_pipeline(
+        raw_512,
+        PipelineStageConfig::Semantic,
+        &ingest_cfg,
+        &canonical_cfg,
+        None,
+        Some(&cfg_512),
+    )
+    .unwrap();
+    match emb_512 {
+        Some(emb) => println!(
             "   ✓ Success with 512 token limit. Embedding dim: {}",
             emb.vector.len()
         ),
-        Err(e) => println!("   ✗ Error: {e}"),
+        None => println!("   ✗ Error: No embedding returned"),
     }
 
     // Test 2: Custom 256 tokens (smaller models)
@@ -43,12 +56,22 @@ fn main() {
         max_sequence_length: 256, // Custom smaller limit
         ..Default::default()
     };
-    match semanticize_document(&doc, &cfg_256) {
-        Ok(emb) => println!(
+    let raw_256 = create_raw_record(&text);
+    let (_, _, emb_256) = process_pipeline(
+        raw_256,
+        PipelineStageConfig::Semantic,
+        &ingest_cfg,
+        &canonical_cfg,
+        None,
+        Some(&cfg_256),
+    )
+    .unwrap();
+    match emb_256 {
+        Some(emb) => println!(
             "   ✓ Success with 256 token limit. Embedding dim: {}",
             emb.vector.len()
         ),
-        Err(e) => println!("   ✗ Error: {e}"),
+        None => println!("   ✗ Error: No embedding returned"),
     }
 
     // Test 3: Custom 1024 tokens (if you had a model that supports it)
@@ -66,4 +89,19 @@ fn main() {
     println!("  - Default: 512 tokens (BERT-based models)");
     println!("  - Can be set to any value: 256, 512, 1024, 2048, 4096, etc.");
     println!("  - Allows using models with different context window sizes");
+}
+
+fn create_raw_record(text: &str) -> RawIngestRecord {
+    RawIngestRecord {
+        id: "test".to_string(),
+        source: IngestSource::RawText,
+        metadata: IngestMetadata {
+            tenant_id: None,
+            doc_id: None,
+            received_at: None,
+            original_source: None,
+            attributes: None,
+        },
+        payload: Some(IngestPayload::Text(text.to_string())),
+    }
 }

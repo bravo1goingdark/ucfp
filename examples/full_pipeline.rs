@@ -11,8 +11,7 @@ use ndarray::Array1;
 use serde_json::json;
 use std::path::PathBuf;
 use ucfp::{
-    process_record_with_perceptual_configs, semanticize_document, CanonicalizeConfig,
-    PerceptualConfig, SemanticConfig,
+    process_pipeline, CanonicalizeConfig, PerceptualConfig, PipelineStageConfig, SemanticConfig,
 };
 
 fn main() -> anyhow::Result<()> {
@@ -67,20 +66,21 @@ fn main() -> anyhow::Result<()> {
 
     for (tenant, doc_id, text) in corpus {
         let raw = build_raw_record(tenant, doc_id, text);
-        let processed = process_record_with_perceptual_configs(
+        let (doc, fingerprint, semantic) = process_pipeline(
             raw,
+            PipelineStageConfig::Semantic,
             &ingest_cfg,
             &canonical_cfg,
-            &perceptual_cfg,
+            Some(&perceptual_cfg),
+            Some(&semantic_cfg),
         )?;
 
-        let semantic =
-            semanticize_document(&processed.0, &semantic_cfg).context("semantic embedding")?;
+        let semantic = semantic.context("semantic embedding")?;
 
         let rec = IndexRecord {
             schema_version: INDEX_SCHEMA_VERSION,
             canonical_hash: format!("{}-{}", tenant, doc_id),
-            perceptual: Some(processed.1.minhash.clone()),
+            perceptual: Some(fingerprint.unwrap().minhash.clone()),
             embedding: Some(UfpIndex::quantize(
                 &Array1::from(semantic.vector.clone()),
                 127.0,
@@ -88,7 +88,7 @@ fn main() -> anyhow::Result<()> {
             metadata: json!({
                 "tenant": tenant,
                 "doc_id": doc_id,
-                "source": processed.0.canonical_text.chars().take(80).collect::<String>() + "..."
+                "source": doc.canonical_text.chars().take(80).collect::<String>() + "..."
             }),
         };
 
@@ -99,19 +99,20 @@ fn main() -> anyhow::Result<()> {
     println!("\nSearching for documents similar to: 'Rust ownership model prevents data races...'");
 
     let query_raw = build_raw_record("query", "q1", "Rust ownership prevents data races");
-    let query_processed = process_record_with_perceptual_configs(
+    let (_query_doc, query_fingerprint, query_semantic) = process_pipeline(
         query_raw,
+        PipelineStageConfig::Semantic,
         &ingest_cfg,
         &canonical_cfg,
-        &perceptual_cfg,
+        Some(&perceptual_cfg),
+        Some(&semantic_cfg),
     )?;
-    let query_semantic =
-        semanticize_document(&query_processed.0, &semantic_cfg).context("query semantic")?;
+    let query_semantic = query_semantic.context("query semantic")?;
 
     let query = IndexRecord {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: "query-1".into(),
-        perceptual: Some(query_processed.1.minhash.clone()),
+        perceptual: Some(query_fingerprint.unwrap().minhash.clone()),
         embedding: Some(UfpIndex::quantize(
             &Array1::from(query_semantic.vector.clone()),
             127.0,

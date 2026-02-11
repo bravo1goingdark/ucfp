@@ -8,7 +8,10 @@ use futures::stream::{self, StreamExt};
 use ingest::{IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use ucfp::{CanonicalizeConfig, IngestConfig, PerceptualConfig, SemanticConfig};
+use ucfp::{
+    process_pipeline, CanonicalizeConfig, IngestConfig, PerceptualConfig, PipelineStageConfig,
+    SemanticConfig,
+};
 
 /// Request to process a single document
 #[derive(Debug, Deserialize)]
@@ -189,19 +192,29 @@ pub async fn process_document(
         let perceptual_cfg = request.perceptual_config.unwrap_or_default();
         let semantic_cfg = request.semantic_config.unwrap_or_default();
 
-        // First process perceptual
-        match ucfp::process_record_with_perceptual_configs(
-            raw.clone(),
+        // Process both perceptual and semantic using process_pipeline
+        match process_pipeline(
+            raw,
+            PipelineStageConfig::Perceptual,
             &ingest_cfg,
             &canonical_cfg,
-            &perceptual_cfg,
+            Some(&perceptual_cfg),
+            Some(&semantic_cfg),
         ) {
-            Ok((doc, fingerprint)) => {
-                response.canonical_hash = Some(doc.sha256_hex.clone());
-                response.perceptual_fingerprint = Some(
-                    serde_json::to_value(fingerprint)
-                        .map_err(|e| ServerError::Internal(e.to_string()))?,
-                );
+            Ok((doc, fingerprint, embedding)) => {
+                response.canonical_hash = Some(doc.sha256_hex);
+                if let Some(fp) = fingerprint {
+                    response.perceptual_fingerprint = Some(
+                        serde_json::to_value(fp)
+                            .map_err(|e| ServerError::Internal(e.to_string()))?,
+                    );
+                }
+                if let Some(emb) = embedding {
+                    response.semantic_embedding = Some(
+                        serde_json::to_value(emb)
+                            .map_err(|e| ServerError::Internal(e.to_string()))?,
+                    );
+                }
             }
             Err(e) => {
                 response.status = "error".to_string();
@@ -209,41 +222,26 @@ pub async fn process_document(
                 return Ok(Json(response));
             }
         }
-
-        // Then process semantic
-        match ucfp::process_record_with_semantic_configs(
-            raw,
-            &ingest_cfg,
-            &canonical_cfg,
-            &semantic_cfg,
-        ) {
-            Ok((_, embedding)) => {
-                response.semantic_embedding = Some(
-                    serde_json::to_value(embedding)
-                        .map_err(|e| ServerError::Internal(e.to_string()))?,
-                );
-            }
-            Err(e) => {
-                response.status = "error".to_string();
-                response.error = Some(e.to_string());
-            }
-        }
     } else if request.enable_perceptual {
         // Perceptual only
         let perceptual_cfg = request.perceptual_config.unwrap_or_default();
 
-        match ucfp::process_record_with_perceptual_configs(
+        match process_pipeline(
             raw,
+            PipelineStageConfig::Perceptual,
             &ingest_cfg,
             &canonical_cfg,
-            &perceptual_cfg,
+            Some(&perceptual_cfg),
+            None,
         ) {
-            Ok((doc, fingerprint)) => {
-                response.canonical_hash = Some(doc.sha256_hex.clone());
-                response.perceptual_fingerprint = Some(
-                    serde_json::to_value(fingerprint)
-                        .map_err(|e| ServerError::Internal(e.to_string()))?,
-                );
+            Ok((doc, fingerprint, _)) => {
+                response.canonical_hash = Some(doc.sha256_hex);
+                if let Some(fp) = fingerprint {
+                    response.perceptual_fingerprint = Some(
+                        serde_json::to_value(fp)
+                            .map_err(|e| ServerError::Internal(e.to_string()))?,
+                    );
+                }
             }
             Err(e) => {
                 response.status = "error".to_string();
@@ -254,18 +252,22 @@ pub async fn process_document(
         // Semantic only
         let semantic_cfg = request.semantic_config.unwrap_or_default();
 
-        match ucfp::process_record_with_semantic_configs(
+        match process_pipeline(
             raw,
+            PipelineStageConfig::Semantic,
             &ingest_cfg,
             &canonical_cfg,
-            &semantic_cfg,
+            None,
+            Some(&semantic_cfg),
         ) {
-            Ok((doc, embedding)) => {
-                response.canonical_hash = Some(doc.sha256_hex.clone());
-                response.semantic_embedding = Some(
-                    serde_json::to_value(embedding)
-                        .map_err(|e| ServerError::Internal(e.to_string()))?,
-                );
+            Ok((doc, _, embedding)) => {
+                response.canonical_hash = Some(doc.sha256_hex);
+                if let Some(emb) = embedding {
+                    response.semantic_embedding = Some(
+                        serde_json::to_value(emb)
+                            .map_err(|e| ServerError::Internal(e.to_string()))?,
+                    );
+                }
             }
             Err(e) => {
                 response.status = "error".to_string();
@@ -274,9 +276,16 @@ pub async fn process_document(
         }
     } else {
         // Canonical only
-        match ucfp::process_record_with_configs(raw, &ingest_cfg, &canonical_cfg) {
-            Ok(doc) => {
-                response.canonical_hash = Some(doc.sha256_hex.clone());
+        match process_pipeline(
+            raw,
+            PipelineStageConfig::Canonical,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            None,
+        ) {
+            Ok((doc, _, _)) => {
+                response.canonical_hash = Some(doc.sha256_hex);
             }
             Err(e) => {
                 response.status = "error".to_string();
@@ -347,55 +356,59 @@ pub async fn process_batch(
                     error: None,
                 };
 
-                // Process perceptual fingerprinting
-                if enable_perceptual {
-                    let perceptual_cfg = PerceptualConfig::default();
-                    match ucfp::process_record_with_perceptual_configs(
-                        raw.clone(),
-                        &ingest_cfg,
-                        &canonical_cfg,
-                        &perceptual_cfg,
-                    ) {
-                        Ok((doc, fingerprint)) => {
-                            response.canonical_hash = Some(doc.sha256_hex.clone());
+                // Determine stage and process
+                let (stage, perceptual_cfg, semantic_cfg) = if enable_perceptual && enable_semantic
+                {
+                    (
+                        PipelineStageConfig::Perceptual,
+                        Some(PerceptualConfig::default()),
+                        Some(SemanticConfig::default()),
+                    )
+                } else if enable_perceptual {
+                    (
+                        PipelineStageConfig::Perceptual,
+                        Some(PerceptualConfig::default()),
+                        None,
+                    )
+                } else if enable_semantic {
+                    (
+                        PipelineStageConfig::Semantic,
+                        None,
+                        Some(SemanticConfig::default()),
+                    )
+                } else {
+                    (PipelineStageConfig::Canonical, None, None)
+                };
+
+                match process_pipeline(
+                    raw,
+                    stage,
+                    &ingest_cfg,
+                    &canonical_cfg,
+                    perceptual_cfg.as_ref(),
+                    semantic_cfg.as_ref(),
+                ) {
+                    Ok((doc, fingerprint, embedding)) => {
+                        response.canonical_hash = Some(doc.sha256_hex);
+                        if let Some(fp) = fingerprint {
                             response.perceptual_fingerprint = Some(
-                                serde_json::to_value(fingerprint)
+                                serde_json::to_value(fp)
                                     .map_err(|e| ServerError::Internal(e.to_string()))
                                     .unwrap_or(serde_json::Value::Null),
                             );
                         }
-                        Err(e) => {
-                            response.status = "error".to_string();
-                            response.error = Some(e.to_string());
-                            return (idx, response);
+                        if let Some(emb) = embedding {
+                            response.semantic_embedding = Some(
+                                serde_json::to_value(emb)
+                                    .map_err(|e| ServerError::Internal(e.to_string()))
+                                    .unwrap_or(serde_json::Value::Null),
+                            );
                         }
                     }
-                }
-
-                // Process semantic embedding
-                if enable_semantic {
-                    let semantic_cfg = SemanticConfig::default();
-                    match ucfp::process_record_with_semantic_configs(
-                        raw.clone(),
-                        &ingest_cfg,
-                        &canonical_cfg,
-                        &semantic_cfg,
-                    ) {
-                        Ok((doc, embedding)) => {
-                            if response.canonical_hash.is_none() {
-                                response.canonical_hash = Some(doc.sha256_hex.clone());
-                            }
-                            response.semantic_embedding = Some(
-                                serde_json::to_value(embedding)
-                                    .map_err(|e| ServerError::Internal(e.to_string()))
-                                    .unwrap_or(serde_json::Value::Null),
-                            );
-                        }
-                        Err(e) => {
-                            response.status = "error".to_string();
-                            response.error = Some(e.to_string());
-                            return (idx, response);
-                        }
+                    Err(e) => {
+                        response.status = "error".to_string();
+                        response.error = Some(e.to_string());
+                        return (idx, response);
                     }
                 }
 

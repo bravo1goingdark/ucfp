@@ -1,7 +1,7 @@
 use ucfp::{
-    process_document, process_record_with_perceptual_configs, CanonicalizeConfig, IngestConfig,
-    IngestError, IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, PerceptualError,
-    PipelineError, RawIngestRecord,
+    process_pipeline, CanonicalizeConfig, IngestConfig, IngestError, IngestMetadata, IngestPayload,
+    IngestSource, PerceptualConfig, PerceptualError, PipelineError, PipelineStageConfig,
+    RawIngestRecord,
 };
 
 fn base_metadata() -> IngestMetadata {
@@ -23,7 +23,14 @@ fn empty_text_payload_returns_ingest_error() {
         payload: Some(IngestPayload::Text("   ".into())),
     };
 
-    let result = process_document(raw, &PerceptualConfig::default());
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
     assert!(matches!(
         result,
         Err(PipelineError::Ingest(IngestError::EmptyNormalizedText))
@@ -42,7 +49,14 @@ fn binary_payload_for_file_source_is_rejected_by_canonical_stage() {
         payload: Some(IngestPayload::Binary(vec![0, 1, 2])),
     };
 
-    let result = process_document(raw, &PerceptualConfig::default());
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
     assert!(matches!(result, Err(PipelineError::NonTextPayload)));
 }
 
@@ -64,8 +78,14 @@ fn perceptual_invalid_config_bubbles_up() {
         ..Default::default()
     };
 
-    let result =
-        process_record_with_perceptual_configs(raw, &ingest_cfg, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
 
     assert!(matches!(
         result,
@@ -91,7 +111,14 @@ fn error_empty_normalized_text_various_whitespace() {
             payload: Some(IngestPayload::Text(ws.into())),
         };
 
-        let result = process_document(raw, &PerceptualConfig::default());
+        let result = process_pipeline(
+            raw,
+            PipelineStageConfig::Perceptual,
+            &IngestConfig::default(),
+            &CanonicalizeConfig::default(),
+            Some(&PerceptualConfig::default()),
+            None,
+        );
         assert!(
             matches!(
                 result,
@@ -111,7 +138,14 @@ fn error_missing_payload_for_text_source() {
         payload: None,
     };
 
-    let result = process_document(raw, &PerceptualConfig::default());
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
     assert!(matches!(
         result,
         Err(PipelineError::Ingest(IngestError::MissingPayload))
@@ -134,8 +168,14 @@ fn error_perceptual_config_k_too_large() {
         ..Default::default()
     };
 
-    let result =
-        process_record_with_perceptual_configs(raw, &ingest_cfg, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
 
     assert!(matches!(
         result,
@@ -164,8 +204,14 @@ fn error_perceptual_config_w_zero() {
         ..Default::default()
     };
 
-    let result =
-        process_record_with_perceptual_configs(raw, &ingest_cfg, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
 
     assert!(matches!(
         result,
@@ -193,8 +239,14 @@ fn error_perceptual_config_version_zero() {
         ..Default::default()
     };
 
-    let result =
-        process_record_with_perceptual_configs(raw, &ingest_cfg, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
 
     assert!(matches!(
         result,
@@ -252,7 +304,14 @@ fn error_url_source_without_url() {
     };
 
     // Should still work, URL source doesn't validate URL format
-    let result = process_document(raw, &PerceptualConfig::default());
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
     assert!(result.is_ok());
 }
 
@@ -268,7 +327,14 @@ fn error_binary_empty_payload() {
         payload: Some(IngestPayload::Binary(vec![])),
     };
 
-    let result = process_document(raw, &PerceptualConfig::default());
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
     // Empty binary payloads might be handled differently depending on implementation
     // This test documents the current behavior
     assert!(

@@ -252,31 +252,28 @@ pub async fn compare_documents(
             payload: Some(IngestPayload::Text(doc.text.clone())),
         };
 
-        // Try to get both perceptual and semantic
+        // Try to get both perceptual and semantic using process_pipeline
         let mut perceptual = None;
         let mut semantic = None;
 
-        // Process perceptual
-        if let Ok((_, fingerprint)) = ucfp::process_record_with_perceptual_configs(
-            raw.clone(),
+        if let Ok((_, fingerprint, embedding)) = ucfp::process_pipeline(
+            raw,
+            ucfp::PipelineStageConfig::Perceptual,
             ingest_cfg,
             canonical_cfg,
-            perceptual_cfg,
+            Some(perceptual_cfg),
+            Some(semantic_cfg),
         ) {
-            perceptual = Some(
-                serde_json::to_value(fingerprint)
-                    .map_err(|e| ServerError::Internal(e.to_string()))?,
-            );
-        }
-
-        // Process semantic
-        if let Ok((_, embedding)) =
-            ucfp::process_record_with_semantic_configs(raw, ingest_cfg, canonical_cfg, semantic_cfg)
-        {
-            semantic = Some(
-                serde_json::to_value(embedding)
-                    .map_err(|e| ServerError::Internal(e.to_string()))?,
-            );
+            if let Some(fp) = fingerprint {
+                perceptual = Some(
+                    serde_json::to_value(fp).map_err(|e| ServerError::Internal(e.to_string()))?,
+                );
+            }
+            if let Some(emb) = embedding {
+                semantic = Some(
+                    serde_json::to_value(emb).map_err(|e| ServerError::Internal(e.to_string()))?,
+                );
+            }
         }
 
         Ok((perceptual, semantic))

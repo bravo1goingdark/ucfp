@@ -38,8 +38,8 @@ cargo run --package perceptual --example fingerprint_demo
 
 ```rust
 use ucfp::{
-    CanonicalizeConfig, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, process_perceptual,
+    CanonicalizeConfig, IngestConfig, IngestPayload, IngestSource,
+    PerceptualConfig, RawIngestRecord, PipelineStageConfig, process_pipeline,
 };
 
 let record = RawIngestRecord {
@@ -49,14 +49,17 @@ let record = RawIngestRecord {
     ..Default::default()
 };
 
-let (doc, fingerprint) = process_perceptual(
+let (doc, fingerprint, _) = process_pipeline(
     record,
+    PipelineStageConfig::Perceptual,
+    &IngestConfig::default(),
     &CanonicalizeConfig::default(),
-    &PerceptualConfig::default(),
+    Some(&PerceptualConfig::default()),
+    None,
 )?;
 
 println!("Canonical hash: {}", doc.canonical_hash);
-println!("MinHash bands: {}", fingerprint.minhash_bands.len());
+println!("MinHash bands: {}", fingerprint.unwrap().minhash_bands.len());
 ```
 
 See [`examples/`](examples/) for full pipeline demonstrations.
@@ -68,8 +71,8 @@ Complete workflow from ingest to matching:
 ```rust
 use ucfp::{
     CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload, IngestSource,
-    PerceptualConfig, RawIngestRecord, SemanticConfig,
-    process_perceptual, semanticize_document,
+    PerceptualConfig, RawIngestRecord, SemanticConfig, PipelineStageConfig,
+    process_pipeline,
 };
 use ucfp_index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex};
 use ucfp_matcher::{Matcher, MatchConfig, MatchRequest};
@@ -96,12 +99,15 @@ let record = RawIngestRecord {
     payload: Some(IngestPayload::Text("Rust memory safety features".into())),
 };
 
-// 4. Process through pipeline (ingest -> canonical -> perceptual)
-let (doc, fingerprint) =
-    process_perceptual(record, &canonical_cfg, &perceptual_cfg)?;
-
-// 5. Generate semantic embedding
-let embedding = semanticize_document(&doc, &semantic_cfg)?;
+// 4. Process through pipeline (ingest -> canonical -> perceptual -> semantic)
+let (doc, fingerprint, embedding) = process_pipeline(
+    record,
+    PipelineStageConfig::Perceptual,
+    &ingest_cfg,
+    &canonical_cfg,
+    Some(&perceptual_cfg),
+    Some(&semantic_cfg),
+)?;
 
 // 6. Store in index
 let record = IndexRecord {

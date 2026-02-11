@@ -170,12 +170,11 @@ Update ANN config at runtime via control plane. Changes apply to new queries; ex
 
 ## Using with the upper layer (`ucfp`)
 
-`ucfp` (workspace root crate) runs ingest, canonical, perceptual, semantic stages. `index` is the persistence layer behind them:
+`ucfp` (workspace root crate) runs ingest, canonical, perceptual, semantic stages via the unified `process_pipeline` API. `index` is the persistence layer behind them:
 
-1. `ucfp::process_perceptual` → canonical doc + MinHash
-2. `ucfp::process_semantic` → canonical doc + semantic embedding
-3. Convert to `IndexRecord` and `upsert`
-4. Build partial record for lookups and `search`
+1. `ucfp::process_pipeline` with `PipelineStageConfig::Perceptual` or `PipelineStageConfig::Semantic` → canonical doc + fingerprints/embeddings
+2. Convert to `IndexRecord` and `upsert`
+3. Build partial record for lookups and `search`
 
 ### Write path
 

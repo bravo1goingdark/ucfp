@@ -1,6 +1,6 @@
 use ucfp::{
-    process_record_with_perceptual_configs, CanonicalizeConfig, IngestConfig, IngestMetadata,
-    IngestPayload, IngestSource, PerceptualConfig, PipelineError, RawIngestRecord,
+    process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload,
+    IngestSource, PerceptualConfig, PipelineError, PipelineStageConfig, RawIngestRecord,
 };
 
 #[test]
@@ -24,8 +24,15 @@ fn full_pipeline_executes_with_defaults() -> Result<(), PipelineError> {
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig::default();
 
-    let (doc, fingerprint) =
-        process_record_with_perceptual_configs(raw, &ingest_cfg, &canonical_cfg, &perceptual_cfg)?;
+    let (doc, fingerprint, _) = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    )?;
+    let fingerprint = fingerprint.expect("fingerprint should be present");
 
     assert_eq!(doc.doc_id, "doc-full");
     assert!(!doc.canonical_text.is_empty());

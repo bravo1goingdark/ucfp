@@ -6,8 +6,8 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 use ucfp::{
-    canonicalize, process_record_with_perceptual, CanonicalizeConfig, IngestMetadata,
-    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
+    canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
 };
 
 fn create_test_record(id: &str, text: &str) -> RawIngestRecord {
@@ -110,8 +110,16 @@ fn concurrent_pipeline_processing() {
             let perceptual_cfg = perceptual_cfg.clone();
             thread::spawn(move || {
                 let record = create_test_record(&format!("concurrent-{i}"), &text);
-                process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg)
-                    .expect("process should succeed")
+                let (doc, fingerprint, _) = process_pipeline(
+                    record,
+                    PipelineStageConfig::Perceptual,
+                    &IngestConfig::default(),
+                    &canonical_cfg,
+                    Some(&perceptual_cfg),
+                    None,
+                )
+                .expect("process should succeed");
+                (doc, fingerprint.unwrap())
             })
         })
         .collect();
@@ -148,11 +156,17 @@ fn thread_safe_shared_config() {
 
             thread::spawn(move || {
                 let record = create_test_record(&format!("shared-{i}"), &text);
-                let result =
-                    process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+                let result = process_pipeline(
+                    record,
+                    PipelineStageConfig::Perceptual,
+                    &IngestConfig::default(),
+                    &canonical_cfg,
+                    Some(&perceptual_cfg),
+                    None,
+                );
 
                 results.lock().unwrap().push((i, result.is_ok()));
-                result
+                result.map(|(doc, fp, _)| (doc, fp.unwrap()))
             })
         })
         .collect();
@@ -195,8 +209,14 @@ fn no_data_races_on_independent_documents() {
                     let record =
                         create_test_record(&format!("thread-{thread_id}-doc-{doc_id}"), &text);
 
-                    let result =
-                        process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg);
+                    let result = process_pipeline(
+                        record,
+                        PipelineStageConfig::Perceptual,
+                        &IngestConfig::default(),
+                        &canonical_cfg,
+                        Some(&perceptual_cfg),
+                        None,
+                    );
 
                     local_results.push((thread_id, doc_id, result.is_ok()));
                 }
@@ -354,10 +374,13 @@ fn stress_test_thread_pool_simulation() {
                         Ok((id, text)) => {
                             let record =
                                 create_test_record(&format!("pool-{worker_id}-{id}"), &text);
-                            if process_record_with_perceptual(
+                            if process_pipeline(
                                 record,
+                                PipelineStageConfig::Perceptual,
+                                &IngestConfig::default(),
                                 &canonical_cfg,
-                                &perceptual_cfg,
+                                Some(&perceptual_cfg),
+                                None,
                             )
                             .is_ok()
                             {

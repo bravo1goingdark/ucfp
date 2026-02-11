@@ -3,11 +3,10 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use ucfp::{
-    process_record_with_perceptual, semanticize_document, set_pipeline_logger,
-    set_pipeline_metrics, CanonicalizeConfig, IndexError, IngestError, IngestMetadata,
-    IngestPayload, IngestSource, KeyValueLogger, MatchError, PerceptualConfig, PerceptualError,
-    PipelineError, PipelineEventLogger, PipelineMetrics, RawIngestRecord, SemanticConfig,
-    SemanticError,
+    process_pipeline, set_pipeline_logger, set_pipeline_metrics, CanonicalizeConfig, IndexError,
+    IngestConfig, IngestError, IngestMetadata, IngestPayload, IngestSource, KeyValueLogger,
+    MatchError, PerceptualConfig, PerceptualError, PipelineError, PipelineEventLogger,
+    PipelineMetrics, PipelineStageConfig, RawIngestRecord, SemanticConfig, SemanticError,
 };
 
 fn main() -> Result<(), PipelineError> {
@@ -17,20 +16,35 @@ fn main() -> Result<(), PipelineError> {
     set_pipeline_logger(Some(logger));
 
     let canonical_cfg = CanonicalizeConfig::default();
+    let ingest_cfg = IngestConfig::default();
     let perceptual_cfg = PerceptualConfig {
         k: 3,
         ..PerceptualConfig::default()
     };
 
-    let (doc, _fingerprint) =
-        process_record_with_perceptual(build_demo_record(), &canonical_cfg, &perceptual_cfg)?;
+    let (_doc, _fingerprint, _) = process_pipeline(
+        build_demo_record(),
+        PipelineStageConfig::Perceptual,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    )?;
 
     let semantic_cfg = SemanticConfig {
         mode: "fast".into(),
         tier: "fast".into(),
         ..Default::default()
     };
-    let _embedding = semanticize_document(&doc, &semantic_cfg)?;
+    let (_, _, embedding) = process_pipeline(
+        build_demo_record(),
+        PipelineStageConfig::Semantic,
+        &ingest_cfg,
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        Some(&semantic_cfg),
+    )?;
+    let _embedding = embedding.unwrap();
 
     println!("Recorded metrics events:");
     for event in metrics.snapshot() {

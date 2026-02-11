@@ -4,8 +4,8 @@
 
 use std::time::{Duration, Instant};
 use ucfp::{
-    canonicalize, process_record_with_perceptual, CanonicalizeConfig, IngestMetadata,
-    IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord,
+    canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
 };
 
 /// Helper function to create a test record with variable text size
@@ -67,7 +67,14 @@ fn performance_single_document_processing_time() {
     let raw = create_test_record("perf-1", &text);
 
     let start = Instant::now();
-    let result = process_record_with_perceptual(raw, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
     let elapsed = start.elapsed();
 
     assert!(result.is_ok(), "Processing should succeed");
@@ -98,7 +105,16 @@ fn performance_batch_processing() {
 
     let mut success_count = 0;
     for record in records {
-        if process_record_with_perceptual(record, &canonical_cfg, &perceptual_cfg).is_ok() {
+        if process_pipeline(
+            record,
+            PipelineStageConfig::Perceptual,
+            &IngestConfig::default(),
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        )
+        .is_ok()
+        {
             success_count += 1;
         }
     }
@@ -131,12 +147,20 @@ fn stress_test_large_document() {
     let raw = create_test_record("large-doc", &text);
 
     let start = Instant::now();
-    let result = process_record_with_perceptual(raw, &canonical_cfg, &perceptual_cfg);
+    let result = process_pipeline(
+        raw,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &canonical_cfg,
+        Some(&perceptual_cfg),
+        None,
+    );
     let elapsed = start.elapsed();
 
     assert!(result.is_ok(), "Large document should process successfully");
 
-    let (doc, fingerprint) = result.unwrap();
+    let (doc, fingerprint, _) = result.unwrap();
+    let fingerprint = fingerprint.expect("fingerprint should be present");
 
     // Verify outputs are reasonable
     assert!(!doc.canonical_text.is_empty());
@@ -157,7 +181,14 @@ fn stress_test_many_small_documents() {
 
     for i in 0..count {
         let raw = create_test_record(&format!("small-{i}"), text);
-        let result = process_record_with_perceptual(raw, &canonical_cfg, &perceptual_cfg);
+        let result = process_pipeline(
+            raw,
+            PipelineStageConfig::Perceptual,
+            &IngestConfig::default(),
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        );
         assert!(result.is_ok(), "Document {i} should process");
     }
 
@@ -279,7 +310,14 @@ fn stress_test_repeated_processing() {
     let start = Instant::now();
 
     for _ in 0..iterations {
-        let result = process_record_with_perceptual(raw.clone(), &canonical_cfg, &perceptual_cfg);
+        let result = process_pipeline(
+            raw.clone(),
+            PipelineStageConfig::Perceptual,
+            &IngestConfig::default(),
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        );
         assert!(result.is_ok());
     }
 

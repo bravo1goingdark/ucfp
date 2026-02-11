@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 use std::time::Instant;
 use ucfp::{
-    canonicalize, process_record_with_perceptual, semanticize_document, CanonicalizeConfig,
-    IngestMetadata, IngestPayload, IngestSource, PerceptualConfig, RawIngestRecord, SemanticConfig,
+    canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
+    SemanticConfig,
 };
 
 fn main() {
@@ -44,10 +45,18 @@ fn main() {
         },
         payload: Some(IngestPayload::Text(text.clone())),
     };
+    let ingest_cfg = IngestConfig::default();
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = process_record_with_perceptual(record.clone(), &canonical_cfg, &perceptual_cfg)
-            .unwrap();
+        let _ = process_pipeline(
+            record.clone(),
+            PipelineStageConfig::Perceptual,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            None,
+        )
+        .unwrap();
     }
     let pipeline_us = start.elapsed().as_micros() as f64 / iterations as f64;
 
@@ -62,7 +71,16 @@ fn main() {
     };
     let start = Instant::now();
     for _ in 0..iterations {
-        let _ = semanticize_document(&doc, &semantic_cfg).unwrap();
+        let (_, _, emb) = process_pipeline(
+            record.clone(),
+            PipelineStageConfig::Semantic,
+            &ingest_cfg,
+            &canonical_cfg,
+            Some(&perceptual_cfg),
+            Some(&semantic_cfg),
+        )
+        .unwrap();
+        let _ = emb.unwrap();
     }
     let semantic_us = start.elapsed().as_micros() as f64 / iterations as f64;
 

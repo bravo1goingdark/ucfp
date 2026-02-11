@@ -1,5 +1,8 @@
 use std::path::PathBuf;
-use ucfp::{canonicalize, semanticize_document, CanonicalizeConfig, SemanticConfig};
+use ucfp::{
+    process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata, IngestPayload,
+    IngestSource, PipelineStageConfig, RawIngestRecord, SemanticConfig,
+};
 
 fn main() {
     // Create a long text that will definitely need chunking
@@ -12,7 +15,7 @@ fn main() {
     );
 
     let canonical_cfg = CanonicalizeConfig::default();
-    let doc = canonicalize("test", &long_text, &canonical_cfg).unwrap();
+    let ingest_cfg = IngestConfig::default();
 
     // Test 1: Without chunking (truncation at 512 tokens)
     println!("1. WITHOUT chunking (truncates at 512 tokens):");
@@ -27,8 +30,18 @@ fn main() {
         ..Default::default()
     };
 
-    match semanticize_document(&doc, &cfg_no_chunk) {
-        Ok(emb) => {
+    let raw_no_chunk = create_raw_record(&long_text);
+    let (_, _, emb_no_chunk) = process_pipeline(
+        raw_no_chunk,
+        PipelineStageConfig::Semantic,
+        &ingest_cfg,
+        &canonical_cfg,
+        None,
+        Some(&cfg_no_chunk),
+    )
+    .unwrap();
+    match emb_no_chunk {
+        Some(emb) => {
             println!("   ✓ Success (truncated)");
             println!("   Embedding dimension: {}", emb.vector.len());
             println!(
@@ -36,7 +49,7 @@ fn main() {
                 &emb.vector[..5.min(emb.vector.len())]
             );
         }
-        Err(e) => println!("   ✗ Error: {e}"),
+        None => println!("   ✗ Error: No embedding returned"),
     }
 
     // Test 2: With chunking enabled (sliding window + weighted mean)
@@ -54,8 +67,18 @@ fn main() {
         ..Default::default()
     };
 
-    match semanticize_document(&doc, &cfg_chunk) {
-        Ok(emb) => {
+    let raw_chunk = create_raw_record(&long_text);
+    let (_, _, emb_chunk) = process_pipeline(
+        raw_chunk,
+        PipelineStageConfig::Semantic,
+        &ingest_cfg,
+        &canonical_cfg,
+        None,
+        Some(&cfg_chunk),
+    )
+    .unwrap();
+    match emb_chunk {
+        Some(emb) => {
             println!("   ✓ Success with chunking!");
             println!("   Embedding dimension: {}", emb.vector.len());
             println!(
@@ -65,7 +88,7 @@ fn main() {
             println!("\n   Note: Long text was automatically split into overlapping chunks,");
             println!("   each embedded separately, then pooled with center-weighted mean.");
         }
-        Err(e) => println!("   ✗ Error: {e}"),
+        None => println!("   ✗ Error: No embedding returned"),
     }
 
     // Test 3: Different pooling strategies
@@ -84,9 +107,19 @@ fn main() {
             ..Default::default()
         };
 
-        match semanticize_document(&doc, &cfg_strategy) {
-            Ok(emb) => println!("   ✓ {} pooling: dim={}", strategy, emb.vector.len()),
-            Err(e) => println!("   ✗ {strategy} pooling failed: {e}"),
+        let raw_strategy = create_raw_record(&long_text);
+        let (_, _, emb_strategy) = process_pipeline(
+            raw_strategy,
+            PipelineStageConfig::Semantic,
+            &ingest_cfg,
+            &canonical_cfg,
+            None,
+            Some(&cfg_strategy),
+        )
+        .unwrap();
+        match emb_strategy {
+            Some(emb) => println!("   ✓ {} pooling: dim={}", strategy, emb.vector.len()),
+            None => println!("   ✗ {strategy} pooling failed: No embedding returned"),
         }
     }
 
@@ -95,4 +128,19 @@ fn main() {
     println!("  - Weighted mean pooling (center chunks weighted higher)");
     println!("  - Explicit opt-in via enable_chunking: true");
     println!("  - Works with any max_sequence_length (512, 1024, 4096, etc.)");
+}
+
+fn create_raw_record(text: &str) -> RawIngestRecord {
+    RawIngestRecord {
+        id: "chunk-test".to_string(),
+        source: IngestSource::RawText,
+        metadata: IngestMetadata {
+            tenant_id: None,
+            doc_id: None,
+            received_at: None,
+            original_source: None,
+            attributes: None,
+        },
+        payload: Some(IngestPayload::Text(text.to_string())),
+    }
 }
