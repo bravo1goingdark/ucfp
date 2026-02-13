@@ -294,7 +294,7 @@ pub struct IngestMetadata {
     /// Optional tenant identifier for multi-tenant isolation.
     ///
     /// When `None` or empty after sanitization, falls back to
-    /// [`IngestConfig::default_tenant_id`].
+    /// `IngestConfig::default_tenant_id`.
     ///
     /// # Example
     ///
@@ -314,7 +314,7 @@ pub struct IngestMetadata {
     /// Optional document identifier.
     ///
     /// When `None` or empty after sanitization, a deterministic UUIDv5 is generated
-    /// using [`IngestConfig::doc_id_namespace`]:
+    /// using `IngestConfig::doc_id_namespace`:
     /// `UUIDv5(namespace, tenant_id + "\0" + record_id)`
     ///
     /// # Example
@@ -697,7 +697,7 @@ pub struct CanonicalIngestRecord {
     ///
     /// This is the effective tenant ID after applying defaults:
     /// - If provided and non-empty: the sanitized provided value
-    /// - Otherwise: [`IngestConfig::default_tenant_id`]
+    /// - Otherwise: `IngestConfig::default_tenant_id`
     pub tenant_id: String,
 
     /// Document identifier.

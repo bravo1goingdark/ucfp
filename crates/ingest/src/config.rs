@@ -188,7 +188,7 @@ pub struct IngestConfig {
     /// Maximum raw payload byte length allowed.
     ///
     /// If set, payloads exceeding this limit are rejected with
-    /// [`IngestError::PayloadTooLarge`] before any processing.
+    /// `IngestError::PayloadTooLarge` before any processing.
     ///
     /// This check is performed on the raw payload size before normalization
     /// (whitespace collapsing, UTF-8 decoding, etc.).
@@ -206,7 +206,7 @@ pub struct IngestConfig {
     /// Maximum normalized payload byte length allowed.
     ///
     /// If set, text payloads exceeding this limit after whitespace normalization
-    /// are rejected with [`IngestError::PayloadTooLarge`].
+    /// are rejected with `IngestError::PayloadTooLarge`.
     ///
     /// This is useful for enforcing limits on processed content size, which
     /// may differ from raw size due to whitespace collapsing.
@@ -260,7 +260,7 @@ pub struct MetadataPolicy {
     /// Metadata fields that must be provided by the caller (after sanitization).
     ///
     /// If a required field is missing or empty after control character stripping,
-    /// ingest fails with [`IngestError::InvalidMetadata`].
+    /// ingest fails with `IngestError::InvalidMetadata`.
     ///
     /// # Example
     ///
@@ -298,7 +298,7 @@ pub struct MetadataPolicy {
     /// Reject ingests with timestamps that lie in the future.
     ///
     /// When `true`, if `received_at` is strictly greater than the current time,
-    /// ingest fails with [`IngestError::InvalidMetadata`] containing "future".
+    /// ingest fails with `IngestError::InvalidMetadata` containing "future".
     ///
     /// This is useful for detecting clock skew or preventing future-dated content
     /// from entering the system.

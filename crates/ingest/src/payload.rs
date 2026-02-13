@@ -167,7 +167,7 @@ fn source_requires_text_payload(source: &IngestSource) -> bool {
 /// # Errors
 ///
 /// - [`IngestError::InvalidMetadata`] - Text source received binary payload
-/// - All errors from [`normalize_payload_value`]
+/// - All errors from `normalize_payload_value`
 ///
 /// # Examples
 ///

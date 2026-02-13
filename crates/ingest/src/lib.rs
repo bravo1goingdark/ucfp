@@ -76,11 +76,11 @@
 //!
 //! # Module Structure
 //!
-//! - [`config`](config): Configuration types (`IngestConfig`, `MetadataPolicy`)
-//! - [`error`](error): Error types (`IngestError`)
-//! - [`types`](types): Data model (`RawIngestRecord`, `CanonicalIngestRecord`, etc.)
-//! - [`metadata`](metadata): Metadata normalization and validation logic
-//! - [`payload`](payload): Payload validation and transformation utilities
+//! - `config`: Configuration types (`IngestConfig`, `MetadataPolicy`)
+//! - `error`: Error types (`IngestError`)
+//! - `types`: Data model (`RawIngestRecord`, `CanonicalIngestRecord`, etc.)
+//! - `metadata`: Metadata normalization and validation logic
+//! - `payload`: Payload validation and transformation utilities
 //!
 //! # Error Handling
 //!
@@ -149,8 +149,8 @@
 //! # See Also
 //!
 //! - [Crate documentation](doc/ingest.md) for comprehensive guides
-//! - [`config`](config) module for configuration details
-//! - [`types`](types) module for data structure definitions
+//! - `config` module for configuration details
+//! - `types` module for data structure definitions
 
 use std::time::Instant;
 
