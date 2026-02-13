@@ -6,11 +6,11 @@ description = "UCFP matching layer for semantic and perceptual search over index
 license = "Apache-2.0"
 
 [dependencies]
-ingest = { path = "../ingest" }
-canonical = { path = "../canonical" }
-perceptual = { path = "../perceptual" }
-semantic = { path = "../semantic" }
-index = { path = "../index" }
+ingest = { package = "content-ingest", version = "0.1.0", path = "../ingest" }
+canonical = { package = "content-canonical", version = "0.1.0", path = "../canonical" }
+perceptual = { version = "0.1.0", path = "../perceptual" }
+semantic = { version = "0.1.0", path = "../semantic" }
+index = { version = "0.1.0", path = "../index" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0.17"

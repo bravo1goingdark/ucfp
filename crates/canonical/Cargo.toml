@@ -1,8 +1,17 @@
 [package]
-name = "canonical"
+name = "content-canonical"
 version = "0.1.0"
 edition = "2021"
+authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
+license = "Apache-2.0"
+description = "Content canonicalization and text normalization library"
+repository = "https://github.com/bravo1goingdark/ucfp"
+documentation = "https://docs.rs/content-canonical"
+keywords = ["canonical", "text", "normalization", "unicode", "fingerprinting"]
+categories = ["text-processing", "encoding"]
 
+[lib]
+name = "canonical"
 
 [dependencies]
 unicode-normalization = "0.1"

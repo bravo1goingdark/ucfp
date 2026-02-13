@@ -392,20 +392,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "canonical"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "hex",
- "serde",
- "sha2",
- "thiserror 2.0.17",
- "unicode-normalization",
- "unicode-segmentation",
- "unicode_categories",
-]
-
-[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,6 +601,32 @@ dependencies = [
  "getrandom 0.2.16",
  "once_cell",
  "tiny-keccak",
+]
+
+[[package]]
+name = "content-canonical"
+version = "0.1.0"
+dependencies = [
+ "criterion",
+ "hex",
+ "serde",
+ "sha2",
+ "thiserror 2.0.17",
+ "unicode-normalization",
+ "unicode-segmentation",
+ "unicode_categories",
+]
+
+[[package]]
+name = "content-ingest"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1642,18 +1654,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ingest"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1853,10 +1853,10 @@ checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 name = "matcher"
 version = "0.1.0"
 dependencies = [
- "canonical",
  "chrono",
+ "content-canonical",
+ "content-ingest",
  "index",
- "ingest",
  "once_cell",
  "perceptual",
  "semantic",
@@ -2315,7 +2315,7 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 name = "perceptual"
 version = "0.1.0"
 dependencies = [
- "canonical",
+ "content-canonical",
  "criterion",
  "rayon",
  "serde",
@@ -2983,15 +2983,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "canonical",
  "chrono",
  "config",
+ "content-canonical",
+ "content-ingest",
  "dashmap",
  "dotenvy",
  "futures",
  "headers",
  "index",
- "ingest",
  "matcher",
  "metrics",
  "metrics-exporter-prometheus",
@@ -3636,12 +3636,12 @@ name = "ucfp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "canonical",
  "chrono",
+ "content-canonical",
+ "content-ingest",
  "criterion",
  "futures",
  "index",
- "ingest",
  "matcher",
  "ndarray 0.17.1",
  "perceptual",

@@ -5,7 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 description = "UCFP perceptual fingerprinting (text shingling, winnowing, MinHash) crate"
 authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
-repository = "https://github.com/bravo1goingdark/ufcp"
+repository = "https://github.com/bravo1goingdark/ucfp"
 
 [features]
 # Enable canonical adapter to integrate directly with canonical crate
@@ -18,7 +18,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rayon = "1.10"
 
 # Optional canonical crate integration
-canonical = { path = "../canonical", optional = true }
+canonical = { package = "content-canonical", version = "0.1.0", path = "../canonical", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }

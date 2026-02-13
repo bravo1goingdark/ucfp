@@ -8,13 +8,13 @@ repository = "https://github.com/bravo1goingdark/ucfp"
 
 [dependencies]
 # Core UCFP crates
-ucfp = { path = "../.." }
-ingest = { path = "../ingest" }
-canonical = { path = "../canonical" }
-perceptual = { path = "../perceptual" }
-semantic = { path = "../semantic" }
-index = { path = "../index" }
-matcher = { path = "../matcher" }
+ucfp = { version = "0.1.0", path = "../.." }
+ingest = { package = "content-ingest", version = "0.1.0", path = "../ingest" }
+canonical = { package = "content-canonical", version = "0.1.0", path = "../canonical" }
+perceptual = { version = "0.1.0", path = "../perceptual" }
+semantic = { version = "0.1.0", path = "../semantic" }
+index = { version = "0.1.0", path = "../index" }
+matcher = { version = "0.1.0", path = "../matcher" }
 
 # Server framework
 axum = { version = "0.8", features = ["macros"] }

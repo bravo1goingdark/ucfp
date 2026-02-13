@@ -1,7 +1,17 @@
 [package]
-name = "ingest"
+name = "content-ingest"
 version = "0.1.0"
 edition = "2021"
+authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
+license = "Apache-2.0"
+description = "Content ingestion, validation, and normalization pipeline for text and binary data"
+repository = "https://github.com/bravo1goingdark/ucfp"
+documentation = "https://docs.rs/content-ingest"
+keywords = ["ingest", "pipeline", "content", "validation", "normalization"]
+categories = ["text-processing", "data-structures"]
+
+[lib]
+name = "ingest"
 
 [dependencies]
 chrono = { version = "0.4", features = ["serde"] }
