@@ -94,7 +94,7 @@
 //! In typical services these hooks are registered once during startup alongside
 //! construction of the ingest/canonical/perceptual/semantic configs, ensuring
 //! that every call to [`process_pipeline`] shares a consistent view of pipeline
-//! behaviour and instrumentation.
+//! behavior and instrumentation.
 //!
 //! ## Indexing and downstream integration
 //!

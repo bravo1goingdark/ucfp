@@ -276,7 +276,7 @@ pub struct IndexConfig {
     /// Quantization settings for embeddings.
     pub quantization: QuantizationConfig,
     /// ANN (Approximate Nearest Neighbor) configuration for semantic search.
-    /// When enabled, uses HNSW algorithm for sub-linear search on large datasets.
+    /// When enabled, uses HNSW algorithm for sublinear search on large datasets.
     pub ann: AnnConfig,
 }
 
@@ -354,7 +354,7 @@ pub struct UfpIndex {
     /// Lock-free index for semantic embeddings enabling concurrent access
     semantic_index: DashMap<String, QuantizedVec>,
     /// ANN index for fast approximate semantic search (HNSW)
-    ann_index: std::sync::Mutex<Option<crate::ann::AnnIndex>>,
+    ann_index: std::sync::Mutex<Option<ann::AnnIndex>>,
     /// Tracks if ANN index needs rebuilding
     ann_needs_rebuild: std::sync::atomic::AtomicBool,
 }
@@ -424,7 +424,7 @@ impl UfpIndex {
 
                     // Rebuild ANN index with correct dimension
                     if dimension > 0 && !vectors_to_insert.is_empty() {
-                        *ann = crate::ann::AnnIndex::new(dimension, self.cfg.ann);
+                        *ann = ann::AnnIndex::new(dimension, self.cfg.ann);
                         for (hash, vec) in vectors_to_insert {
                             let _ = ann.insert(hash, vec);
                         }

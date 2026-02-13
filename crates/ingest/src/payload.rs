@@ -1,13 +1,107 @@
 //! Payload validation and normalization utilities.
 //!
 //! This module contains helpers for enforcing payload presence/shape policies
-//! and transforming raw payloads into [`CanonicalPayload`]
-//! values suitable for downstream processing.
+//! and transforming raw payloads into [`CanonicalPayload`] values suitable for
+//! downstream processing.
+//!
+//! # Responsibilities
+//!
+//! - **Requirement Validation**: Check if source type mandates a payload
+//! - **Type Validation**: Ensure text sources get text payloads
+//! - **Content Validation**: UTF-8 validation, emptiness checks
+//! - **Normalization**: Whitespace collapsing for text
+//! - **Size Enforcement**: Apply payload size limits
+//!
+//! # Payload Flow
+//!
+//! ```text
+//! IngestPayload (raw)
+//!        │
+//!        ▼
+//! ┌─────────────────────────────┐
+//! │ 1. Check requirements       │
+//! │    - Source mandates?       │
+//! │    - Text source = text?    │
+//! ├─────────────────────────────┤
+//! │ 2. Decode/validate          │
+//! │    - UTF-8 validation       │
+//! │    - Binary checks          │
+//! ├─────────────────────────────┤
+//! │ 3. Normalize                │
+//! │    - Collapse whitespace    │
+//! │    - Size limits            │
+//! └─────────────────────────────┘
+//!        │
+//!        ▼
+//! CanonicalPayload (normalized)
+//! ```
+//!
+//! # Examples
+//!
+//! ```rust
+//! use ingest::{
+//!     validate_payload_requirements, normalize_payload_option,
+//!     IngestPayload, IngestSource, IngestConfig
+//! };
+//!
+//! let source = IngestSource::RawText;
+//! let payload = Some(IngestPayload::Text("Hello world".to_string()));
+//!
+//! // Validate requirements
+//! validate_payload_requirements(&source, &payload).unwrap();
+//!
+//! // Normalize
+//! let config = IngestConfig::default();
+//! let canonical = normalize_payload_option(&source, payload, &config).unwrap();
+//! ```
 use crate::config::IngestConfig;
 use crate::error::IngestError;
 use crate::types::{CanonicalPayload, IngestPayload, IngestSource};
 
 /// Checks if the source requires a payload.
+///
+/// This function validates that sources which mandate payloads (like `RawText`
+/// and `File`) actually have one provided. This is an early validation step
+/// before any processing occurs.
+///
+/// # Source Requirements
+///
+/// | Source | Payload Required |
+/// |--------|-----------------|
+/// | `RawText` | Yes |
+/// | `Url` | No (but typically has one) |
+/// | `File` | Yes |
+/// | `Api` | No |
+///
+/// # Arguments
+///
+/// * `source` - The ingest source type
+/// * `payload` - The optional payload
+///
+/// # Returns
+///
+/// - `Ok(())` - Payload requirements satisfied
+/// - `Err(IngestError::MissingPayload)` - Required payload is missing
+///
+/// # Examples
+///
+/// ```rust
+/// use ingest::{validate_payload_requirements, IngestPayload, IngestSource};
+///
+/// // RawText requires payload
+/// let source = IngestSource::RawText;
+/// let result = validate_payload_requirements(&source, &Some(IngestPayload::Text("test".to_string())));
+/// assert!(result.is_ok());
+///
+/// // Missing required payload
+/// let result = validate_payload_requirements(&source, &None);
+/// assert!(result.is_err());
+///
+/// // Api doesn't require payload
+/// let source = IngestSource::Api;
+/// let result = validate_payload_requirements(&source, &None);
+/// assert!(result.is_ok());
+/// ```
 pub fn validate_payload_requirements(
     source: &IngestSource,
     payload: &Option<IngestPayload>,
@@ -20,11 +114,82 @@ pub fn validate_payload_requirements(
 }
 
 /// Determines if a source type requires a payload.
-pub(crate) fn source_requires_payload(source: &IngestSource) -> bool {
+///
+/// This internal function defines which source types mandate payload presence.
+///
+/// # Arguments
+///
+/// * `source` - The ingest source type
+///
+/// # Returns
+///
+/// `true` if the source requires a payload, `false` otherwise
+fn source_requires_payload(source: &IngestSource) -> bool {
     matches!(source, IngestSource::RawText | IngestSource::File { .. })
 }
 
+/// Determines if a source type requires a text payload.
+///
+/// Text-based sources (like `RawText` and `Url`) should receive text payloads
+/// rather than binary data.
+///
+/// # Arguments
+///
+/// * `source` - The ingest source type
+///
+/// # Returns
+///
+/// `true` if the source requires text content, `false` otherwise
+fn source_requires_text_payload(source: &IngestSource) -> bool {
+    matches!(source, IngestSource::RawText | IngestSource::Url(_))
+}
+
 /// Normalizes the payload based on its type.
+///
+/// This is the main entry point for payload processing. It:
+/// 1. Handles `None` payloads (returns `None`)
+/// 2. Normalizes the payload value
+/// 3. Validates text source requirements
+/// 4. Returns the canonical payload
+///
+/// # Arguments
+///
+/// * `source` - The ingest source (for type validation)
+/// * `payload` - The optional raw payload
+/// * `cfg` - Configuration for normalization
+///
+/// # Returns
+///
+/// - `Ok(Some(CanonicalPayload))` - Successfully normalized payload
+/// - `Ok(None)` - No payload provided
+/// - `Err(IngestError)` - Validation or normalization failure
+///
+/// # Errors
+///
+/// - [`IngestError::InvalidMetadata`] - Text source received binary payload
+/// - All errors from [`normalize_payload_value`]
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use ingest::{normalize_payload_option, IngestPayload, IngestSource, IngestConfig};
+///
+/// let config = IngestConfig::default();
+///
+/// // Text normalization
+/// let result = normalize_payload_option(
+///     &IngestSource::RawText,
+///     Some(IngestPayload::Text("  Hello   world  ".to_string())),
+///     &config
+/// ).unwrap();
+///
+/// // Binary preservation
+/// let result = normalize_payload_option(
+///     &IngestSource::File { filename: "test.bin".to_string(), content_type: None },
+///     Some(IngestPayload::Binary(vec![1, 2, 3])),
+///     &config
+/// ).unwrap();
+/// ```
 pub fn normalize_payload_option(
     source: &IngestSource,
     payload: Option<IngestPayload>,
@@ -45,13 +210,31 @@ pub fn normalize_payload_option(
     Ok(Some(canonical))
 }
 
-/// Determines if a source type requires a text payload.
-pub(crate) fn source_requires_text_payload(source: &IngestSource) -> bool {
-    matches!(source, IngestSource::RawText | IngestSource::Url(_))
-}
-
 /// Normalizes the payload value itself.
-pub(crate) fn normalize_payload_value(
+///
+/// This function processes the actual payload content based on its type:
+/// - `Text`: Validates and normalizes whitespace
+/// - `TextBytes`: Validates UTF-8, then treats as Text
+/// - `Binary`: Validates non-empty, passes through unchanged
+///
+/// # Arguments
+///
+/// * `payload` - The raw payload value
+/// * `cfg` - Configuration for normalization
+///
+/// # Returns
+///
+/// - `Ok(CanonicalPayload)` - Successfully normalized payload
+/// - `Err(IngestError)` - Validation or normalization failure
+///
+/// # Errors
+///
+/// - [`IngestError::InvalidUtf8`] - TextBytes contains invalid UTF-8
+/// - [`IngestError::EmptyBinaryPayload`] - Binary payload is empty
+/// - [`IngestError::InvalidMetadata`] - Binary contains suspicious patterns
+/// - [`IngestError::PayloadTooLarge`] - Size limit exceeded
+/// - [`IngestError::EmptyNormalizedText`] - Text empty after normalization
+fn normalize_payload_value(
     payload: IngestPayload,
     cfg: &IngestConfig,
 ) -> Result<CanonicalPayload, IngestError> {
@@ -86,7 +269,27 @@ pub(crate) fn normalize_payload_value(
     }
 }
 
-/// Validates text content for potential issues before normalization
+/// Validates text content for potential issues before normalization.
+///
+/// This function performs sanity checks on text content:
+/// - Null byte detection
+/// - Excessive control characters
+/// - Empty content check
+///
+/// # Arguments
+///
+/// * `text` - The text to validate
+/// * `cfg` - Configuration (controls control character checking)
+///
+/// # Returns
+///
+/// - `Ok(())` - Text is valid
+/// - `Err(IngestError)` - Validation failure
+///
+/// # Errors
+///
+/// - [`IngestError::InvalidMetadata`] - Null bytes or too many control characters
+/// - [`IngestError::EmptyNormalizedText`] - Text is empty/whitespace only
 fn validate_text_content(text: &str, cfg: &IngestConfig) -> Result<(), IngestError> {
     // Check for null bytes
     if text.contains('\0') {
@@ -115,7 +318,29 @@ fn validate_text_content(text: &str, cfg: &IngestConfig) -> Result<(), IngestErr
 }
 
 /// Normalizes a text payload by collapsing whitespace.
-pub(crate) fn normalize_text_payload(
+///
+/// This function performs the full text normalization pipeline:
+/// 1. Validates content (null bytes, control chars, emptiness)
+/// 2. Collapses whitespace using [`normalize_payload`](crate::normalize_payload)
+/// 3. Enforces size limits
+/// 4. Checks for empty result
+///
+/// # Arguments
+///
+/// * `text` - The raw text to normalize
+/// * `cfg` - Configuration for normalization and size limits
+///
+/// # Returns
+///
+/// - `Ok(CanonicalPayload::Text)` - Successfully normalized text
+/// - `Err(IngestError)` - Validation or normalization failure
+///
+/// # Errors
+///
+/// - All errors from [`validate_text_content`]
+/// - [`IngestError::PayloadTooLarge`] - Normalized text exceeds limit
+/// - [`IngestError::EmptyNormalizedText`] - Result is empty
+fn normalize_text_payload(
     text: String,
     cfg: &IngestConfig,
 ) -> Result<CanonicalPayload, IngestError> {
@@ -141,6 +366,31 @@ pub(crate) fn normalize_text_payload(
 }
 
 /// Returns a string representation of the payload kind for logging.
+///
+/// This is a utility function for structured logging to categorize payloads
+/// without exposing actual content.
+///
+/// # Arguments
+///
+/// * `payload` - Optional reference to canonical payload
+///
+/// # Returns
+///
+/// String describing the payload type: `"text"`, `"binary"`, or `"none"`
+///
+/// # Examples
+///
+/// ```rust
+/// use ingest::{payload_kind, CanonicalPayload};
+///
+/// let text = Some(CanonicalPayload::Text("hello".to_string()));
+/// assert_eq!(payload_kind(text.as_ref()), "text");
+///
+/// let binary = Some(CanonicalPayload::Binary(vec![1, 2, 3]));
+/// assert_eq!(payload_kind(binary.as_ref()), "binary");
+///
+/// assert_eq!(payload_kind(None), "none");
+/// ```
 pub fn payload_kind(payload: Option<&CanonicalPayload>) -> &'static str {
     match payload {
         Some(CanonicalPayload::Text(_)) => "text",
@@ -150,6 +400,31 @@ pub fn payload_kind(payload: Option<&CanonicalPayload>) -> &'static str {
 }
 
 /// Returns the length of the payload for logging.
+///
+/// This is a utility function for structured logging to record payload sizes
+/// without exposing actual content.
+///
+/// # Arguments
+///
+/// * `payload` - Optional reference to canonical payload
+///
+/// # Returns
+///
+/// Size in bytes, or 0 if no payload
+///
+/// # Examples
+///
+/// ```rust
+/// use ingest::{payload_length, CanonicalPayload};
+///
+/// let text = Some(CanonicalPayload::Text("hello".to_string()));
+/// assert_eq!(payload_length(text.as_ref()), 5);
+///
+/// let binary = Some(CanonicalPayload::Binary(vec![1, 2, 3, 4]));
+/// assert_eq!(payload_length(binary.as_ref()), 4);
+///
+/// assert_eq!(payload_length(None), 0);
+/// ```
 pub fn payload_length(payload: Option<&CanonicalPayload>) -> usize {
     match payload {
         Some(CanonicalPayload::Text(text)) => text.len(),
