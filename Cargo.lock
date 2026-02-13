@@ -620,6 +620,7 @@ name = "content-canonical"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "fxhash",
  "hex",
  "serde",
  "sha2",
