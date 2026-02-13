@@ -27,7 +27,7 @@ ndarray = "0.17"
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 tempfile = "3"
 ndarray = "0.17"
-# server = { version = "0.1.0", path = "crates/server" }  # Temporarily removed for publishing
+server = { package = "ucfp-server", version = "0.1.0", path = "crates/server" }
 rand = "0.8"
 futures = "0.3"
 rayon = "1.10"
