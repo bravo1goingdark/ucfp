@@ -618,6 +618,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "content-index"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode 2.0.1",
+ "criterion",
+ "dashmap",
+ "hashbrown 0.16.0",
+ "hnsw_rs",
+ "log",
+ "ndarray 0.17.1",
+ "redb",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.17",
+ "zstd",
+]
+
+[[package]]
 name = "content-ingest"
 version = "0.1.0"
 dependencies = [
@@ -627,6 +647,25 @@ dependencies = [
  "thiserror 2.0.17",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "content-semantic"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dashmap",
+ "fastrand",
+ "fxhash",
+ "lru",
+ "once_cell",
+ "onnxruntime",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokenizers",
+ "tokio",
 ]
 
 [[package]]
@@ -1611,26 +1650,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "index"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode 2.0.1",
- "criterion",
- "dashmap",
- "hashbrown 0.16.0",
- "hnsw_rs",
- "log",
- "ndarray 0.17.1",
- "redb",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.17",
- "zstd",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1855,11 +1874,11 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "content-canonical",
+ "content-index",
  "content-ingest",
- "index",
+ "content-semantic",
  "once_cell",
  "perceptual",
- "semantic",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -2859,25 +2878,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "semantic"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "dashmap",
- "fastrand",
- "fxhash",
- "lru",
- "once_cell",
- "onnxruntime",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokenizers",
- "tokio",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2986,19 +2986,19 @@ dependencies = [
  "chrono",
  "config",
  "content-canonical",
+ "content-index",
  "content-ingest",
+ "content-semantic",
  "dashmap",
  "dotenvy",
  "futures",
  "headers",
- "index",
  "matcher",
  "metrics",
  "metrics-exporter-prometheus",
  "once_cell",
  "perceptual",
  "reqwest",
- "semantic",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -3638,16 +3638,16 @@ dependencies = [
  "anyhow",
  "chrono",
  "content-canonical",
+ "content-index",
  "content-ingest",
+ "content-semantic",
  "criterion",
  "futures",
- "index",
  "matcher",
  "ndarray 0.17.1",
  "perceptual",
  "rand 0.8.5",
  "rayon",
- "semantic",
  "serde",
  "serde_json",
  "serde_yaml",
