@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["UCFP Team"]
 description = "HTTP REST API server for UCFP content fingerprinting"
 repository = "https://github.com/bravo1goingdark/ucfp"
+license = "Apache-2.0"
 
 [dependencies]
 # Core UCFP crates

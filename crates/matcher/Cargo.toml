@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "UCFP matching layer for semantic and perceptual search over indexed fingerprints"
 license = "Apache-2.0"
+repository = "https://github.com/bravo1goingdark/ucfp"
 
 [dependencies]
 ingest = { package = "content-ingest", version = "0.1.0", path = "../ingest" }
