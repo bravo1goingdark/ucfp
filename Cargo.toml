@@ -5,6 +5,7 @@ edition = "2021"
 description = "Universal Content Fingerprinting (UCFP) core library"
 license = "Apache-2.0"
 repository = "https://github.com/bravo1goingdark/ucfp"
+include = ["src/**/*", "crates/canonical/examples/big_text.txt", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
 canonical = { package = "content-canonical", version = "0.1.0", path = "crates/canonical" }
