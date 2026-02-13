@@ -87,10 +87,24 @@
 //! All errors are typed via [`IngestError`] for precise handling:
 //!
 //! ```rust
-//! use ingest::{ingest, IngestError};
+//! use ingest::{ingest, IngestError, IngestConfig, RawIngestRecord, IngestSource, IngestMetadata, IngestPayload};
+//!
+//! let config = IngestConfig::default();
+//! let record = RawIngestRecord {
+//!     id: "test".to_string(),
+//!     source: IngestSource::RawText,
+//!     metadata: IngestMetadata {
+//!         tenant_id: Some("tenant".to_string()),
+//!         doc_id: Some("doc".to_string()),
+//!         received_at: None,
+//!         original_source: None,
+//!         attributes: None,
+//!     },
+//!     payload: Some(IngestPayload::Text("hello".to_string())),
+//! };
 //!
 //! match ingest(record, &config) {
-//!     Ok(canonical) => process(canonical),
+//!     Ok(canonical) => println!("Success: {}", canonical.doc_id),
 //!     Err(IngestError::PayloadTooLarge(msg)) => {
 //!         eprintln!("Content too large: {}", msg);
 //!     }

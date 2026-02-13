@@ -383,6 +383,7 @@ pub enum RequiredField {
 ///                  normalized, payload);
 ///     }
 ///     Ok(()) => println!("Config is valid"),
+///     Err(_) => println!("Other config error"),
 /// }
 /// ```
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -500,16 +501,13 @@ impl IngestConfig {
     /// ```rust
     /// use ingest::IngestConfig;
     ///
-    /// fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let config = load_config()?;
-    ///     config.validate()?;
+    /// fn main() {
+    ///     let config = IngestConfig::default();
+    ///     if let Err(e) = config.validate() {
+    ///         eprintln!("Configuration error: {}", e);
+    ///         std::process::exit(1);
+    ///     }
     ///     // Continue with valid config...
-    ///     Ok(())
-    /// }
-    ///
-    /// fn load_config() -> anyhow::Result<IngestConfig> {
-    ///     // Load from file, env vars, etc.
-    ///     Ok(IngestConfig::default())
     /// }
     /// ```
     pub fn validate(&self) -> Result<(), ConfigError> {

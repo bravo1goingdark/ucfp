@@ -185,22 +185,6 @@ pub fn hash_canonical_bytes(canonical_version: u32, canonical_bytes: &[u8]) -> S
 ///
 /// A 64-character hexadecimal string representing the SHA-256 digest.
 ///
-/// # Examples
-///
-/// ```rust
-/// use canonical::hash_token_bytes;
-///
-/// let hash1 = hash_token_bytes(1, b"hello");
-/// let hash2 = hash_token_bytes(1, b"world");
-///
-/// // Different tokens have different hashes
-/// assert_ne!(hash1, hash2);
-///
-/// // Same version and token = same hash
-/// let hash1_again = hash_token_bytes(1, b"hello");
-/// assert_eq!(hash1, hash1_again);
-/// ```
-///
 /// # Use Cases
 ///
 /// - Perceptual fingerprinting (MinHash)

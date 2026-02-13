@@ -83,6 +83,7 @@
 //!             println!("No payload");
 //!             None
 //!         }
+//!         _ => None,
 //!     }
 //! }
 //! ```
