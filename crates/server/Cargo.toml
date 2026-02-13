@@ -7,6 +7,9 @@ description = "HTTP REST API server for UCFP content fingerprinting"
 repository = "https://github.com/bravo1goingdark/ucfp"
 license = "Apache-2.0"
 
+[lib]
+name = "server"
+
 [dependencies]
 # Core UCFP crates
 ucfp = { version = "0.1.0", path = "../.." }

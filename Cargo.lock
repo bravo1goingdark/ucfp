@@ -2978,41 +2978,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "config",
- "content-canonical",
- "content-index",
- "content-ingest",
- "content-semantic",
- "dashmap",
- "dotenvy",
- "futures",
- "headers",
- "matcher",
- "metrics",
- "metrics-exporter-prometheus",
- "once_cell",
- "perceptual",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.17",
- "tokio",
- "tokio-test",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "ucfp",
- "uuid",
-]
-
-[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3654,6 +3619,42 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
+ "ucfp-server",
+]
+
+[[package]]
+name = "ucfp-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "config",
+ "content-canonical",
+ "content-index",
+ "content-ingest",
+ "content-semantic",
+ "dashmap",
+ "dotenvy",
+ "futures",
+ "headers",
+ "matcher",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "once_cell",
+ "perceptual",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "ucfp",
+ "uuid",
 ]
 
 [[package]]
