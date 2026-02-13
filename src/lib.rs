@@ -755,7 +755,7 @@ fn demo_timestamp() -> DateTime<Utc> {
 pub fn big_text_demo(
     perceptual_cfg: &PerceptualConfig,
 ) -> Result<(CanonicalizedDocument, PerceptualFingerprint), PipelineError> {
-    const BIG_TEXT: &str = include_str!("../crates/canonical/examples/big_text.txt");
+    const BIG_TEXT: &str = include_str!("big_text.txt");
 
     let raw = RawIngestRecord {
         id: "demo-big-text".into(),
