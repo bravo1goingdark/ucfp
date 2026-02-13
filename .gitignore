@@ -10,4 +10,4 @@ web/dist
 
 # Profiling artifacts
 perf.data
-perf.data.*
+perf.data.*web/node_modules/
