@@ -2,6 +2,7 @@
 
 use reqwest::Client;
 use serde_json::json;
+use url::form_urlencoded;
 
 const SERVER_URL: &str = "http://localhost:8080";
 const API_KEY: &str = "demo-key-12345";
@@ -91,14 +92,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Example 5: Search index
     println!("5. Search Index:");
+    let query_params = form_urlencoded::Serializer::new(String::new())
+        .append_pair("query", "sample document")
+        .append_pair("strategy", "perceptual")
+        .append_pair("top_k", "10")
+        .finish();
     let resp = client
-        .get(format!("{SERVER_URL}/api/v1/index/search"))
+        .get(format!("{SERVER_URL}/api/v1/index/search?{}", query_params))
         .header("X-API-Key", API_KEY)
-        .query(&[
-            ("query", "sample document"),
-            ("strategy", "perceptual"),
-            ("top_k", "10"),
-        ])
         .send()
         .await?;
     println!("Status: {}", resp.status());

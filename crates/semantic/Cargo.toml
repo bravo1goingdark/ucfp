@@ -7,6 +7,8 @@ description = "UCFP semantic fingerprinting (embedding generation) crate"
 authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
 repository = "https://github.com/bravo1goingdark/ucfp"
 
+[lib]
+name = "semantic"
 
 [dependencies]
 # --- Core runtime dependencies ---

@@ -7,6 +7,9 @@ description = "UCFP backend-agnostic vector and fingerprint index"
 authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
 repository = "https://github.com/bravo1goingdark/ucfp"
 
+[lib]
+name = "index"
+
 [features]
 default = ["backend-redb"]
 backend-redb = ["redb"]

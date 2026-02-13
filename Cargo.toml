@@ -10,7 +10,7 @@ include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 [dependencies]
 canonical = { package = "content-canonical", version = "0.1.0", path = "crates/canonical" }
 ingest = { package = "content-ingest", version = "0.1.0", path = "crates/ingest" }
-perceptual = { version = "0.1.0", path = "crates/perceptual" }
+perceptual = { package = "content-perceptual", version = "0.1.0", path = "crates/perceptual" }
 semantic = { package = "content-semantic", version = "0.1.0", path = "crates/semantic" }
 index = { package = "content-index", version = "0.1.0", path = "crates/index" }
 matcher = { version = "0.1.0", path = "crates/matcher" }

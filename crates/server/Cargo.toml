@@ -15,15 +15,14 @@ name = "server"
 ucfp = { version = "0.1.0", path = "../.." }
 ingest = { package = "content-ingest", version = "0.1.0", path = "../ingest" }
 canonical = { package = "content-canonical", version = "0.1.0", path = "../canonical" }
-perceptual = { version = "0.1.0", path = "../perceptual" }
 semantic = { package = "content-semantic", version = "0.1.0", path = "../semantic" }
 index = { package = "content-index", version = "0.1.0", path = "../index" }
 matcher = { version = "0.1.0", path = "../matcher" }
+perceptual = { package = "content-perceptual", version = "0.1.0", path = "../perceptual" }
 
 # Server framework
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1.42", features = ["full"] }
-tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["compression-full", "timeout", "trace", "cors"] }
 
 # Serialization
@@ -44,7 +43,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Metrics and monitoring
 metrics = "0.24"
-metrics-exporter-prometheus = "0.16"
 
 # Authentication and security
 headers = "0.4"
@@ -57,5 +55,6 @@ dashmap = "6.1"
 futures = "0.3"
 
 [dev-dependencies]
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13.2", features = ["json"] }
 tokio-test = "0.4"
+url = "2"

@@ -1,11 +1,14 @@
 [package]
-name = "perceptual"
+name = "content-perceptual"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "UCFP perceptual fingerprinting (text shingling, winnowing, MinHash) crate"
 authors = ["UCFP Developers <kumarashutosh34169@gmail.com>"]
 repository = "https://github.com/bravo1goingdark/ucfp"
+
+[lib]
+name = "perceptual"
 
 [features]
 # Enable canonical adapter to integrate directly with canonical crate

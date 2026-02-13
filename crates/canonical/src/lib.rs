@@ -1,29 +1,159 @@
-//! UCFP canonical text layer.
+//! UCFP Canonical Layer - Deterministic Text Canonicalization
 //!
-//! This module normalizes text into a deterministic, versioned format. Downstream
-//! stages (perceptual, semantic, index) can rely on this for stable identity.
+//! This crate provides the second stage in the Universal Content Fingerprinting (UCFP)
+//! pipeline, transforming text into a deterministic, versioned format suitable for
+//! downstream processing (perceptual fingerprinting, semantic embeddings, indexing).
 //!
-//! ## What we do
+//! # Overview
 //!
-//! - Unicode normalization (NFKC by default, configurable)
-//! - Casing and punctuation handling (lowercase, optional stripping)
-//! - Whitespace normalization (collapses to single spaces)
-//! - Tokenization with byte offsets for downstream accuracy
-//! - Versioned hashes so you can tell which canonicalization was used
+//! The `canonical` crate is responsible for:
+//! - **Unicode Normalization**: NFKC normalization for consistent character representation
+//! - **Text Transformation**: Locale-free lowercasing, optional punctuation stripping
+//! - **Whitespace Normalization**: Collapsing consecutive whitespace to single spaces
+//! - **Tokenization**: Producing offset-aware tokens for downstream stages
+//! - **Versioned Hashing**: Computing stable identity hashes that include config version
 //!
-//! ## Pure function guarantee
+//! # Core Guarantee
 //!
-//! No I/O, no clock calls, no OS/locale dependence. Give us the same text
-//! and config, you get the same result on any machine.
+//! > **Same input text + same `CanonicalizeConfig` → identical `CanonicalizedDocument`, forever.**
 //!
-//! ## Invariants worth knowing
+//! This crate is **pure** and **side-effect free**:
+//! - No I/O operations
+//! - No network calls
+//! - No dependence on wall-clock time, locale, or hardware
 //!
-//! - Input should be trusted UTF-8 (usually from ingest stage)
-//! - We don't re-validate ingest constraints here
-//! - Output depends only on text + config
-//! - Hash = SHA-256(version || 0x00 || canonical_text)
+//! # Pipeline Position
 //!
-//! Bottom line: same input + same config = same output forever.
+//! ```text
+//! Raw Text ──▶ Ingest ──▶ Canonical ──▶ Perceptual/Semantic ──▶ Index ──▶ Match
+//!                              ↑
+//!                           (this crate)
+//! ```
+//!
+//! # Quick Start
+//!
+//! ```rust
+//! use canonical::{canonicalize, CanonicalizeConfig};
+//!
+//! // Use default configuration (recommended)
+//! let config = CanonicalizeConfig::default();
+//!
+//! // Canonicalize some text
+//! let doc = canonicalize("doc-001", "  Hello   WORLD  ", &config).unwrap();
+//!
+//! assert_eq!(doc.canonical_text, "hello world");
+//! assert_eq!(doc.tokens.len(), 2);
+//! assert!(!doc.sha256_hex.is_empty()); // Version-aware identity hash
+//! ```
+//!
+//! # Configuration
+//!
+//! ## Default Configuration (Recommended)
+//!
+//! ```rust
+//! use canonical::CanonicalizeConfig;
+//!
+//! let config = CanonicalizeConfig::default();
+//! // version: 1
+//! // normalize_unicode: true
+//! // strip_punctuation: false
+//! // lowercase: true
+//! ```
+//!
+//! ## Custom Configuration
+//!
+//! ```rust
+//! use canonical::CanonicalizeConfig;
+//!
+//! let config = CanonicalizeConfig {
+//!     version: 1,
+//!     normalize_unicode: true,
+//!     strip_punctuation: true,  // Remove punctuation
+//!     lowercase: true,
+//! };
+//! ```
+//!
+//! # Canonicalization Pipeline
+//!
+//! The `canonicalize()` function implements a deterministic pipeline:
+//!
+//! 1. **Config Validation**: Ensure version >= 1, doc_id non-empty
+//! 2. **Unicode Normalization** (optional): NFKC normalization
+//! 3. **Case Folding** (optional): Locale-free lowercasing
+//! 4. **Character Processing**: Delimiter detection, punctuation handling
+//! 5. **Whitespace Collapsing**: Multiple spaces → single spaces
+//! 6. **Tokenization**: Extract tokens with byte offsets
+//! 7. **Hashing**: Compute version-aware identity hash
+//!
+//! # Hash Algorithms
+//!
+//! ## Document Identity Hash
+//!
+//! ```text
+//! SHA-256(version.to_be_bytes() || 0x00 || canonical_text_bytes)
+//! ```
+//!
+//! This hash uniquely identifies the canonical document and includes the version,
+//! ensuring that different canonicalization versions produce different hashes even
+//! for the same input text.
+//!
+//! ## Token Hash
+//!
+//! ```text
+//! SHA-256(version.to_be_bytes() || 0x01 || token_text_bytes)
+//! ```
+//!
+//! Each token gets its own stable hash using a different discriminator byte.
+//!
+//! # Module Structure
+//!
+//! - `config`: Configuration types (`CanonicalizeConfig`)
+//! - `document`: Output types (`CanonicalizedDocument`, `Token`)
+//! - `error`: Error types (`CanonicalError`)
+//! - `hash`: Hashing utilities (`hash_text`, `hash_canonical_bytes`)
+//! - `pipeline`: Main canonicalization logic (`canonicalize`)
+//! - `token`: Tokenization utilities (`tokenize`)
+//! - `whitespace`: Whitespace normalization (`collapse_whitespace`)
+//!
+//! # Error Handling
+//!
+//! All errors are typed via [`CanonicalError`]:
+//!
+//! ```rust
+//! use canonical::{canonicalize, CanonicalizeConfig, CanonicalError};
+//!
+//! let config = CanonicalizeConfig::default();
+//!
+//! match canonicalize("doc-001", "   ", &config) {
+//!     Ok(doc) => println!("Canonicalized: {}", doc.canonical_text),
+//!     Err(CanonicalError::EmptyInput) => println!("Input is empty after normalization"),
+//!     Err(CanonicalError::MissingDocId) => println!("Document ID is required"),
+//!     Err(CanonicalError::InvalidConfig(msg)) => println!("Invalid config: {}", msg),
+//! }
+//! ```
+//!
+//! # Performance
+//!
+//! All operations are O(n) where n is the input length:
+//! - Unicode normalization: O(n)
+//! - Case folding: O(n)
+//! - Whitespace collapsing: O(n)
+//! - Tokenization: O(n)
+//! - SHA-256 hashing: O(n)
+//!
+//! Memory allocations are minimized using `Cow<str>` and pre-allocated vectors.
+//!
+//! # Examples
+//!
+//! See the `examples/` directory for complete working examples:
+//! - `demo.rs`: Basic canonicalization examples
+//! - `benchmark.rs`: Performance benchmarking
+//!
+//! # See Also
+//!
+//! - [Crate documentation](doc/canonical.md) for comprehensive guides
+//! - `config` module for configuration details
+//! - `document` module for output structure definitions
 
 mod config;
 mod document;

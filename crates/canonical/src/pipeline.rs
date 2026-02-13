@@ -1,3 +1,46 @@
+//! Core canonicalization pipeline implementation.
+//!
+//! This module contains the main [`canonicalize`] function and supporting
+//! internal functions that implement the full canonicalization pipeline.
+//!
+//! # Pipeline Stages
+//!
+//! The canonicalization process follows these stages in order:
+//!
+//! 1. **Configuration Validation**: Ensure version >= 1, doc_id non-empty
+//! 2. **Unicode Normalization** (optional): Apply NFKC normalization
+//! 3. **Character Processing**: Process grapheme clusters with case folding
+//! 4. **Delimiter Handling**: Detect whitespace and punctuation boundaries
+//! 5. **Token Assembly**: Build tokens with byte offsets
+//! 6. **Hash Computation**: Compute version-aware identity hashes
+//!
+//! # Implementation Details
+//!
+//! The pipeline uses a state machine approach for efficiency:
+//! - `pending_space`: Tracks whether a space should be inserted before next token
+//! - `current_token_start`: Tracks the start byte offset of the current token
+//! - Processes text in a single pass where possible
+//! - Uses `Cow<str>` to avoid allocations when normalization is disabled
+//!
+//! # Performance
+//!
+//! - Single-pass processing for most operations
+//! - Pre-allocated vectors based on text length estimates
+//! - Minimal allocations when Unicode normalization is disabled
+//! - Linear time complexity O(n) where n is input length
+//!
+//! # Examples
+//!
+//! ```rust
+//! use canonical::{canonicalize, CanonicalizeConfig};
+//!
+//! let config = CanonicalizeConfig::default();
+//! let doc = canonicalize("doc-001", "  Hello   WORLD  ", &config).unwrap();
+//!
+//! assert_eq!(doc.canonical_text, "hello world");
+//! assert_eq!(doc.tokens.len(), 2);
+//! ```
+
 use std::borrow::Cow;
 
 use unicode_categories::UnicodeCategories;
@@ -10,8 +53,121 @@ use crate::error::CanonicalError;
 use crate::hash::{hash_canonical_bytes, hash_token_bytes};
 use crate::token::Token;
 
-/// Main entry point. Takes an input payload and config and returns a
-/// canonicalized document.
+/// Canonicalize text into a deterministic, versioned representation.
+///
+/// This is the primary entry point for the canonical text pipeline. It takes
+/// raw input text and transforms it into a canonical form suitable for
+/// fingerprinting, indexing, and comparison.
+///
+/// # Pipeline
+///
+/// The canonicalization follows these stages:
+/// 1. Validate configuration (version >= 1)
+/// 2. Validate document ID (non-empty)
+/// 3. Apply Unicode normalization (if enabled)
+/// 4. Process characters (case folding, delimiter detection)
+/// 5. Collapse whitespace
+/// 6. Extract tokens with byte offsets
+/// 7. Compute version-aware hashes
+///
+/// # Arguments
+///
+/// * `doc_id` - Unique document identifier (required, non-empty)
+/// * `input` - Raw input text to canonicalize
+/// * `cfg` - Canonicalization configuration
+///
+/// # Returns
+///
+/// - `Ok(CanonicalizedDocument)` - Successfully canonicalized document
+/// - `Err(CanonicalError)` - Validation or processing error
+///
+/// # Errors
+///
+/// - [`CanonicalError::InvalidConfig`] - If `cfg.version == 0`
+/// - [`CanonicalError::MissingDocId`] - If `doc_id` is empty or whitespace-only
+/// - [`CanonicalError::EmptyInput`] - If canonical text is empty after processing
+///
+/// # Guarantees
+///
+/// For the same input text and configuration:
+/// - The output is deterministic across all platforms
+/// - The output is stable across Rust versions (within reason)
+/// - The identity hash uniquely identifies the content
+///
+/// # Examples
+///
+/// ## Basic Usage
+///
+/// ```rust
+/// use canonical::{canonicalize, CanonicalizeConfig};
+///
+/// let config = CanonicalizeConfig::default();
+/// let doc = canonicalize("doc-001", "Hello World", &config).unwrap();
+///
+/// assert_eq!(doc.canonical_text, "hello world");
+/// assert_eq!(doc.tokens.len(), 2);
+/// assert!(!doc.sha256_hex.is_empty());
+/// ```
+///
+/// ## With Punctuation Stripping
+///
+/// ```rust
+/// use canonical::{canonicalize, CanonicalizeConfig};
+///
+/// let config = CanonicalizeConfig {
+///     strip_punctuation: true,
+///     ..Default::default()
+/// };
+///
+/// let doc = canonicalize("doc", "Hello, world!", &config).unwrap();
+/// assert_eq!(doc.canonical_text, "hello world");
+/// ```
+///
+/// ## Unicode Normalization
+///
+/// ```rust
+/// use canonical::{canonicalize, CanonicalizeConfig};
+///
+/// let config = CanonicalizeConfig::default();
+///
+/// // Different Unicode forms produce same canonical text
+/// let doc1 = canonicalize("doc", "Café", &config).unwrap();        // U+00E9
+/// let doc2 = canonicalize("doc", "Cafe\u{0301}", &config).unwrap(); // e + accent
+///
+/// assert_eq!(doc1.canonical_text, doc2.canonical_text);
+/// ```
+///
+/// ## Error Handling
+///
+/// ```rust
+/// use canonical::{canonicalize, CanonicalizeConfig, CanonicalError};
+///
+/// let config = CanonicalizeConfig::default();
+///
+/// // Empty document ID
+/// match canonicalize("", "hello", &config) {
+///     Err(CanonicalError::MissingDocId) => println!("ID required"),
+///     _ => {}
+/// }
+///
+/// // Empty input after normalization
+/// match canonicalize("doc", "   ", &config) {
+///     Err(CanonicalError::EmptyInput) => println!("Empty content"),
+///     _ => {}
+/// }
+/// ```
+///
+/// # Performance
+///
+/// - Time: O(n) where n is input length
+/// - Space: O(n) for output structures
+/// - Minimal allocations when Unicode normalization is disabled
+///
+/// # See Also
+///
+/// - [`CanonicalizeConfig`] for configuration options
+/// - [`CanonicalizedDocument`] for the output structure
+/// - [`CanonicalError`] for error types
 pub fn canonicalize(
     doc_id: impl Into<String>,
     input: &str,
@@ -91,6 +247,9 @@ pub fn canonicalize(
 }
 
 /// Helper to iterate over characters and dispatch them for processing.
+///
+/// This function processes Unicode grapheme clusters to handle multi-character
+/// emojis and complex scripts correctly. It applies case folding if configured.
 fn process_chars(
     text: &str,
     cfg: &CanonicalizeConfig,
@@ -129,6 +288,10 @@ fn process_chars(
 }
 
 /// Decides whether a character is part of a token or a delimiter.
+///
+/// Delimiters (whitespace and optionally punctuation) trigger token finalization
+/// and set the pending space flag. Non-delimiter characters are appended to the
+/// current token.
 fn dispatch_char(
     ch: char,
     cfg: &CanonicalizeConfig,
@@ -152,6 +315,10 @@ fn dispatch_char(
 }
 
 /// Appends a character to the canonical text.
+///
+/// If a space is pending (from a previous delimiter), it is inserted first
+/// and a new token is started. Otherwise, the character is appended to the
+/// current token.
 fn append_char(
     ch: char,
     canonical_text: &mut String,
@@ -173,6 +340,10 @@ fn append_char(
 }
 
 /// Creates a token from the current token start and adds it to the list.
+///
+/// This finalizes the current token by extracting the text from the current
+/// start position to the end of the canonical text. The start position is
+/// then cleared.
 fn finalize_token(
     tokens: &mut Vec<Token>,
     canonical_text: &str,
