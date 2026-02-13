@@ -44,7 +44,37 @@
 //! assert_eq!(canonical_hash.len(), 64);
 //! ```
 
+use fxhash::FxHasher64;
 use sha2::{Digest, Sha256};
+use std::hash::Hasher;
+
+/// Compute a fast 64-bit hash for an individual token under a given canonical
+/// configuration version.
+///
+/// This is used for token-level hashes in perceptual fingerprinting.
+/// It's much faster than SHA-256 but provides a 64-bit hash which is sufficient
+/// for non-cryptographic purposes like MinHash.
+///
+/// # Algorithm
+///
+/// ```text
+/// FxHash64(version.to_le_bytes() || 0x01 || token_text_bytes)
+/// ```
+///
+/// - `version.to_le_bytes()`: 4-byte little-endian version number  
+/// - `0x01`: Discriminator byte (token level)
+/// - `token_text_bytes`: UTF-8 bytes of token text
+///
+/// # Returns
+///
+/// A 16-character hexadecimal string representing the 64-bit FxHash digest.
+pub fn hash_token_bytes_fast(canonical_version: u32, token_bytes: &[u8]) -> String {
+    let mut hasher = FxHasher64::default();
+    hasher.write(&canonical_version.to_le_bytes());
+    hasher.write(&[1]); // discriminator
+    hasher.write(token_bytes);
+    format!("{:016x}", hasher.finish())
+}
 
 /// Hash arbitrary text with SHA-256 and return a hex digest.
 ///
@@ -92,7 +122,7 @@ use sha2::{Digest, Sha256};
 ///
 /// Do **not** use this for:
 /// - Canonical document identity (use [`hash_canonical_bytes`])
-/// - Token-level hashing in pipelines (use `hash_token_bytes`)
+/// - Token-level hashing in pipelines (handled internally)
 pub fn hash_text(text: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(text.as_bytes());
@@ -149,57 +179,12 @@ pub fn hash_text(text: &str) -> String {
 ///
 /// # See Also
 ///
-/// - `hash_token_bytes` for token-level hashing
-/// - `hash_text` for simple text hashing
+/// - [`hash_canonical_bytes`] for document-level hashing
+/// - [`hash_text`] for simple text hashing
 pub fn hash_canonical_bytes(canonical_version: u32, canonical_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(canonical_version.to_be_bytes());
     hasher.update([0]);
     hasher.update(canonical_bytes);
-    hex::encode(hasher.finalize())
-}
-
-/// Compute a stable hash for an individual token under a given canonical
-/// configuration version.
-///
-/// This produces token-level hashes suitable for perceptual fingerprinting
-/// and token-level operations. It uses a different discriminator byte than
-/// the document-level hash.
-///
-/// # Algorithm
-///
-/// ```text
-/// SHA-256(version.to_be_bytes() || 0x01 || token_text_bytes)
-/// ```
-///
-/// - `version.to_be_bytes()`: 4-byte big-endian version number
-/// - `0x01`: Discriminator byte (token level)
-/// - `token_text_bytes`: UTF-8 bytes of token text
-///
-/// # Arguments
-///
-/// * `canonical_version` - The configuration version (from `CanonicalizeConfig`)
-/// * `token_bytes` - The token text as UTF-8 bytes
-///
-/// # Returns
-///
-/// A 64-character hexadecimal string representing the SHA-256 digest.
-///
-/// # Use Cases
-///
-/// - Perceptual fingerprinting (MinHash)
-/// - Token-level deduplication
-/// - Token-level change detection
-/// - Shingling operations
-///
-/// # See Also
-///
-/// - [`hash_canonical_bytes`] for document-level hashing
-/// - [`hash_text`] for simple text hashing
-pub fn hash_token_bytes(canonical_version: u32, token_bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(canonical_version.to_be_bytes());
-    hasher.update([1]);
-    hasher.update(token_bytes);
     hex::encode(hasher.finalize())
 }

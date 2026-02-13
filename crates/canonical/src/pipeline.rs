@@ -50,7 +50,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use crate::config::CanonicalizeConfig;
 use crate::document::CanonicalizedDocument;
 use crate::error::CanonicalError;
-use crate::hash::{hash_canonical_bytes, hash_token_bytes};
+use crate::hash::{hash_canonical_bytes, hash_token_bytes_fast};
 use crate::token::Token;
 
 /// Canonicalize text into a deterministic, versioned representation.
@@ -231,7 +231,7 @@ pub fn canonicalize(
     token_hashes.extend(
         tokens
             .iter()
-            .map(|t| hash_token_bytes(canonical_version, t.text.as_bytes())),
+            .map(|t| hash_token_bytes_fast(canonical_version, t.text.as_bytes())),
     );
     let sha256_hex = hash_canonical_bytes(canonical_version, canonical_text.as_bytes());
 
@@ -258,6 +258,27 @@ fn process_chars(
     pending_space: &mut bool,
     current_token_start: &mut Option<usize>,
 ) {
+    // Fast path: ASCII-only text can use simpler processing
+    if text.is_ascii() {
+        let processed = if cfg.lowercase {
+            text.to_ascii_lowercase()
+        } else {
+            text.to_string()
+        };
+
+        for ch in processed.chars() {
+            dispatch_char(
+                ch,
+                cfg,
+                canonical_text,
+                tokens,
+                pending_space,
+                current_token_start,
+            );
+        }
+        return;
+    }
+
     // Process Unicode grapheme clusters properly to handle multi-character emojis and complex scripts
     for grapheme in text.graphemes(true) {
         // Lowercasing can expand a single character into multiple (e.g., German ß -> ss).

@@ -147,7 +147,6 @@
 //!
 //! See the `examples/` directory for complete working examples:
 //! - `demo.rs`: Basic canonicalization examples
-//! - `benchmark.rs`: Performance benchmarking
 //!
 //! # See Also
 //!
