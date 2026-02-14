@@ -356,6 +356,40 @@ See the [types module](src/types.rs) for complete definitions of:
 - `IngestPayload` / `CanonicalPayload` - Payload variants
 - `IngestSource` - Source enumeration
 
+#### RawIngestRecord
+
+The input structure for the ingest pipeline.
+
+```rust
+pub struct RawIngestRecord {
+    /// Unique identifier for this ingest operation (used for tracing and ID derivation)
+    pub id: String,
+    
+    /// Source of the content (RawText, Url, File, or Api)
+    pub source: IngestSource,
+    
+    /// Metadata associated with the record (tenant, timestamps, attributes)
+    pub metadata: IngestMetadata,
+    
+    /// Raw payload content (Text, TextBytes, Binary, or None)
+    pub payload: Option<IngestPayload>,
+}
+```
+
+**Field Details:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `String` | Unique identifier for this ingest request. Used for tracing, log correlation, and deterministic doc ID derivation when `doc_id` is not provided |
+| `source` | `IngestSource` | Where the content originated. Affects validation rules (e.g., `RawText` requires payload, `Api` doesn't) |
+| `metadata` | `IngestMetadata` | Contextual information including tenant_id, doc_id, timestamps, and custom attributes |
+| `payload` | `Option<IngestPayload>` | The actual content. `None` for metadata-only events. Variant depends on content type |
+
+**Notes:**
+- The `id` field should be unique per ingest request. Use a UUID if you don't have a natural identifier
+- When `metadata.doc_id` is `None`, the `id` field is used with the tenant_id to derive a deterministic UUIDv5
+- Different `IngestSource` variants have different payload requirements (see IngestSource docs)
+
 ---
 
 ## Error Handling
