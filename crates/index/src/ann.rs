@@ -24,7 +24,26 @@
 //! - Memory constrained environment
 
 use hnsw_rs::prelude::*;
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap};
+
+/// Wrapper for f32 that implements Ord using total_cmp for BinaryHeap compatibility.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OrdF32(f32);
+
+impl Eq for OrdF32 {}
+
+impl PartialOrd for OrdF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OrdF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
 
 /// Configuration for ANN index construction.
 #[derive(Debug, Clone, Copy)]
@@ -194,31 +213,47 @@ impl AnnIndex {
     }
 
     /// Linear search (exact, slow but accurate).
+    /// Uses BinaryHeap for O(n log k) top-k selection instead of O(n log n) full sort.
     fn linear_search(&self, query: &[f32], k: usize) -> Result<Vec<AnnResult>, AnnError> {
         if self.vectors.is_empty() {
             return Ok(Vec::new());
         }
 
-        // Calculate distances for all vectors
-        let mut distances: Vec<(usize, f32)> = self
-            .vectors
-            .iter()
-            .enumerate()
-            .map(|(idx, vec)| (idx, cosine_distance(query, vec)))
-            .collect();
+        let k = k.min(self.vectors.len());
 
-        // Sort by distance (ascending - lower is closer)
-        distances.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Use a max-heap to track top-k closest vectors
+        // BinaryHeap is a max-heap by default, so pop() removes the largest element
+        // We want to keep the k smallest distances, so we pop the largest when heap is full
+        // OrdF32 wrapper provides Ord implementation for f32
+        let mut heap: BinaryHeap<(OrdF32, usize)> = BinaryHeap::with_capacity(k + 1);
 
-        // Take top k
-        let results = distances
+        for (idx, vec) in self.vectors.iter().enumerate() {
+            let dist = cosine_distance(query, vec);
+            heap.push((OrdF32(dist), idx));
+
+            // Keep only k closest (smallest distances)
+            // Since this is a max-heap, pop() removes the largest distance
+            if heap.len() > k {
+                heap.pop();
+            }
+        }
+
+        // Convert heap to results
+        // Results will be in arbitrary order, sort by distance for consistency
+        let mut results: Vec<_> = heap
             .into_iter()
-            .take(k)
-            .map(|(idx, dist)| AnnResult {
+            .map(|(dist, idx)| AnnResult {
                 index: idx,
-                distance: dist,
+                distance: dist.0,
             })
             .collect();
+
+        // Sort by distance ascending for consistent output
+        results.sort_by(|a, b| {
+            a.distance
+                .partial_cmp(&b.distance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(results)
     }
