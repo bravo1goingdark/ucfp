@@ -263,6 +263,21 @@ Fields that can be made mandatory:
 - `ReceivedAt` - Timestamp when content was received
 - `OriginalSource` - Human-readable source reference
 
+### Input Data Types
+
+The ingest pipeline accepts [`RawIngestRecord`](api-reference#rawingestrecord) as input:
+
+```rust
+pub struct RawIngestRecord {
+    pub id: String,                    // Unique operation ID
+    pub source: IngestSource,          // Where content came from
+    pub metadata: IngestMetadata,      // Tenant, timestamps, attributes
+    pub payload: Option<IngestPayload>, // The actual content
+}
+```
+
+See the [API Reference](#rawingestrecord) section for detailed field documentation.
+
 ### Configuration Validation
 
 Always validate configuration at startup:
@@ -931,7 +946,6 @@ cargo run --package ingest --example size_limit_demo
 
 ---
 
----
 
 ## License
 
