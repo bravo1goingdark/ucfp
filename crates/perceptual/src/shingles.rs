@@ -34,10 +34,12 @@ pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -
     let base = BASE ^ splitmix64(seed);
 
     // Precompute base^(k-1) for efficient removal of the oldest element in the window.
-    let mut base_km1 = 1u64;
-    for _ in 1..k {
-        base_km1 = base_km1.wrapping_mul(base);
-    }
+    // Use wrapping_pow for single instruction on common k values.
+    let base_km1 = if k == 1 {
+        1u64
+    } else {
+        base.wrapping_pow((k - 1) as u32)
+    };
 
     let mut out = Vec::with_capacity(n - k + 1);
     let mut h = 0u64;
@@ -48,7 +50,10 @@ pub fn make_shingles_rolling<S: AsRef<str>>(tokens: &[S], k: usize, seed: u64) -
     out.push(h);
 
     // Slide the window over the rest of the tokens, updating the hash in O(1) at each step.
-    for (&old, &new) in th.iter().zip(th.iter().skip(k)) {
+    // Use indexed access instead of zip+skip for better cache locality and to avoid iterator overhead.
+    for i in k..th.len() {
+        let old = th[i - k];
+        let new = th[i];
         h = h.wrapping_sub(old.wrapping_mul(base_km1)); // Remove old token
         h = h.wrapping_mul(base).wrapping_add(new); // Add new token
         out.push(h);

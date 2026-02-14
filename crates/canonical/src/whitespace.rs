@@ -15,10 +15,11 @@
 //!
 //! # Algorithm
 //!
-//! The whitespace collapsing algorithm:
-//! 1. Split text on any Unicode whitespace sequence
-//! 2. Join segments with single ASCII spaces
-//! 3. Result has no leading/trailing whitespace
+//! The whitespace collapsing algorithm uses a single-pass scan:
+//! 1. Iterate through characters once
+//! 2. Collapse consecutive whitespace into single spaces
+//! 3. Trim leading and trailing whitespace
+//! 4. All Unicode whitespace characters are normalized to ASCII space
 //!
 //! # Examples
 //!
@@ -37,9 +38,11 @@
 ///
 /// # Algorithm
 ///
-/// 1. Split the text on any Unicode whitespace (using `split_whitespace()`)
-/// 2. Join the resulting segments with single ASCII spaces
-/// 3. The result has no leading or trailing whitespace
+/// Uses a single-pass scan for efficiency:
+/// 1. Iterate through characters once
+/// 2. Collapse consecutive whitespace into single spaces  
+/// 3. Trim leading and trailing whitespace
+/// 4. All Unicode whitespace is normalized to ASCII space
 ///
 /// # Arguments
 ///
@@ -154,11 +157,24 @@
 /// - `split_whitespace()` in the standard library
 pub fn collapse_whitespace(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
-    for segment in text.split_whitespace() {
-        if !normalized.is_empty() {
-            normalized.push(' ');
+    let mut in_whitespace = true; // Start true to trim leading whitespace
+
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !in_whitespace {
+                normalized.push(' ');
+                in_whitespace = true;
+            }
+        } else {
+            normalized.push(ch);
+            in_whitespace = false;
         }
-        normalized.push_str(segment);
     }
+
+    // Trim trailing space if present
+    if normalized.ends_with(' ') {
+        normalized.pop();
+    }
+
     normalized
 }
