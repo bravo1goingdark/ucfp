@@ -284,11 +284,25 @@ pub(crate) fn normalize_metadata(
 /// ```
 pub(crate) fn derive_doc_id(cfg: &IngestConfig, tenant_id: &str, record_id: &str) -> String {
     // Use a UUIDv5 to create a deterministic ID based on the namespace and a name.
-    let mut material = Vec::with_capacity(tenant_id.len() + record_id.len() + 1);
-    material.extend_from_slice(tenant_id.as_bytes());
-    material.push(0); // Separator to prevent collisions.
-    material.extend_from_slice(record_id.as_bytes());
-    uuid::Uuid::new_v5(&cfg.doc_id_namespace, &material).to_string()
+    // Optimize for common case: use stack buffer for typical sizes to avoid allocation.
+    const STACK_BUF_SIZE: usize = 256;
+    let total_len = tenant_id.len() + record_id.len() + 1;
+
+    if total_len <= STACK_BUF_SIZE {
+        // Fast path: stack-allocated buffer for common sizes
+        let mut material = [0u8; STACK_BUF_SIZE];
+        material[..tenant_id.len()].copy_from_slice(tenant_id.as_bytes());
+        material[tenant_id.len()] = 0; // Separator to prevent collisions.
+        material[tenant_id.len() + 1..total_len].copy_from_slice(record_id.as_bytes());
+        uuid::Uuid::new_v5(&cfg.doc_id_namespace, &material[..total_len]).to_string()
+    } else {
+        // Slow path: heap allocation for large inputs
+        let mut material = Vec::with_capacity(total_len);
+        material.extend_from_slice(tenant_id.as_bytes());
+        material.push(0); // Separator to prevent collisions.
+        material.extend_from_slice(record_id.as_bytes());
+        uuid::Uuid::new_v5(&cfg.doc_id_namespace, &material).to_string()
+    }
 }
 
 /// Checks if the serialized attributes exceed the configured limit.
