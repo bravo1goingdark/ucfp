@@ -299,10 +299,16 @@ fn validate_text_content(text: &str, cfg: &IngestConfig) -> Result<(), IngestErr
     }
 
     // Check for excessive control characters
-    let control_count = text
-        .chars()
-        .filter(|c| c.is_control() && *c != '\t' && *c != '\n' && *c != '\r')
-        .count();
+    // Use ASCII fast path for better performance on common ASCII text
+    let control_count = if text.is_ascii() {
+        text.bytes()
+            .filter(|&b| b < 32 && !matches!(b, b'\t' | b'\n' | b'\r'))
+            .count()
+    } else {
+        text.chars()
+            .filter(|c| c.is_control() && *c != '\t' && *c != '\n' && *c != '\r')
+            .count()
+    };
     if cfg.strip_control_chars && control_count > text.len() / 10 {
         return Err(IngestError::InvalidMetadata(
             "text contains too many control characters".into(),
