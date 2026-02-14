@@ -43,7 +43,11 @@ pub async fn api_info() -> ServerResult<impl IntoResponse> {
             "/api/v1/batch",
             "/api/v1/index/insert",
             "/api/v1/index/search",
+            "/api/v1/index/stats",
+            "/api/v1/index/documents",
             "/api/v1/match",
+            "/api/v1/compare",
+            "/api/v1/pipeline/status",
             "/health",
             "/ready",
             "/metrics"

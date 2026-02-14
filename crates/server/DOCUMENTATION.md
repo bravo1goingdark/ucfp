@@ -90,10 +90,13 @@ Rust example demonstrating all API endpoints:
 - `POST /api/v1/batch` - Batch processing
 - `POST /api/v1/index/insert` - Index insertion
 - `GET /api/v1/index/search` - Index search
+- `GET /api/v1/index/stats` - Index statistics
 - `GET /api/v1/index/documents` - List documents
+- `GET /api/v1/index/documents/:id` - Get document
 - `DELETE /api/v1/index/documents/:id` - Delete document
 - `POST /api/v1/match` - Document matching
 - `POST /api/v1/compare` - Document comparison
+- `GET /api/v1/pipeline/status` - Pipeline status
 - `GET /api/v1/metadata` - Server metadata
 
 ### Security Features

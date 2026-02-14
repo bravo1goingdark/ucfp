@@ -65,7 +65,9 @@ fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/v1/index/insert", post(index::insert_record))
         .layer(DefaultBodyLimit::max(100 * 1024 * 1024))
         .route("/api/v1/index/search", get(index::search_index))
+        .route("/api/v1/index/stats", get(index::index_stats))
         .route("/api/v1/index/documents", get(index::list_documents))
+        .route("/api/v1/index/documents/{doc_id}", get(index::get_document))
         .route(
             "/api/v1/index/documents/{doc_id}",
             delete(index::delete_document),
@@ -73,6 +75,8 @@ fn build_router(state: Arc<ServerState>) -> Router {
         // Matching
         .route("/api/v1/match", post(matching::match_documents))
         .route("/api/v1/compare", post(matching::compare_documents))
+        // Pipeline
+        .route("/api/v1/pipeline/status", get(health::pipeline_status))
         // Metadata
         .route("/api/v1/metadata", get(health::server_metadata))
         // Add auth middleware

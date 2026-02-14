@@ -56,6 +56,9 @@ impl UfpIndex {
 
     /// Compute Jaccard similarity for perceptual fingerprints (MinHash).
     /// This is the size of the intersection divided by the size of the union.
+    ///
+    /// Uses an optimized path for small signatures (≤256 elements) using stack-allocated
+    /// arrays to avoid HashSet overhead. Falls back to HashSet for larger signatures.
     #[inline]
     fn jaccard_similarity(
         query: &HashSet<u64>,
@@ -65,6 +68,63 @@ impl UfpIndex {
         if query.is_empty() || candidate.is_empty() {
             return 0.0;
         }
+
+        // Fast path: use stack-allocated array for small signatures
+        // Most MinHash signatures are 16-128 elements, so this avoids HashSet overhead
+        const SMALL_SIG_THRESHOLD: usize = 256;
+
+        if candidate.len() <= SMALL_SIG_THRESHOLD {
+            return Self::jaccard_similarity_small(query, candidate);
+        }
+
+        // Slow path: use HashSet for large signatures
+        Self::jaccard_similarity_large(query, candidate, scratch)
+    }
+
+    /// Optimized Jaccard similarity for small signatures using stack arrays.
+    /// Uses linear search which is faster than HashSet for small arrays due to cache locality.
+    #[inline]
+    fn jaccard_similarity_small(query: &HashSet<u64>, candidate: &[u64]) -> f32 {
+        // Stack buffer for deduplication - sized for typical MinHash signatures
+        let mut seen = [0u64; 256];
+        let mut seen_len = 0;
+
+        let mut intersection = 0usize;
+        let mut union = query.len();
+
+        for &value in candidate {
+            // Check if we've seen this value (linear search - fast for small arrays)
+            if seen.iter().take(seen_len).any(|&v| v == value) {
+                continue;
+            }
+
+            // Add to seen array
+            if seen_len < seen.len() {
+                seen[seen_len] = value;
+                seen_len += 1;
+            }
+
+            if query.contains(&value) {
+                intersection += 1;
+            } else {
+                union += 1;
+            }
+        }
+
+        if union == 0 {
+            0.0
+        } else {
+            intersection as f32 / union as f32
+        }
+    }
+
+    /// Jaccard similarity using HashSet for large signatures.
+    #[inline]
+    fn jaccard_similarity_large(
+        query: &HashSet<u64>,
+        candidate: &[u64],
+        scratch: &mut HashSet<u64>,
+    ) -> f32 {
         // The scratch space is used to avoid re-allocating a HashSet for each candidate.
         scratch.clear();
 
@@ -259,6 +319,40 @@ mod tests {
         let score = UfpIndex::jaccard_similarity(&query_set, &candidate, &mut scratch);
 
         assert!((score - (2.0 / 6.0)).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn jaccard_similarity_small_signature_optimization() {
+        // Test the small signature optimization path (≤256 elements)
+        let mut query_set = HashSet::new();
+        query_set.extend(1_u64..=100); // 100 elements
+
+        let mut scratch = HashSet::new();
+        // Candidate with 50 matching elements and 50 new elements
+        let candidate: Vec<u64> = (1_u64..=50).chain(101_u64..=150).collect();
+        let score = UfpIndex::jaccard_similarity(&query_set, &candidate, &mut scratch);
+
+        // Intersection = 50, Union = 100 + 50 = 150
+        let expected = 50.0 / 150.0;
+        assert!((score - expected).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn jaccard_similarity_large_signature_fallback() {
+        // Test the large signature fallback path (>256 elements)
+        let mut query_set = HashSet::new();
+        query_set.extend(1_u64..=300); // 300 elements
+
+        let mut scratch = HashSet::new();
+        // Candidate with duplicates to test deduplication
+        let mut candidate: Vec<u64> = (1_u64..=100).chain(1_u64..=100).collect(); // 200 elements with duplicates
+        candidate.extend(301_u64..=400); // Add 100 more unique elements
+
+        let score = UfpIndex::jaccard_similarity(&query_set, &candidate, &mut scratch);
+
+        // After dedup: intersection = 100, union = 300 + 100 = 400
+        let expected = 100.0 / 400.0;
+        assert!((score - expected).abs() < f32::EPSILON);
     }
 
     #[test]

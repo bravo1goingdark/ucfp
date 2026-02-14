@@ -44,8 +44,14 @@
 //! - `POST /api/v1/batch` - Batch process documents
 //! - `POST /api/v1/index/insert` - Insert into index
 //! - `GET /api/v1/index/search` - Search index
+//! - `GET /api/v1/index/stats` - Index statistics
+//! - `GET /api/v1/index/documents` - List documents
+//! - `GET /api/v1/index/documents/:id` - Get document by ID
+//! - `DELETE /api/v1/index/documents/:id` - Delete document
 //! - `POST /api/v1/match` - Match documents
 //! - `POST /api/v1/compare` - Compare two documents
+//! - `GET /api/v1/pipeline/status` - Pipeline status
+//! - `GET /api/v1/metadata` - Server metadata
 //!
 //! See the README.md and API.md files for complete documentation.
 

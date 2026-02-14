@@ -48,7 +48,12 @@ Returns API information and available endpoints.
     "/api/v1/batch",
     "/api/v1/index/insert",
     "/api/v1/index/search",
+    "/api/v1/index/stats",
+    "/api/v1/index/documents",
+    "/api/v1/index/documents/:id",
     "/api/v1/match",
+    "/api/v1/compare",
+    "/api/v1/pipeline/status",
     "/health",
     "/ready",
     "/metrics"
@@ -342,6 +347,52 @@ Search the index for similar documents.
 
 ---
 
+### GET /api/v1/index/stats
+
+Get index statistics including document counts.
+
+**Response:**
+```json
+{
+  "total_documents": 150,
+  "with_perceptual": 120,
+  "with_semantic": 100
+}
+```
+
+---
+
+### GET /api/v1/index/documents/:doc_id
+
+Get a single document by ID.
+
+**Response:**
+```json
+{
+  "doc_id": "doc-001",
+  "canonical_hash": "a1b2c3d4...",
+  "tenant_id": "tenant-001",
+  "has_perceptual": true,
+  "has_semantic": true,
+  "metadata": {
+    "category": "news",
+    "author": "John Doe"
+  }
+}
+```
+
+If not found:
+```json
+{
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Document not found"
+  }
+}
+```
+
+---
+
 ### GET /api/v1/index/documents
 
 List all documents in the index.
@@ -458,6 +509,27 @@ Compare two documents directly for similarity.
   "similarity_score": 0.75,
   "perceptual_similarity": 0.80,
   "semantic_similarity": 0.70
+}
+```
+
+---
+
+### GET /api/v1/pipeline/status
+
+Get pipeline/component status.
+
+**Response:**
+```json
+{
+  "status": "ready",
+  "components": {
+    "ingest": "ready",
+    "canonical": "ready",
+    "perceptual": "ready",
+    "semantic": "ready",
+    "index": "ready",
+    "matcher": "ready"
+  }
 }
 ```
 

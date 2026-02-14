@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use ingest::{ingest, IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawIngestRecord};
+use std::hint::black_box;
 
 mod common;
 use common::generate_text_byte_count;

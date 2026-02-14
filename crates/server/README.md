@@ -120,10 +120,13 @@ cargo run -p server
 | `/api/v1/batch` | POST | Process multiple documents |
 | `/api/v1/index/insert` | POST | Insert record into index |
 | `/api/v1/index/search` | GET | Search the index |
+| `/api/v1/index/stats` | GET | Index statistics |
 | `/api/v1/index/documents` | GET | List all documents |
+| `/api/v1/index/documents/:doc_id` | GET | Get document by ID |
 | `/api/v1/index/documents/:doc_id` | DELETE | Delete document |
 | `/api/v1/match` | POST | Match documents |
 | `/api/v1/compare` | POST | Compare two documents |
+| `/api/v1/pipeline/status` | GET | Pipeline status |
 | `/api/v1/metadata` | GET | Server metadata |
 
 ## API Documentation

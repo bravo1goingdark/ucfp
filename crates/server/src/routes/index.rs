@@ -338,6 +338,103 @@ pub async fn list_documents(
     })))
 }
 
+/// Index statistics response
+#[derive(Debug, Serialize)]
+pub struct IndexStatsResponse {
+    pub total_documents: usize,
+    pub with_perceptual: usize,
+    pub with_semantic: usize,
+}
+
+/// Get index statistics
+pub async fn index_stats(State(state): State<Arc<ServerState>>) -> ServerResult<impl IntoResponse> {
+    let mut total = 0;
+    let mut with_perceptual = 0;
+    let mut with_semantic = 0;
+
+    state
+        .index
+        .scan(&mut |record: &IndexRecord| {
+            total += 1;
+            if record.perceptual.is_some() {
+                with_perceptual += 1;
+            }
+            if record.embedding.is_some() {
+                with_semantic += 1;
+            }
+            Ok(())
+        })
+        .map_err(ServerError::Index)?;
+
+    Ok(Json(IndexStatsResponse {
+        total_documents: total,
+        with_perceptual,
+        with_semantic,
+    }))
+}
+
+/// Type alias for document record tuple to avoid complex type warning
+pub type DocumentRecord = (
+    String,
+    Option<String>,
+    bool,
+    bool,
+    serde_json::Map<String, serde_json::Value>,
+);
+
+/// Get a single document by ID
+pub async fn get_document(
+    State(state): State<Arc<ServerState>>,
+    axum::extract::Path(doc_id): axum::extract::Path<String>,
+) -> ServerResult<impl IntoResponse> {
+    let mut found_record: Option<DocumentRecord> = None;
+
+    state
+        .index
+        .scan(&mut |record: &IndexRecord| {
+            let record_doc_id = record
+                .metadata
+                .get("doc_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| record.canonical_hash.clone());
+
+            if record_doc_id == doc_id {
+                let tenant_id = record
+                    .metadata
+                    .get("tenant_id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let metadata = record.metadata.as_object().cloned().unwrap_or_default();
+
+                found_record = Some((
+                    record.canonical_hash.clone(),
+                    tenant_id,
+                    record.perceptual.is_some(),
+                    record.embedding.is_some(),
+                    metadata,
+                ));
+            }
+            Ok(())
+        })
+        .map_err(ServerError::Index)?;
+
+    match found_record {
+        Some((canonical_hash, tenant_id, has_perceptual, has_semantic, metadata)) => {
+            Ok(Json(serde_json::json!({
+                "doc_id": doc_id,
+                "canonical_hash": canonical_hash,
+                "tenant_id": tenant_id,
+                "has_perceptual": has_perceptual,
+                "has_semantic": has_semantic,
+                "metadata": metadata,
+            })))
+        }
+        None => Err(ServerError::NotFound),
+    }
+}
+
 /// Delete a document from the index
 pub async fn delete_document(
     State(state): State<Arc<ServerState>>,

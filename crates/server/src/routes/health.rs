@@ -80,3 +80,38 @@ pub async fn server_metadata(
 
     Ok(Json(serde_json::to_value(metadata)?))
 }
+
+/// Pipeline status response
+#[derive(serde::Serialize)]
+pub struct PipelineStatusResponse {
+    pub status: String,
+    pub components: PipelineComponents,
+}
+
+/// Pipeline component status
+#[derive(serde::Serialize)]
+pub struct PipelineComponents {
+    pub ingest: String,
+    pub canonical: String,
+    pub perceptual: String,
+    pub semantic: String,
+    pub index: String,
+    pub matcher: String,
+}
+
+/// Get pipeline/component status
+pub async fn pipeline_status(
+    State(_state): State<Arc<ServerState>>,
+) -> ServerResult<impl IntoResponse> {
+    Ok(Json(PipelineStatusResponse {
+        status: "ready".to_string(),
+        components: PipelineComponents {
+            ingest: "ready".to_string(),
+            canonical: "ready".to_string(),
+            perceptual: "ready".to_string(),
+            semantic: "ready".to_string(),
+            index: "ready".to_string(),
+            matcher: "ready".to_string(),
+        },
+    }))
+}

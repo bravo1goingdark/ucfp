@@ -1,12 +1,15 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use index::ann::{AnnConfig, AnnIndex};
 use ndarray::Array1;
-use rand::Rng;
+use rand::distr::StandardUniform;
+use rand::RngExt;
+use std::hint::black_box;
 
 /// Generate random vector of given dimension
 fn random_vector(dim: usize) -> Vec<f32> {
-    let mut rng = rand::thread_rng();
-    (0..dim).map(|_| rng.gen::<f32>()).collect()
+    let rng = rand::rng();
+    // sample_iter is optimized for generating sequences
+    rng.sample_iter(StandardUniform).take(dim).collect()
 }
 
 /// Benchmark ANN index insertion at different scales

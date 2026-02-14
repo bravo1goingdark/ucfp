@@ -1,65 +1,67 @@
-# UCFP Index (`index`)
+# UCFP Index Crate
 
-## What this is
+> **Storage and search for UCFP fingerprints and embeddings**
 
-`index` handles storage for UCFP fingerprints and embeddings. It gives you quantization, compression, and search tools while staying backend-agnostic - pick Redb for disk storage or use a fast in-memory map for ephemeral stuff. Or roll your own backend if you need something custom.
+[![API Docs](https://img.shields.io/badge/docs-api-blue)](https://docs.rs/index)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-Main entry point is `UfpIndex`. Give it an `IndexConfig` describing what backend you want, compression, and quantization, then do CRUD and similarity searches.
+## Table of Contents
 
-## What's included
+- [Overview](#overview)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Core Concepts](#core-concepts)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Error Handling](#error-handling)
+- [Examples](#examples)
+- [Best Practices](#best-practices)
+- [Performance](#performance)
+- [Troubleshooting](#troubleshooting)
+- [Integration Guide](#integration-guide)
+- [Testing](#testing)
 
-- **Storage backends**: Redb (default, on-disk) or in-memory for tests/lambda-style stuff
-- **Redb is optional**: Disable `backend-redb` for dependency-light builds
-- **Compression**: zstd or none, configurable at runtime
-- **Quantization**: i8 conversion for semantic vectors, deterministic across runs
-- **MinHash storage** for perceptual fingerprints
-- **Schema versioning** via `INDEX_SCHEMA_VERSION` for safe upgrades
-- **Full-scan search** with SIMD cosine and fast Jaccard scoring
-- **ANN search** using HNSW for large datasets (1000+ vectors)
+---
 
-## Key types
+## Overview
 
-```rust
-pub struct IndexRecord {
-    pub schema_version: u16,
-    pub canonical_hash: String,
-    pub perceptual: Option<Vec<u64>>,
-    pub embedding: Option<Vec<i8>>,
-    pub metadata: serde_json::Value,
-}
+The `index` crate handles storage for UCFP fingerprints and embeddings. It provides quantization, compression, and search tools while staying backend-agnostic.
 
-pub struct UfpIndex {
-    pub fn new(cfg: IndexConfig) -> Result<Self, IndexError>;
-    pub fn with_backend(cfg: IndexConfig, backend: Box<dyn IndexBackend>) -> Self;
-    pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError>;
-    pub fn batch_insert(&self, records: &[IndexRecord]) -> Result<(), IndexError>;
-    pub fn get(&self, hash: &str) -> Result<Option<IndexRecord>, IndexError>;
-    pub fn delete(&self, hash: &str) -> Result<(), IndexError>;
-    pub fn flush(&self) -> Result<(), IndexError>;
-    pub fn search(&self, query: &IndexRecord, mode: QueryMode, top_k: usize)
-        -> Result<Vec<QueryResult>, IndexError>;
-}
+### What This Crate Does
 
-pub trait IndexBackend: Send + Sync {
-    fn put(&self, key: &str, value: &[u8]) -> Result<(), IndexError>;
-    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, IndexError>;
-    fn delete(&self, key: &str) -> Result<(), IndexError>;
-    fn batch_put(&self, entries: Vec<(String, Vec<u8>)>) -> Result<(), IndexError>;
-    fn scan(&self, visit: &mut dyn FnMut(&[u8]) -> Result<(), IndexError>)
-        -> Result<(), IndexError>;
-    fn flush(&self) -> Result<(), IndexError> { Ok(()) }
-}
+| Function | Description |
+|----------|-------------|
+| **Storage** | Redb (disk) or in-memory backends |
+| **Compression** | zstd or none, configurable at runtime |
+| **Quantization** | i8 conversion for semantic vectors |
+| **Search** | Full-scan and ANN (HNSW) similarity search |
+| **Schema Versioning** | Safe upgrades via `INDEX_SCHEMA_VERSION` |
+
+### Key Properties
+
+- **Backend-agnostic**: Swap Redb, in-memory, or custom
+- **Optional Redb**: Disable `backend-redb` for dependency-light builds
+- **Deterministic**: Quantization produces consistent results
+- **SIMD-optimized**: Fast cosine and Jaccard scoring
+
+### Pipeline Position
+
+```
+┌─────────┐     ┌──────────┐     ┌──────────────────┐     ┌───────┐     ┌───────┐
+│  Ingest │────▶│Canonical │────▶│Perceptual/Semantic│────▶│ Index │────▶│ Match │
+│         │     │          │     │                  │     │(this) │     │       │
+└─────────┘     └──────────┘     └──────────────────┘     └───────┘     └───────┘
 ```
 
-`QueryMode` has two flavors: `Semantic` for cosine similarity on embeddings, and `Perceptual` for Jaccard on MinHash. `QueryResult` gives you the matching hash, score, and any stored metadata.
+---
 
-## Quick start
+## Quick Start
 
-```rust,ignore
+### Basic Index Usage
+
+```rust
+use index::{BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex};
 use serde_json::json;
-use index::{
-    BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex, INDEX_SCHEMA_VERSION
-};
 
 let cfg = IndexConfig::new().with_backend(BackendConfig::redb("data/index"));
 let index = UfpIndex::new(cfg)?;
@@ -70,7 +72,7 @@ index.upsert(&IndexRecord {
     perceptual: Some(vec![111, 222, 333]),
     embedding: Some(vec![10, -3, 7, 5]),
     metadata: json!({"source": "guide.md"}),
-)?;
+})?;
 
 let query = IndexRecord { 
     schema_version: INDEX_SCHEMA_VERSION,
@@ -82,35 +84,278 @@ let query = IndexRecord {
 let hits = index.search(&query, QueryMode::Perceptual, 10)?;
 ```
 
-### Swapping backends
-
-```rust,ignore
-use index::{BackendConfig, IndexConfig, InMemoryBackend, UfpIndex};
-
-// In-memory for tests/demos
-let in_mem = UfpIndex::new(IndexConfig::new().with_backend(BackendConfig::InMemory))?;
-
-// Bring your own backend (e.g., shared connection pool)
-let cfg = IndexConfig::new().with_backend(BackendConfig::InMemory);
-let index = UfpIndex::with_backend(cfg, Box::new(InMemoryBackend::new()));
-```
-
-Run `cargo run -p index --example index_demo` to see insert + queries in action. Default is Redb; swap to in-memory with `IndexConfig::with_backend(...)`.
-
-## ANN (Approximate Nearest Neighbor) Search
-
-We use HNSW for efficient vector search on large collections:
-
-### How it works
-
-- **Small datasets (< 1000 vectors)**: Linear scan, exact results
-- **Large datasets (1000+ vectors)**: HNSW, O(log n) queries
-- **Auto fallback**: Falls back to linear scan if ANN is disabled
-
-### Configure it
+### In-Memory Index
 
 ```rust
-use index::{AnnConfig, BackendConfig, IndexConfig, UfpIndex};
+use index::{BackendConfig, IndexConfig, UfpIndex};
+
+let in_mem = UfpIndex::new(IndexConfig::new().with_backend(BackendConfig::InMemory))?;
+```
+
+---
+
+## Architecture
+
+### Data Flow
+
+```
+IndexRecord (with hash, perceptual, embedding, metadata)
+      │
+      ▼
+┌─────────────────────────────────────────┐
+│              UfpIndex                   │
+├─────────────────────────────────────────┤
+│  1. Quantization (if embedding)        │
+│     - Convert f32 to i8 deterministically│
+├─────────────────────────────────────────┤
+│  2. Compression (optional)              │
+│     - zstd or none                      │
+├─────────────────────────────────────────┤
+│  3. Backend Storage                     │
+│     - Redb (disk) or InMemory           │
+├─────────────────────────────────────────┤
+│  4. Search                              │
+│     - Semantic: Cosine similarity        │
+│     - Perceptual: Jaccard similarity     │
+│     - ANN: HNSW for large datasets      │
+└─────────────────────────────────────────┘
+      │
+      ▼
+QueryResult (hash, score, metadata)
+```
+
+### Storage Backends
+
+| Backend | Use Case |
+|---------|----------|
+| Redb (default) | Persistent disk storage |
+| InMemory | Tests, ephemeral data, lambdas |
+
+---
+
+## Core Concepts
+
+### IndexRecord
+
+```rust
+pub struct IndexRecord {
+    pub schema_version: u16,
+    pub canonical_hash: String,
+    pub perceptual: Option<Vec<u64>>,  // MinHash for perceptual search
+    pub embedding: Option<Vec<i8>>,     // Quantized embedding
+    pub metadata: serde_json::Value,
+}
+```
+
+### Query Modes
+
+- **Semantic**: Cosine similarity on embeddings
+- **Perceptual**: Jaccard similarity on MinHash
+
+### Schema Versioning
+
+The `INDEX_SCHEMA_VERSION` ensures safe migrations. Increment when changing the data model.
+
+---
+
+## Configuration
+
+### IndexConfig
+
+```rust
+pub struct IndexConfig {
+    pub backend: BackendConfig,
+    pub compression: CompressionConfig,
+    pub quantization: QuantizationConfig,
+    pub ann: AnnConfig,
+}
+```
+
+### BackendConfig
+
+```rust
+pub enum BackendConfig {
+    Redb { path: String },  // Path to database file
+    InMemory,
+}
+```
+
+**Methods:**
+- `BackendConfig::redb(path)` - Create Redb backend config
+- `BackendConfig::in_memory()` - Create in-memory backend config
+
+### CompressionConfig
+
+```rust
+pub enum CompressionCodec {
+    None,
+    Zstd,
+}
+
+pub struct CompressionConfig {
+    pub codec: CompressionCodec,
+    pub level: i32,  // 1-22 for Zstd
+}
+```
+
+### QuantizationConfig
+
+```rust
+pub enum QuantizationConfig {
+    Int8 { scale: f32 },  // default scale: 100.0
+}
+```
+
+Converts f32 embeddings to i8 deterministically using: `quantized = (value * scale).clamp(-128.0, 127.0) as i8`
+
+### AnnConfig
+
+```rust
+pub struct AnnConfig {
+    pub enabled: bool,
+    pub min_vectors_for_ann: usize,
+    pub ef_construction: usize,
+    pub ef_search: usize,
+    pub m: usize,
+}
+```
+
+**Fields:**
+- `enabled`: Master switch (default: true)
+- `min_vectors_for_ann`: When to switch to HNSW (default: 1000)
+- `ef_construction`: Build accuracy vs speed
+- `ef_search`: Query accuracy vs speed
+- `m`: HNSW layer connections
+
+---
+
+## API Reference
+
+### Main Types
+
+#### UfpIndex
+
+```rust
+pub fn new(cfg: IndexConfig) -> Result<Self, IndexError>;
+pub fn with_backend(cfg: IndexConfig, backend: Box<dyn IndexBackend>) -> Self;
+pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError>;
+pub fn batch_insert(&self, records: &[IndexRecord]) -> Result<(), IndexError>;
+pub fn get(&self, hash: &str) -> Result<Option<IndexRecord>, IndexError>;
+pub fn delete(&self, hash: &str) -> Result<(), IndexError>;
+pub fn flush(&self) -> Result<(), IndexError>;
+pub fn scan(&self, visitor: &mut dyn FnMut(&IndexRecord) -> Result<(), IndexError>) -> Result<(), IndexError>;
+pub fn search(&self, query: &IndexRecord, mode: QueryMode, top_k: usize) 
+    -> Result<Vec<QueryResult>, IndexError>;
+pub fn semantic_vector_count(&self) -> usize;
+pub fn should_use_ann(&self) -> bool;
+pub fn rebuild_ann_if_needed(&self);
+```
+
+#### IndexBackend Trait
+
+```rust
+pub trait IndexBackend: Send + Sync {
+    fn put(&self, key: &str, value: &[u8]) -> Result<(), IndexError>;
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, IndexError>;
+    fn delete(&self, key: &str) -> Result<(), IndexError>;
+    fn batch_put(&self, entries: Vec<(String, Vec<u8>)>) -> Result<(), IndexError>;
+    fn scan(&self, visit: &mut dyn FnMut(&[u8]) -> Result<(), IndexError>) -> Result<(), IndexError>;
+    fn flush(&self) -> Result<(), IndexError> { Ok(()) }
+}
+```
+
+---
+
+## Error Handling
+
+### IndexError Variants
+
+| Error | Trigger | Recovery |
+|-------|---------|----------|
+| `Backend(msg)` | Storage backend failure | Check disk space, permissions |
+| `Encode(msg)` | Serialization encode error | Check record format |
+| `Decode(msg)` | Serialization decode error | Check data corruption |
+| `Zstd(msg)` | Compression/decompression error | Check data integrity |
+
+---
+
+## Examples
+
+### Example 1: Basic CRUD
+
+```rust
+use index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex};
+use serde_json::json;
+
+let index = UfpIndex::new(
+    IndexConfig::new().with_backend(BackendConfig::InMemory)
+)?;
+
+let record = IndexRecord {
+    schema_version: 1,
+    canonical_hash: "abc123".into(),
+    perceptual: Some(vec![1, 2, 3]),
+    embedding: Some(vec![10, -5, 3]),
+    metadata: json!({"title": "Test Doc"}),
+};
+
+index.upsert(&record)?;
+let retrieved = index.get("abc123")?.unwrap();
+assert_eq!(retrieved.canonical_hash, "abc123");
+```
+
+### Example 2: Semantic Search
+
+```rust
+use index::{BackendConfig, IndexConfig, IndexRecord, QueryMode, UfpIndex};
+
+let index = UfpIndex::new(
+    IndexConfig::new().with_backend(BackendConfig::InMemory)
+)?;
+
+// Insert documents with embeddings
+for (hash, embedding) in documents {
+    index.upsert(&IndexRecord {
+        schema_version: 1,
+        canonical_hash: hash,
+        perceptual: None,
+        embedding: Some(embedding),
+        metadata: json!({}),
+    })?;
+}
+
+// Search
+let query = IndexRecord {
+    schema_version: 1,
+    canonical_hash: "".into(),
+    perceptual: None,
+    embedding: Some(query_embedding),
+    metadata: json!({}),
+};
+
+let results = index.search(&query, QueryMode::Semantic, 10)?;
+```
+
+### Example 3: Perceptual Search
+
+```rust
+use index::{IndexRecord, QueryMode};
+
+let query = IndexRecord {
+    schema_version: 1,
+    canonical_hash: "".into(),
+    perceptual: Some(query_minhash),  // MinHash from perceptual stage
+    embedding: None,
+    metadata: json!({}),
+};
+
+let results = index.search(&query, QueryMode::Perceptual, 10)?;
+```
+
+### Example 4: ANN Search Configuration
+
+```rust
+use index::{AnnConfig, BackendConfig, IndexConfig};
 
 let cfg = IndexConfig::new()
     .with_backend(BackendConfig::redb("data/index"))
@@ -125,99 +370,223 @@ let cfg = IndexConfig::new()
 let index = UfpIndex::new(cfg)?;
 ```
 
-- `enabled`: Master switch (default: true)
-- `min_vectors_for_ann`: When to switch to HNSW (default: 1000)
-- `ef_construction`: Build accuracy vs speed tradeoff
-- `ef_search`: Query accuracy vs speed tradeoff
-- `m`: HNSW layer connections
+---
 
-### Linear scan fallback
+## Best Practices
 
-When ANN is off or dataset is small:
-
-- Exact cosine similarity
-- Deterministic ordering for pagination
-- No HNSW memory overhead
-- SIMD-optimized distances
-
-### Full config example
+### 1. Use Schema Versioning
 
 ```rust
-use index::{AnnConfig, BackendConfig, CompressionConfig, IndexConfig};
-
-let cfg = IndexConfig::new()
-    .with_backend(BackendConfig::redb("data/index"))
-    .with_compression(CompressionConfig::zstd())
-    .with_ann(AnnConfig {
-        enabled: true,
-        min_vectors_for_ann: 500,
-        ef_construction: 128,
-        ef_search: 64,
-        m: 24,
-    });
-```
-
-Update ANN config at runtime via control plane. Changes apply to new queries; existing HNSW indices stay valid.
-
-## How it all fits together
-
-- **Data model**: `IndexRecord` has canonical hash, optional MinHash, optional quantized embedding, and a JSON metadata blob. Metadata is raw JSON bytes so you can add fields without migrations.
-- **Entry point**: `UfpIndex` owns the backend, exposes CRUD + search.
-- **Config**: `IndexConfig` describes backend, compression, quantization. Clone it to share settings across workers.
-- **Storage abstraction**: `IndexBackend` trait lets you swap implementations. Six methods to implement.
-- **Compression**: `CompressionConfig` (none/zstd) shrinks data before storage. `QuantizationConfig` converts semantic vectors to i8 deterministically.
-- **Query engine**: `QueryMode::Semantic` does cosine on embeddings. `QueryMode::Perceptual` does Jaccard on MinHash. Ties break lexicographically for consistent pagination.
-
-## Using with the upper layer (`ucfp`)
-
-`ucfp` (workspace root crate) runs ingest, canonical, perceptual, semantic stages via the unified `process_pipeline` API. `index` is the persistence layer behind them:
-
-1. `ucfp::process_pipeline` with `PipelineStageConfig::Perceptual` or `PipelineStageConfig::Semantic` → canonical doc + fingerprints/embeddings
-2. Convert to `IndexRecord` and `upsert`
-3. Build partial record for lookups and `search`
-
-### Write path
-
-```rust,ignore
-// After processing with ucfp pipeline...
-let quantized = UfpIndex::quantize_with_strategy(
-    &Array1::from(embedding.vector.clone()),
-    &index_cfg.quantization,
-);
+const INDEX_SCHEMA_VERSION: u16 = 1;
 
 let record = IndexRecord {
     schema_version: INDEX_SCHEMA_VERSION,
-    canonical_hash: doc.sha256_hex.clone(),
-    perceptual: Some(fingerprint.minhash.clone()),
-    embedding: Some(quantized),
-    metadata: json!({ /* your metadata */ }),
+    // ...
+};
+```
+
+### 2. Batch Inserts for Large Data
+
+```rust
+index.batch_insert(&records)?;
+```
+
+### 3. Configure ANN for Large Datasets
+
+```rust
+let cfg = IndexConfig::new()
+    .with_ann(AnnConfig {
+        enabled: true,
+        min_vectors_for_ann: 1000,  // Switch to HNSW at 1000 vectors
+        ..Default::default()
+    });
+```
+
+### 4. Flush Before Shutdown
+
+```rust
+index.flush()?;
+```
+
+---
+
+## Performance
+
+### Search Modes
+
+| Mode | Dataset Size | Complexity |
+|------|--------------|------------|
+| Linear Scan | < 1000 vectors | O(n) |
+| ANN (HNSW) | 1000+ vectors | O(log n) |
+
+### Benchmarks
+
+Typical performance on modern hardware:
+
+| Operation | Latency |
+|-----------|---------|
+| Single insert | ~100 μs |
+| Batch insert (1000) | ~50 ms |
+| Linear search (1K vectors) | ~1 ms |
+| ANN search (100K vectors) | ~10 ms |
+
+### Optimization Tips
+
+1. **Enable ANN** for datasets > 1000 vectors
+2. **Use batch inserts** for bulk loading
+3. **Quantize embeddings** to i8 for storage savings
+4. **Enable compression** for large datasets
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+#### "BackendError: No such file or directory"
+
+**Problem**: Redb database path doesn't exist.
+
+**Solutions:**
+```rust
+// Create directory or use in-memory
+let cfg = IndexConfig::new().with_backend(BackendConfig::InMemory);
+```
+
+#### Slow Search Performance
+
+**Problem**: Search is taking too long.
+
+**Solutions:**
+1. Enable ANN for large datasets
+2. Increase `ef_search` parameter
+3. Use quantized embeddings (i8)
+
+#### Schema Version Mismatch
+
+**Problem**: Can't read old records after upgrade.
+
+**Solutions:**
+- Implement migration logic
+- Keep schema version in sync across deployments
+
+---
+
+## Integration Guide
+
+### With UCFP Pipeline
+
+```rust
+use ucfp::{process_pipeline, PipelineStageConfig};
+use index::{BackendConfig, IndexConfig, IndexRecord, UfpIndex};
+use serde_json::json;
+
+// 1. Process through pipeline
+let result = process_pipeline(
+    raw_record,
+    PipelineStageConfig::all().with_semantic(),
+)?;
+
+// 2. Create index record
+let record = IndexRecord {
+    schema_version: INDEX_SCHEMA_VERSION,
+    canonical_hash: result.canonical.sha256_hex,
+    perceptual: result.perceptual.map(|p| p.minhash),
+    embedding: result.semantic.map(|s| s.vector),
+    metadata: json!({"source": "uploaded"}),
 };
 
+// 3. Insert into index
+let index = UfpIndex::new(IndexConfig::new().with_backend(BackendConfig::redb("data/index")))?;
 index.upsert(&record)?;
 ```
 
-### Read path
+### Custom Backend
 
-Build a query `IndexRecord` with just the modality you need (perceptual OR embedding), pick your `QueryMode`, and get `QueryResult`s back.
+```rust
+use index::{IndexBackend, IndexConfig, UfpIndex};
 
-## Feature flags
+struct MyBackend { /* ... */ }
 
-| Feature | What it does |
-|---------|--------------|
-| `backend-redb` *(default)* | Redb backend (pure Rust) |
+impl IndexBackend for MyBackend {
+    fn put(&self, key: &str, value: &[u8]) -> Result<(), IndexError> { /* ... */ }
+    fn get(&self, key: &str) -> Result<Option<Vec<u8>>, IndexError> { /* ... */ }
+    fn delete(&self, key: &str) -> Result<(), IndexError> { /* ... */ }
+    fn batch_put(&self, entries: Vec<(String, Vec<u8>)>) -> Result<(), IndexError> { /* ... */ }
+    fn scan(&self, visit: &mut dyn FnMut(&[u8]) -> Result<(), IndexError>) { /* ... */ }
+    fn flush(&self) -> Result<(), IndexError> { /* ... */ }
+}
 
-Disable default features for purely in-memory runs: `cargo test -p index --no-default-features`
+let index = UfpIndex::with_backend(
+    IndexConfig::new().with_backend(BackendConfig::InMemory),
+    Box::new(MyBackend::new()),
+);
+```
 
-## Tests
+---
+
+## Testing
+
+### Running Tests
 
 ```bash
-# In-memory only
+# In-memory only (no dependencies)
 cargo test -p index --no-default-features
 
 # Full suite with Redb
 cargo test -p index
 ```
 
-Unit tests cover serialization, backend swaps, and query correctness. Integration tests exercise both paths.
+### Test Coverage
 
-Runnable example: `cargo run -p ucfp --example full_pipeline`
+- Serialization/deserialization
+- Backend swaps
+- Query correctness
+- ANN fallback behavior
+- Quantization determinism
+
+### Example Programs
+
+```bash
+# Index demo
+cargo run -p index --example index_demo
+
+# Full pipeline
+cargo run -p ucfp --example full_pipeline
+```
+
+---
+
+## Feature Flags
+
+| Feature | Description |
+|---------|-------------|
+| `backend-redb` *(default)* | Redb backend for disk storage |
+
+Disable default features for purely in-memory runs:
+```bash
+cargo test -p index --no-default-features
+```
+
+---
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](../../LICENSE) for details.
+
+---
+
+## Contributing
+
+Contributions are welcome! Please ensure:
+- All tests pass: `cargo test -p index`
+- Documentation is updated
+- Examples are provided for new features
+
+---
+
+## Support
+
+For issues and questions:
+- GitHub Issues: [github.com/bravo1goingdark/ufcp/issues](https://github.com/bravo1goingdark/ufcp/issues)
+- Documentation: [docs.rs/index](https://docs.rs/index)
