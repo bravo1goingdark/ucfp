@@ -267,7 +267,9 @@ impl Token {
 /// - [`CanonicalizedDocument`](crate::CanonicalizedDocument) which uses this internally
 /// - [`collapse_whitespace`](crate::collapse_whitespace) for whitespace normalization
 pub fn tokenize(text: &str) -> Vec<Token> {
-    let mut tokens = Vec::new();
+    // Estimate capacity: assume average token length of 5 bytes
+    let estimated_tokens = (text.len() / 5).saturating_add(1);
+    let mut tokens = Vec::with_capacity(estimated_tokens);
     let mut start: Option<usize> = None;
 
     for (idx, ch) in text.char_indices() {

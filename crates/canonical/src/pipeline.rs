@@ -227,12 +227,10 @@ pub fn canonicalize(
     }
 
     let canonical_version = cfg.version;
-    let mut token_hashes: Vec<String> = Vec::with_capacity(tokens.len());
-    token_hashes.extend(
-        tokens
-            .iter()
-            .map(|t| hash_token_bytes_fast(canonical_version, t.text.as_bytes())),
-    );
+    let token_hashes: Vec<String> = tokens
+        .iter()
+        .map(|t| hash_token_bytes_fast(canonical_version, t.text.as_bytes()))
+        .collect();
     let sha256_hex = hash_canonical_bytes(canonical_version, canonical_text.as_bytes());
 
     Ok(CanonicalizedDocument {
@@ -260,13 +258,12 @@ fn process_chars(
 ) {
     // Fast path: ASCII-only text can use simpler processing
     if text.is_ascii() {
-        let processed = if cfg.lowercase {
-            text.to_ascii_lowercase()
-        } else {
-            text.to_string()
-        };
-
-        for ch in processed.chars() {
+        for ch in text.chars() {
+            let ch = if cfg.lowercase {
+                ch.to_ascii_lowercase()
+            } else {
+                ch
+            };
             dispatch_char(
                 ch,
                 cfg,
