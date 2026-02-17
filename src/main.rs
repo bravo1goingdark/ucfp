@@ -4,8 +4,11 @@ use ingest::{IngestConfig, IngestMetadata, IngestPayload, IngestSource, RawInges
 use ndarray::Array1;
 use serde_json::json;
 use ucfp::{
-    process_pipeline, CanonicalizeConfig, PerceptualConfig, PipelineStageConfig, SemanticConfig,
+    process_pipeline, CanonicalizeConfig, CanonicalizedDocument, PerceptualConfig,
+    PerceptualFingerprint, PipelineStageConfig, SemanticConfig,
 };
+
+const BATCH_SIZE: usize = 100;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -42,14 +45,15 @@ async fn main() -> anyhow::Result<()> {
 
     let start_time = std::time::Instant::now();
     let mut processed_docs: Vec<(
+        &'static str,
         String,
         String,
-        String,
-        perceptual::PerceptualFingerprint,
-        canonical::CanonicalizedDocument,
+        PerceptualFingerprint,
+        CanonicalizedDocument,
     )> = Vec::with_capacity(total_docs);
 
     println!("\nPhase 1: Ingest + Canonical + Perceptual...");
+    let progress_mult = 100.0 / total_docs as f64;
     for (i, (tenant, doc_id, text)) in corpus.iter().enumerate() {
         let raw = build_raw_record(tenant, doc_id, text);
         let (doc, fingerprint, _) = process_pipeline(
@@ -60,35 +64,29 @@ async fn main() -> anyhow::Result<()> {
             Some(&perceptual_cfg),
             None,
         )?;
-        let fingerprint = fingerprint.unwrap();
+        let fingerprint = fingerprint.context("perceptual fingerprint missing")?;
 
-        processed_docs.push((
-            tenant.to_string(),
-            doc_id.clone(),
-            text.clone(),
-            fingerprint,
-            doc,
-        ));
+        processed_docs.push((*tenant, doc_id.clone(), text.clone(), fingerprint, doc));
 
-        if (i + 1) % 100 == 0 || i == total_docs - 1 {
+        let completed = i + 1;
+        if completed % 100 == 0 || completed == total_docs {
             println!(
                 "  Progress: {}/{} ({:.1}%)",
-                i + 1,
+                completed,
                 total_docs,
-                ((i + 1) as f64 / total_docs as f64) * 100.0
+                completed as f64 * progress_mult
             );
         }
     }
 
     println!("\nPhase 2: Semantic embedding...");
-    const BATCH_SIZE: usize = 100;
     let total_batches = total_docs.div_ceil(BATCH_SIZE);
     let mut all_embeddings: Vec<semantic::SemanticEmbedding> = Vec::with_capacity(total_docs);
 
     for (batch_idx, batch) in processed_docs.chunks(BATCH_SIZE).enumerate() {
-        let batch_input: Vec<(String, String)> = batch
+        let batch_input: Vec<(&str, &str)> = batch
             .iter()
-            .map(|(_, doc_id, _, _, doc)| (doc_id.clone(), doc.canonical_text.clone()))
+            .map(|(_, doc_id, _, _, doc)| (doc_id.as_str(), doc.canonical_text.as_str()))
             .collect();
 
         println!(
@@ -103,7 +101,7 @@ async fn main() -> anyhow::Result<()> {
             Err(e) => {
                 eprintln!("    API failed: {}, using stubs", e);
                 batch_input
-                    .iter()
+                    .into_iter()
                     .map(|(doc_id, _)| make_stub_embedding(doc_id, doc_id))
                     .collect()
             }
@@ -113,33 +111,37 @@ async fn main() -> anyhow::Result<()> {
     }
 
     println!("\nPhase 3: Indexing...");
-    for (i, ((tenant, doc_id, text, fingerprint, doc), semantic)) in
-        processed_docs.iter().zip(all_embeddings.iter()).enumerate()
+    for (i, ((tenant, doc_id, text, fingerprint, doc), semantic)) in processed_docs
+        .into_iter()
+        .zip(all_embeddings.into_iter())
+        .enumerate()
     {
         let rec = IndexRecord {
             schema_version: INDEX_SCHEMA_VERSION,
-            canonical_hash: doc.sha256_hex.clone(),
-            perceptual: Some(fingerprint.minhash.clone()),
-            embedding: Some(UfpIndex::quantize(
-                &Array1::from(semantic.vector.clone()),
-                127.0,
-            )),
-            metadata: json!({
-                "tenant": tenant,
-                "doc_id": doc_id,
-                "full_text": text,
-                "source": doc.canonical_text.chars().take(80).collect::<String>() + "..."
-            }),
+            canonical_hash: doc.sha256_hex,
+            perceptual: Some(fingerprint.minhash),
+            embedding: Some(UfpIndex::quantize(&Array1::from(semantic.vector), 127.0)),
+            metadata: {
+                let mut source: String = doc.canonical_text.chars().take(80).collect();
+                source.push_str("...");
+                json!({
+                    "tenant": tenant,
+                    "doc_id": doc_id,
+                    "full_text": text,
+                    "source": source
+                })
+            },
         };
 
         index.upsert(&rec).context("index upsert")?;
 
-        if (i + 1) % 100 == 0 || i == total_docs - 1 {
+        let completed = i + 1;
+        if completed % 100 == 0 || completed == total_docs {
             println!(
                 "  Progress: {}/{} ({:.1}%)",
-                i + 1,
+                completed,
                 total_docs,
-                ((i + 1) as f64 / total_docs as f64) * 100.0
+                completed as f64 * progress_mult
             );
         }
     }
@@ -169,9 +171,10 @@ async fn main() -> anyhow::Result<()> {
         Some(&semantic_cfg),
     )?;
 
+    let query_fingerprint = query_fingerprint.context("query perceptual fingerprint missing")?;
     println!(
         "  Query: {} minhash values",
-        query_fingerprint.as_ref().unwrap().minhash.len()
+        query_fingerprint.minhash.len()
     );
 
     let query_semantic =
@@ -180,9 +183,9 @@ async fn main() -> anyhow::Result<()> {
     let query = IndexRecord {
         schema_version: INDEX_SCHEMA_VERSION,
         canonical_hash: "query-1".into(),
-        perceptual: Some(query_fingerprint.unwrap().minhash.clone()),
+        perceptual: Some(query_fingerprint.minhash),
         embedding: Some(UfpIndex::quantize(
-            &Array1::from(query_semantic.vector.clone()),
+            &Array1::from(query_semantic.vector),
             127.0,
         )),
         metadata: json!({}),
@@ -205,8 +208,8 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn generate_large_corpus() -> Vec<(&'static str, String, String)> {
-    let mut corpus = Vec::new();
     let tenants = ["tenant-a", "tenant-b", "tenant-c", "tenant-d"];
+    let num_tenants = tenants.len();
 
     let programming_docs = [
         "Rust is a systems programming language that runs blazingly fast, prevents segfaults, and guarantees thread safety. Ownership and borrowing are core concepts.",
@@ -332,6 +335,9 @@ fn generate_large_corpus() -> Vec<(&'static str, String, String)> {
         .copied()
         .collect();
 
+    let total_items = all_docs.len() * num_tenants * 3;
+    let mut corpus = Vec::with_capacity(total_items);
+
     for (doc_idx, doc) in all_docs.iter().enumerate() {
         for (tenant_idx, tenant) in tenants.iter().enumerate() {
             for variant in 0..3 {
@@ -346,16 +352,7 @@ fn generate_large_corpus() -> Vec<(&'static str, String, String)> {
         }
     }
 
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    corpus.sort_by(|a, b| {
-        let mut h = DefaultHasher::new();
-        a.1.hash(&mut h);
-        let ha = h.finish();
-        let mut h = DefaultHasher::new();
-        b.1.hash(&mut h);
-        h.finish().cmp(&ha)
-    });
+    corpus.sort_by(|a, b| a.1.cmp(&b.1));
 
     corpus
 }

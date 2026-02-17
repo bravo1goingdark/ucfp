@@ -112,12 +112,12 @@ where
     // Step 3: Deduplicate the selected shingles to get a set of unique hashes for MinHash.
     // If winnowing produced no results (e.g., text was too short), use all shingles.
     let uniq: Vec<u64> = if winnowed.is_empty() {
-        let mut hashes = Vec::with_capacity(shingles.len());
-        hashes.extend(shingles.iter().copied());
+        let mut hashes = shingles.clone();
+        hashes.sort_unstable();
+        hashes.dedup();
         hashes
     } else {
-        let mut hashes: Vec<u64> = Vec::with_capacity(winnowed.len());
-        hashes.extend(winnowed.iter().map(|w| w.hash));
+        let mut hashes: Vec<u64> = winnowed.iter().map(|w| w.hash).collect();
         hashes.sort_unstable();
         hashes.dedup();
         hashes
