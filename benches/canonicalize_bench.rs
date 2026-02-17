@@ -1,5 +1,6 @@
 use canonical::{canonicalize, CanonicalizeConfig};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
+use std::hint::black_box;
 
 fn bench_canonicalize(c: &mut Criterion) {
     let config = CanonicalizeConfig::default();

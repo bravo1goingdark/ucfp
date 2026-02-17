@@ -1,6 +1,7 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use index::{IndexRecord, INDEX_SCHEMA_VERSION};
 use serde_json::json;
+use std::hint::black_box;
 use std::sync::Arc;
 use std::thread;
 

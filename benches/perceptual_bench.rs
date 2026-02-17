@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use perceptual::{perceptualize_tokens, PerceptualConfig};
+use std::hint::black_box;
 
 fn bench_perceptual(c: &mut Criterion) {
     let config = PerceptualConfig::default();

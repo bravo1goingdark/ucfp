@@ -1,11 +1,12 @@
 use canonical::CanonicalizeConfig;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use index::{IndexRecord, INDEX_SCHEMA_VERSION};
 use ingest::IngestConfig;
 use matcher::{MatchConfig, MatchMode, MatchRequest, Matcher};
 use perceptual::PerceptualConfig;
 use semantic::SemanticConfig;
 use serde_json::json;
+use std::hint::black_box;
 
 mod common;
 use common::{create_sample_records, setup_in_memory_index};

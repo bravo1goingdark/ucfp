@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use serde_json::json;
+use std::hint::black_box;
 
 mod common;
 use common::{create_sample_records, setup_in_memory_index, setup_redb_index};

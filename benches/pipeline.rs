@@ -1,5 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use ucfp::{
     canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestMetadata,
     IngestPayload, IngestSource, PerceptualConfig, PipelineStageConfig, RawIngestRecord,
