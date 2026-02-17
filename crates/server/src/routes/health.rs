@@ -53,14 +53,22 @@ pub async fn readiness_check(
 }
 
 /// Prometheus metrics endpoint
-pub async fn metrics() -> ServerResult<impl IntoResponse> {
-    // For now, return basic metrics
-    // In production, integrate with the metrics system
+pub async fn metrics(State(state): State<Arc<ServerState>>) -> ServerResult<impl IntoResponse> {
+    let uptime = SERVER_START_TIME
+        .elapsed()
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Get actual index stats
+    let index_stats = state.index.stats().unwrap_or_default();
+
     Ok(Json(json!({
-        "uptime_seconds": SERVER_START_TIME
-            .elapsed()
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        "uptime_seconds": uptime,
+        "index": {
+            "total_documents": index_stats.total_documents,
+            "total_vectors": index_stats.total_vectors,
+        },
+        "version": env!("CARGO_PKG_VERSION"),
     })))
 }
 
@@ -101,16 +109,30 @@ pub struct PipelineComponents {
 
 /// Get pipeline/component status
 pub async fn pipeline_status(
-    State(_state): State<Arc<ServerState>>,
+    State(state): State<Arc<ServerState>>,
 ) -> ServerResult<impl IntoResponse> {
+    // Check if index is actually working by doing a quick stats call
+    let index_status = match state.index.stats() {
+        Ok(_) => "ready",
+        Err(_) => "error",
+    };
+
+    // All other components are ready if we got here
+    // (they would fail during server startup if broken)
+    let all_ready = index_status == "ready";
+
     Ok(Json(PipelineStatusResponse {
-        status: "ready".to_string(),
+        status: if all_ready {
+            "ready".to_string()
+        } else {
+            "degraded".to_string()
+        },
         components: PipelineComponents {
             ingest: "ready".to_string(),
             canonical: "ready".to_string(),
             perceptual: "ready".to_string(),
             semantic: "ready".to_string(),
-            index: "ready".to_string(),
+            index: index_status.to_string(),
             matcher: "ready".to_string(),
         },
     }))

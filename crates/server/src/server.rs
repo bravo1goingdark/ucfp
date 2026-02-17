@@ -54,7 +54,8 @@ fn build_router(state: Arc<ServerState>) -> Router {
         .route("/", get(api_info))
         .route("/health", get(health::health_check))
         .route("/ready", get(health::readiness_check))
-        .route("/metrics", get(health::metrics));
+        .route("/metrics", get(health::metrics))
+        .with_state(state.clone());
 
     // Protected routes (require API key)
     let protected_routes = Router::new()

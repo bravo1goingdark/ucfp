@@ -19,7 +19,7 @@
 //! ```
 
 use crate::{IndexBackend, IndexError};
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -187,6 +187,20 @@ impl IndexBackend for RedbBackend {
         // Redb commits are synchronous by default, so flush is a no-op
         // This ensures data is immediately durable
         Ok(())
+    }
+
+    fn len(&self) -> Result<usize, IndexError> {
+        let read_txn = self
+            .db
+            .begin_read()
+            .map_err(|e| IndexError::backend(e.to_string()))?;
+        let table = read_txn
+            .open_table(UCFP_TABLE)
+            .map_err(|e| IndexError::backend(e.to_string()))?;
+        let count = table
+            .len()
+            .map_err(|e| IndexError::backend(e.to_string()))?;
+        Ok(count as usize)
     }
 }
 

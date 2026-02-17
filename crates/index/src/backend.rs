@@ -21,6 +21,12 @@ pub trait IndexBackend: Send + Sync {
     fn flush(&self) -> Result<(), IndexError> {
         Ok(())
     }
+    /// Get the number of entries in the backend.
+    fn len(&self) -> Result<usize, IndexError>;
+    /// Check if the backend is empty.
+    fn is_empty(&self) -> Result<bool, IndexError> {
+        Ok(self.len()? == 0)
+    }
 }
 
 /// Configuration for selecting and building a backend.
@@ -173,6 +179,14 @@ impl IndexBackend for InMemoryBackend {
             visitor(value)?;
         }
         Ok(())
+    }
+
+    fn len(&self) -> Result<usize, IndexError> {
+        let guard = self
+            .records
+            .read()
+            .map_err(|_| IndexError::backend("poisoned lock"))?;
+        Ok(guard.len())
     }
 }
 

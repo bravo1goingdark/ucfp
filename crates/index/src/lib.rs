@@ -589,6 +589,23 @@ impl UfpIndex {
         let encoded = encode_to_vec(rec, standard())?;
         self.cfg.compression.compress(&encoded)
     }
+
+    /// Get index statistics
+    pub fn stats(&self) -> Result<IndexStats, IndexError> {
+        Ok(IndexStats {
+            total_documents: self.backend.len()?,
+            total_vectors: self.semantic_index.len(),
+        })
+    }
+}
+
+/// Index statistics
+#[derive(Debug, Default)]
+pub struct IndexStats {
+    /// Total number of documents in the index
+    pub total_documents: usize,
+    /// Total number of semantic vectors
+    pub total_vectors: usize,
 }
 
 #[cfg(test)]
