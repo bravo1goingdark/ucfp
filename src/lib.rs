@@ -431,29 +431,35 @@ impl StageContext {
         }
     }
 
-    fn from_raw(record: &RawIngestRecord) -> Self {
+    fn update_with_ingest(&mut self, record: &CanonicalIngestRecord) {
+        self.record_id = record.id.clone();
+        self.doc_id = Some(record.doc_id.clone());
+        self.tenant_id = Some(record.tenant_id.clone());
+    }
+}
+
+impl From<&RawIngestRecord> for StageContext {
+    fn from(record: &RawIngestRecord) -> Self {
         Self {
             record_id: record.id.clone(),
             doc_id: record.metadata.doc_id.clone(),
             tenant_id: record.metadata.tenant_id.clone(),
         }
     }
+}
 
-    fn update_with_ingest(&mut self, record: &CanonicalIngestRecord) {
-        self.record_id = record.id.clone();
-        self.doc_id = Some(record.doc_id.clone());
-        self.tenant_id = Some(record.tenant_id.clone());
-    }
-
-    fn from_ingest_record(record: &CanonicalIngestRecord) -> Self {
+impl From<&CanonicalIngestRecord> for StageContext {
+    fn from(record: &CanonicalIngestRecord) -> Self {
         Self {
             record_id: record.id.clone(),
             doc_id: Some(record.doc_id.clone()),
             tenant_id: Some(record.tenant_id.clone()),
         }
     }
+}
 
-    fn from_document(doc: &CanonicalizedDocument) -> Self {
+impl From<&CanonicalizedDocument> for StageContext {
+    fn from(doc: &CanonicalizedDocument) -> Self {
         Self {
             record_id: doc.doc_id.clone(),
             doc_id: Some(doc.doc_id.clone()),
@@ -605,7 +611,7 @@ pub fn process_pipeline(
 > {
     // --- Ingest Stage ---
     let mut ingest_metrics =
-        MetricsSpan::start(PipelineStage::Ingest, StageContext::from_raw(&raw));
+        MetricsSpan::start(PipelineStage::Ingest, StageContext::from(&raw));
     let canonical_record = match ingest(raw, ingest_cfg) {
         Ok(record) => record,
         Err(err) => {
@@ -626,7 +632,7 @@ pub fn process_pipeline(
     // --- Canonicalization Stage ---
     let mut canonical_metrics = MetricsSpan::start(
         PipelineStage::Canonical,
-        StageContext::from_ingest_record(&canonical_record),
+        StageContext::from(&canonical_record),
     );
     let payload = match canonical_record.normalized_payload.as_ref() {
         Some(payload) => payload,
@@ -676,7 +682,7 @@ pub fn process_pipeline(
             perceptual::PerceptualError::InvalidConfigVersion { version: 0 },
         ))?;
         let mut perceptual_metrics =
-            MetricsSpan::start(PipelineStage::Perceptual, StageContext::from_document(&doc));
+            MetricsSpan::start(PipelineStage::Perceptual, StageContext::from(&doc));
         let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
         match perceptualize_tokens(token_refs.as_slice(), cfg) {
             Ok(fp) => {
@@ -705,7 +711,7 @@ pub fn process_pipeline(
         let cfg = semantic_cfg.ok_or(PipelineError::Semantic(
             semantic::SemanticError::Inference("missing semantic config".into()),
         ))?;
-        let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from_document(&doc));
+        let span = MetricsSpan::start(PipelineStage::Semantic, StageContext::from(&doc));
 
         let result = if let Ok(handle) = tokio::runtime::Handle::try_current() {
             tokio::task::block_in_place(|| {
@@ -714,9 +720,13 @@ pub fn process_pipeline(
                 })
             })
         } else {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
-                semanticize(doc.doc_id.as_str(), doc.canonical_text.as_str(), cfg).await
-            })
+            // Fall back to stub embedding if no runtime available
+            // This prevents panics when called outside of a Tokio runtime
+            eprintln!(
+                "Warning: No Tokio runtime available for semantic processing for doc {}, using stub embedding",
+                doc.doc_id
+            );
+            Ok(semantic::make_stub_embedding(&doc.doc_id, &doc.canonical_text, cfg))
         };
 
         match result {

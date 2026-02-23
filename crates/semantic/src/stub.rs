@@ -6,11 +6,7 @@ use crate::{SemanticConfig, SemanticEmbedding};
 /// Deterministic stub used when tier is `"fast"` or the model assets are unavailable.
 /// Generates sinusoid values derived from a hash of the input text to guarantee reproducible
 /// vectors with minimal CPU cost.
-pub(crate) fn make_stub_embedding(
-    doc_id: &str,
-    text: &str,
-    cfg: &SemanticConfig,
-) -> SemanticEmbedding {
+pub fn make_stub_embedding(doc_id: &str, text: &str, cfg: &SemanticConfig) -> SemanticEmbedding {
     let dim = match cfg.tier.as_str() {
         "fast" => 384,
         "accurate" => 1024,

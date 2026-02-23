@@ -82,13 +82,13 @@ mod stub;
 pub use crate::config::SemanticConfig;
 pub use crate::error::SemanticError;
 pub use crate::types::SemanticEmbedding;
+pub use crate::stub::make_stub_embedding;
 
 use crate::api::{semanticize_batch_via_api, semanticize_via_api};
 use crate::assets::{resolve_model_assets, should_fallback_to_stub};
 use crate::cache::get_or_load_model_handle;
 use crate::normalize::l2_normalize_in_place;
 use crate::onnx::run_onnx_embeddings;
-use crate::stub::make_stub_embedding;
 
 /// Converts the provided `text` into a [`SemanticEmbedding`] using the supplied [`SemanticConfig`].
 ///

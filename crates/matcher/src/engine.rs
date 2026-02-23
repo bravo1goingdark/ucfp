@@ -2,8 +2,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use canonical::{canonicalize, CanonicalizeConfig};
-#[allow(unused_imports)]
-use chrono::{NaiveDate, Utc};
 use index::{
     BackendConfig, IndexConfig, IndexRecord, QueryMode, QueryResult, UfpIndex, INDEX_SCHEMA_VERSION,
 };
