@@ -50,6 +50,6 @@ pub fn quantize_with_scale(embedding: &SemanticEmbedding, scale: f32) -> Vec<i8>
     embedding
         .vector
         .iter()
-        .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
+        .map(|v| (v * scale).clamp(-128.0f32, 127.0f32) as i8)
         .collect()
 }

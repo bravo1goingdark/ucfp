@@ -349,8 +349,36 @@ pub enum MatchError {
     Index(IndexError),
 }
 
+/// Automatic conversion from crate errors to `MatchError`.
+///
+/// These implementations allow using the `?` operator throughout the matcher
+/// without explicit `.map_err()` calls at each stage.
 impl From<IndexError> for MatchError {
     fn from(err: IndexError) -> Self {
         MatchError::Index(err)
+    }
+}
+
+impl From<ingest::IngestError> for MatchError {
+    fn from(err: ingest::IngestError) -> Self {
+        MatchError::Ingest(err.to_string())
+    }
+}
+
+impl From<canonical::CanonicalError> for MatchError {
+    fn from(err: canonical::CanonicalError) -> Self {
+        MatchError::Canonical(err.to_string())
+    }
+}
+
+impl From<perceptual::PerceptualError> for MatchError {
+    fn from(err: perceptual::PerceptualError) -> Self {
+        MatchError::Perceptual(err.to_string())
+    }
+}
+
+impl From<semantic::SemanticError> for MatchError {
+    fn from(err: semantic::SemanticError) -> Self {
+        MatchError::Semantic(err.to_string())
     }
 }

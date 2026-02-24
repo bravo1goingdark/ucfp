@@ -81,8 +81,8 @@ mod stub;
 
 pub use crate::config::SemanticConfig;
 pub use crate::error::SemanticError;
-pub use crate::types::SemanticEmbedding;
 pub use crate::stub::make_stub_embedding;
+pub use crate::types::SemanticEmbedding;
 
 use crate::api::{semanticize_batch_via_api, semanticize_via_api};
 use crate::assets::{resolve_model_assets, should_fallback_to_stub};

@@ -169,12 +169,12 @@ fn build_index_with_docs() -> Result<(Matcher, String, String), MatchError> {
     let qa: Vec<i8> = emb_a
         .vector
         .iter()
-        .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
+        .map(|v| (v * scale).clamp(-128.0f32, 127.0f32) as i8)
         .collect();
     let qb: Vec<i8> = emb_b
         .vector
         .iter()
-        .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
+        .map(|v| (v * scale).clamp(-128.0f32, 127.0f32) as i8)
         .collect();
 
     let rec_a = IndexRecord {

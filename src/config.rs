@@ -220,9 +220,9 @@ impl Default for IngestYamlConfig {
             default_tenant_id: "default".to_string(),
             doc_id_namespace: "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string(),
             strip_control_chars: true,
-            max_payload_bytes: Some(10 * 1024 * 1024), // 10MB
-            max_normalized_bytes: Some(100 * 1024),    // 100KB
-            max_attribute_bytes: Some(10 * 1024),      // 10KB
+            max_payload_bytes: Some(10 * 1024 * 1024),
+            max_normalized_bytes: Some(100 * 1024),
+            max_attribute_bytes: Some(10 * 1024),
             required_fields: vec![],
         }
     }
@@ -272,19 +272,19 @@ pub struct PerceptualYamlConfig {
     #[serde(default = "default_version")]
     pub version: u32,
 
-    #[serde(default = "default_k")]
+    #[serde(default)]
     pub k: usize,
 
-    #[serde(default = "default_w")]
+    #[serde(default)]
     pub w: usize,
 
-    #[serde(default = "default_minhash_bands")]
+    #[serde(default)]
     pub minhash_bands: usize,
 
-    #[serde(default = "default_minhash_rows")]
+    #[serde(default)]
     pub minhash_rows_per_band: usize,
 
-    #[serde(default = "default_seed")]
+    #[serde(default)]
     pub seed: u64,
 
     #[serde(default)]
@@ -545,19 +545,19 @@ pub struct ServerYamlConfig {
     pub bind_addr: String,
 
     /// Server port
-    #[serde(default = "default_server_port")]
+    #[serde(default)]
     pub port: u16,
 
     /// Request timeout in seconds
-    #[serde(default = "default_server_timeout_secs")]
+    #[serde(default)]
     pub timeout_secs: u64,
 
     /// Maximum request body size in MB
-    #[serde(default = "default_server_max_body_size_mb")]
+    #[serde(default)]
     pub max_body_size_mb: usize,
 
     /// Rate limit: requests per minute per API key
-    #[serde(default = "default_server_rate_limit")]
+    #[serde(default)]
     pub rate_limit_per_minute: u32,
 
     /// API keys for authentication
@@ -607,10 +607,10 @@ impl Default for ServerYamlConfig {
     fn default() -> Self {
         Self {
             bind_addr: default_server_bind_addr(),
-            port: default_server_port(),
-            timeout_secs: default_server_timeout_secs(),
-            max_body_size_mb: default_server_max_body_size_mb(),
-            rate_limit_per_minute: default_server_rate_limit(),
+            port: 8080,
+            timeout_secs: 30,
+            max_body_size_mb: 10,
+            rate_limit_per_minute: 100,
             api_keys: vec!["demo-key-12345".to_string()],
             enable_cors: true,
             log_level: default_server_log_level(),
@@ -631,21 +631,6 @@ fn default_doc_id_namespace() -> String {
 }
 fn true_value() -> bool {
     true
-}
-fn default_k() -> usize {
-    9
-}
-fn default_w() -> usize {
-    4
-}
-fn default_minhash_bands() -> usize {
-    16
-}
-fn default_minhash_rows() -> usize {
-    8
-}
-fn default_seed() -> u64 {
-    0xF00D_BAAD_F00D_BAAD
 }
 fn default_tier() -> String {
     "balanced".to_string()
@@ -683,29 +668,17 @@ fn default_match_mode() -> String {
 fn default_strategy() -> String {
     "weighted".to_string()
 }
+fn default_server_bind_addr() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_server_log_level() -> String {
+    "info".to_string()
+}
 fn default_max_results() -> usize {
     10
 }
 fn default_oversample() -> f32 {
     2.0
-}
-fn default_server_bind_addr() -> String {
-    "0.0.0.0".to_string()
-}
-fn default_server_port() -> u16 {
-    8080
-}
-fn default_server_timeout_secs() -> u64 {
-    30
-}
-fn default_server_max_body_size_mb() -> usize {
-    10
-}
-fn default_server_rate_limit() -> u32 {
-    100
-}
-fn default_server_log_level() -> String {
-    "info".to_string()
 }
 
 #[cfg(test)]

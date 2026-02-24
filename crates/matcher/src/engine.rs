@@ -127,40 +127,43 @@ impl Matcher {
         Ok((record, Some(fingerprint)))
     }
 
-    /// Run the full pipeline: ingest → canonical → semantic
-    fn run_semantic_pipeline(
+    /// Run ingest and canonical stages, returning the document.
+    fn run_ingest_canonical(
         &self,
         raw: &RawIngestRecord,
-    ) -> Result<SemanticEmbedding, MatchError> {
-        // Ingest stage
-        let canonical_record =
-            ingest(raw.clone(), &self.ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+    ) -> Result<canonical::CanonicalizedDocument, MatchError> {
+        let canonical_record = ingest(raw.clone(), &self.ingest_cfg)?;
 
-        // Get text payload
         let text = match canonical_record.normalized_payload {
             Some(CanonicalPayload::Text(ref t)) => t.as_str(),
             _ => return Err(MatchError::Pipeline("No text payload available".into())),
         };
 
-        // Canonical stage
-        let doc = canonicalize(&canonical_record.doc_id, text, &self.canonical_cfg)
-            .map_err(|e| MatchError::Canonical(e.to_string()))?;
+        Ok(canonicalize(
+            &canonical_record.doc_id,
+            text,
+            &self.canonical_cfg,
+        )?)
+    }
 
-        // Semantic stage - use existing runtime if available, otherwise create one
-        let embedding = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+    /// Run the full pipeline: ingest → canonical → semantic
+    fn run_semantic_pipeline(
+        &self,
+        raw: &RawIngestRecord,
+    ) -> Result<SemanticEmbedding, MatchError> {
+        let doc = self.run_ingest_canonical(raw)?;
+
+        Ok(if let Ok(handle) = tokio::runtime::Handle::try_current() {
             tokio::task::block_in_place(|| {
                 handle.block_on(async {
                     semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg).await
                 })
-            })
+            })?
         } else {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg).await
-            })
-        }
-        .map_err(|e| MatchError::Semantic(e.to_string()))?;
-
-        Ok(embedding)
+            })?
+        })
     }
 
     /// Run the full pipeline: ingest → canonical → perceptual
@@ -168,26 +171,10 @@ impl Matcher {
         &self,
         raw: &RawIngestRecord,
     ) -> Result<PerceptualFingerprint, MatchError> {
-        // Ingest stage
-        let canonical_record =
-            ingest(raw.clone(), &self.ingest_cfg).map_err(|e| MatchError::Ingest(e.to_string()))?;
+        let doc = self.run_ingest_canonical(raw)?;
 
-        // Get text payload
-        let text = match canonical_record.normalized_payload {
-            Some(CanonicalPayload::Text(ref t)) => t.as_str(),
-            _ => return Err(MatchError::Pipeline("No text payload available".into())),
-        };
-
-        // Canonical stage
-        let doc = canonicalize(&canonical_record.doc_id, text, &self.canonical_cfg)
-            .map_err(|e| MatchError::Canonical(e.to_string()))?;
-
-        // Perceptual stage
         let token_refs: Vec<&str> = doc.tokens.iter().map(|t| t.text.as_str()).collect();
-        let fingerprint = perceptualize_tokens(&token_refs, &self.perceptual_cfg)
-            .map_err(|e| MatchError::Perceptual(e.to_string()))?;
-
-        Ok(fingerprint)
+        Ok(perceptualize_tokens(&token_refs, &self.perceptual_cfg)?)
     }
 
     fn build_raw_record(&self, tenant_id: &str, doc_id: &str, text: &str) -> RawIngestRecord {
@@ -213,7 +200,7 @@ impl Matcher {
         embedding
             .vector
             .iter()
-            .map(|v| (v * scale).clamp(-128.0, 127.0) as i8)
+            .map(|v| (v * scale).clamp(-128.0f32, 127.0f32) as i8)
             .collect()
     }
 

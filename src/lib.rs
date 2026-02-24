@@ -438,34 +438,59 @@ impl StageContext {
     }
 }
 
-impl From<&RawIngestRecord> for StageContext {
-    fn from(record: &RawIngestRecord) -> Self {
-        Self {
-            record_id: record.id.clone(),
-            doc_id: record.metadata.doc_id.clone(),
-            tenant_id: record.metadata.tenant_id.clone(),
+/// Macro to generate `From<&T>` implementations for `StageContext`.
+///
+/// Reduces boilerplate when converting different record types into
+/// the common context type used for observability and error reporting.
+macro_rules! impl_stage_context_from {
+    ($type:ty, $record_id:expr, $doc_id:expr, $tenant_id:expr) => {
+        impl From<&$type> for StageContext {
+            fn from(val: &$type) -> Self {
+                Self {
+                    record_id: $record_id(val),
+                    doc_id: $doc_id(val),
+                    tenant_id: $tenant_id(val),
+                }
+            }
         }
-    }
+    };
 }
 
-impl From<&CanonicalIngestRecord> for StageContext {
-    fn from(record: &CanonicalIngestRecord) -> Self {
-        Self {
-            record_id: record.id.clone(),
-            doc_id: Some(record.doc_id.clone()),
-            tenant_id: Some(record.tenant_id.clone()),
-        }
-    }
-}
+impl_stage_context_from!(
+    RawIngestRecord,
+    |r: &RawIngestRecord| r.id.clone(),
+    |r: &RawIngestRecord| r.metadata.doc_id.clone(),
+    |r: &RawIngestRecord| r.metadata.tenant_id.clone()
+);
 
-impl From<&CanonicalizedDocument> for StageContext {
-    fn from(doc: &CanonicalizedDocument) -> Self {
-        Self {
-            record_id: doc.doc_id.clone(),
-            doc_id: Some(doc.doc_id.clone()),
-            tenant_id: None,
+impl_stage_context_from!(
+    CanonicalIngestRecord,
+    |r: &CanonicalIngestRecord| r.id.clone(),
+    |r: &CanonicalIngestRecord| Some(r.doc_id.clone()),
+    |r: &CanonicalIngestRecord| Some(r.tenant_id.clone())
+);
+
+impl_stage_context_from!(
+    CanonicalizedDocument,
+    |d: &CanonicalizedDocument| d.doc_id.clone(),
+    |d: &CanonicalizedDocument| Some(d.doc_id.clone()),
+    |_d: &CanonicalizedDocument| None
+);
+
+/// Macro to generate stage recording methods for `MetricsSpan`.
+///
+/// Reduces duplication when recording pipeline stage metrics and events.
+/// Generates methods like `record_ingest`, `record_canonical`, etc.
+macro_rules! record_stage {
+    ($method:ident, $error:ty, $recorder_method:ident) => {
+        fn $method(self, result: Result<(), $error>) {
+            let latency = self.start.elapsed();
+            self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
+            if let Some(recorder) = self.recorder {
+                recorder.$recorder_method(latency, result);
+            }
         }
-    }
+    };
 }
 
 struct MetricsSpan {
@@ -499,53 +524,12 @@ impl MetricsSpan {
         update(&mut self.context);
     }
 
-    fn record_ingest(self, result: Result<(), IngestError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_ingest(latency, result);
-        }
-    }
-
-    fn record_canonical(self, result: Result<(), PipelineError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_canonical(latency, result);
-        }
-    }
-
-    fn record_perceptual(self, result: Result<(), PerceptualError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_perceptual(latency, result);
-        }
-    }
-
-    fn record_semantic(self, result: Result<(), SemanticError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_semantic(latency, result);
-        }
-    }
-
-    fn record_index(self, result: Result<(), IndexError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_index(latency, result);
-        }
-    }
-
-    fn record_match(self, result: Result<(), MatchError>) {
-        let latency = self.start.elapsed();
-        self.emit_event(latency, result.as_ref().err().map(|e| e.to_string()));
-        if let Some(recorder) = self.recorder {
-            recorder.record_match(latency, result);
-        }
-    }
+    record_stage!(record_ingest, IngestError, record_ingest);
+    record_stage!(record_canonical, PipelineError, record_canonical);
+    record_stage!(record_perceptual, PerceptualError, record_perceptual);
+    record_stage!(record_semantic, SemanticError, record_semantic);
+    record_stage!(record_index, IndexError, record_index);
+    record_stage!(record_match, MatchError, record_match);
 
     fn emit_event(&self, latency: Duration, error: Option<String>) {
         if let Some(logger) = self.logger.as_ref() {
@@ -610,8 +594,7 @@ pub fn process_pipeline(
     PipelineError,
 > {
     // --- Ingest Stage ---
-    let mut ingest_metrics =
-        MetricsSpan::start(PipelineStage::Ingest, StageContext::from(&raw));
+    let mut ingest_metrics = MetricsSpan::start(PipelineStage::Ingest, StageContext::from(&raw));
     let canonical_record = match ingest(raw, ingest_cfg) {
         Ok(record) => record,
         Err(err) => {
@@ -726,7 +709,11 @@ pub fn process_pipeline(
                 "Warning: No Tokio runtime available for semantic processing for doc {}, using stub embedding",
                 doc.doc_id
             );
-            Ok(semantic::make_stub_embedding(&doc.doc_id, &doc.canonical_text, cfg))
+            Ok(semantic::make_stub_embedding(
+                &doc.doc_id,
+                &doc.canonical_text,
+                cfg,
+            ))
         };
 
         match result {
