@@ -620,66 +620,38 @@ impl Default for ServerYamlConfig {
 }
 
 // Helper functions for serde defaults
-fn default_version() -> u32 {
-    1
+macro_rules! default_fn {
+    ($name:ident, $ty:ty, $val:expr) => {
+        fn $name() -> $ty {
+            $val
+        }
+    };
 }
-fn default_tenant_id() -> String {
-    "default".to_string()
-}
-fn default_doc_id_namespace() -> String {
+
+default_fn!(default_version, u32, 1);
+default_fn!(default_tenant_id, String, "default".to_string());
+default_fn!(
+    default_doc_id_namespace,
+    String,
     "6ba7b810-9dad-11d1-80b4-00c04fd430c8".to_string()
-}
-fn true_value() -> bool {
-    true
-}
-fn default_tier() -> String {
-    "balanced".to_string()
-}
-fn default_mode() -> String {
-    "fast".to_string()
-}
-fn default_model_name() -> String {
-    "bge-small-en-v1.5".to_string()
-}
-fn default_timeout() -> Option<u64> {
-    Some(30)
-}
-fn default_device() -> String {
-    "cpu".to_string()
-}
-fn default_backend() -> String {
-    "in_memory".to_string()
-}
-fn default_compression() -> String {
-    "zstd".to_string()
-}
-fn default_quantization() -> String {
-    "i8".to_string()
-}
-fn default_policy_id() -> String {
-    "default-policy".to_string()
-}
-fn default_policy_version() -> String {
-    "v1".to_string()
-}
-fn default_match_mode() -> String {
-    "semantic".to_string()
-}
-fn default_strategy() -> String {
-    "weighted".to_string()
-}
-fn default_server_bind_addr() -> String {
-    "0.0.0.0".to_string()
-}
-fn default_server_log_level() -> String {
-    "info".to_string()
-}
-fn default_max_results() -> usize {
-    10
-}
-fn default_oversample() -> f32 {
-    2.0
-}
+);
+default_fn!(true_value, bool, true);
+default_fn!(default_tier, String, "balanced".to_string());
+default_fn!(default_mode, String, "fast".to_string());
+default_fn!(default_model_name, String, "bge-small-en-v1.5".to_string());
+default_fn!(default_timeout, Option<u64>, Some(30));
+default_fn!(default_device, String, "cpu".to_string());
+default_fn!(default_backend, String, "in_memory".to_string());
+default_fn!(default_compression, String, "zstd".to_string());
+default_fn!(default_quantization, String, "i8".to_string());
+default_fn!(default_policy_id, String, "default-policy".to_string());
+default_fn!(default_policy_version, String, "v1".to_string());
+default_fn!(default_match_mode, String, "semantic".to_string());
+default_fn!(default_strategy, String, "weighted".to_string());
+default_fn!(default_server_bind_addr, String, "0.0.0.0".to_string());
+default_fn!(default_server_log_level, String, "info".to_string());
+default_fn!(default_max_results, usize, 10);
+default_fn!(default_oversample, f32, 2.0);
 
 #[cfg(test)]
 mod tests {

@@ -416,8 +416,7 @@ impl UfpIndex {
                         let quantized = entry.value();
 
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> =
-                            quantized.iter().map(|&v| v as f32 / 100.0).collect();
+                        let float_vec: Vec<f32> = Self::dequantize(quantized);
                         dimension = float_vec.len();
                         vectors_to_insert.push((hash, float_vec));
                     }
@@ -446,10 +445,9 @@ impl UfpIndex {
         out
     }
 
-    /// Quantize using a configured strategy.
-    /// This allows for different quantization strategies to be used in the future.
-    pub fn quantize_with_strategy(vec: &Array1<f32>, cfg: &QuantizationConfig) -> QuantizedVec {
-        Self::quantize(vec, cfg.scale())
+    /// Dequantize i8 embeddings -> f32 using scale of 100.0.
+    fn dequantize(embedding: &[i8]) -> Vec<f32> {
+        embedding.iter().map(|&v| v as f32 / 100.0).collect()
     }
 
     /// Insert or update a record.
@@ -476,8 +474,7 @@ impl UfpIndex {
                 if let Ok(mut ann_lock) = self.ann_index.try_lock() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> =
-                            embedding.iter().map(|&v| v as f32 / 100.0).collect();
+                        let float_vec: Vec<f32> = Self::dequantize(embedding);
                         let _ = ann.insert(rec.canonical_hash.clone(), float_vec);
                     }
                 }
@@ -559,8 +556,7 @@ impl UfpIndex {
                 if let Ok(mut ann_lock) = self.ann_index.try_lock() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> =
-                            embedding.iter().map(|&v| v as f32 / 100.0).collect();
+                        let float_vec: Vec<f32> = Self::dequantize(embedding);
                         let _ = ann.insert(canonical_hash.to_string(), float_vec);
                         ann_needs_rebuild = true;
                     }
