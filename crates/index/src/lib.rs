@@ -354,7 +354,8 @@ pub struct UfpIndex {
     /// Lock-free index for semantic embeddings enabling concurrent access
     semantic_index: DashMap<String, QuantizedVec>,
     /// ANN index for fast approximate semantic search (HNSW)
-    ann_index: std::sync::Mutex<Option<ann::AnnIndex>>,
+    /// Uses RwLock to allow concurrent reads during search while still enabling exclusive writes during rebuild
+    ann_index: std::sync::RwLock<Option<ann::AnnIndex>>,
     /// Tracks if ANN index needs rebuilding
     ann_needs_rebuild: std::sync::atomic::AtomicBool,
 }
@@ -382,7 +383,7 @@ impl UfpIndex {
             cfg,
             perceptual_index: DashMap::new(),
             semantic_index: DashMap::new(),
-            ann_index: std::sync::Mutex::new(ann_index),
+            ann_index: std::sync::RwLock::new(ann_index),
             ann_needs_rebuild: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -405,7 +406,7 @@ impl UfpIndex {
             .load(std::sync::atomic::Ordering::Relaxed)
             && self.should_use_ann()
         {
-            if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+            if let Ok(mut ann_lock) = self.ann_index.try_write() {
                 if let Some(ref mut ann) = *ann_lock {
                     // Collect all embeddings from DashMap
                     let mut vectors_to_insert: Vec<(String, Vec<f32>)> = Vec::new();
@@ -471,7 +472,7 @@ impl UfpIndex {
 
             // Also insert into ANN index if enabled
             if self.cfg.ann.enabled {
-                if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+                if let Ok(mut ann_lock) = self.ann_index.try_write() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
                         let float_vec: Vec<f32> = Self::dequantize(embedding);
@@ -553,7 +554,7 @@ impl UfpIndex {
 
             // Also insert into ANN index if enabled
             if self.cfg.ann.enabled {
-                if let Ok(mut ann_lock) = self.ann_index.try_lock() {
+                if let Ok(mut ann_lock) = self.ann_index.try_write() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
                         let float_vec: Vec<f32> = Self::dequantize(embedding);

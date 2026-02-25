@@ -660,7 +660,9 @@ pub fn process_pipeline(
     }
 
     // --- Perceptual Stage ---
-    let fingerprint = if stage == PipelineStageConfig::Perceptual || perceptual_cfg.is_some() {
+    // Only run perceptual if stage is Perceptual AND perceptual config is provided.
+    // Don't run perceptual if stage is Semantic (even if perceptual_cfg is accidentally provided).
+    let fingerprint = if stage == PipelineStageConfig::Perceptual {
         let cfg = perceptual_cfg.ok_or(PipelineError::Perceptual(
             perceptual::PerceptualError::InvalidConfigVersion { version: 0 },
         ))?;
@@ -690,7 +692,8 @@ pub fn process_pipeline(
     }
 
     // --- Semantic Stage ---
-    let embedding = if stage == PipelineStageConfig::Semantic || semantic_cfg.is_some() {
+    // Only run semantic if stage is Semantic AND semantic config is provided.
+    let embedding = if stage == PipelineStageConfig::Semantic {
         let cfg = semantic_cfg.ok_or(PipelineError::Semantic(
             semantic::SemanticError::Inference("missing semantic config".into()),
         ))?;

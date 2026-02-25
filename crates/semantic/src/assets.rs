@@ -5,7 +5,7 @@ use std::{
 
 use crate::{SemanticConfig, SemanticError};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ModelAssets {
     pub(crate) model_path: PathBuf,
     pub(crate) tokenizer_path: PathBuf,

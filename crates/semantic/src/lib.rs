@@ -125,10 +125,11 @@ pub async fn semanticize(
     };
 
     // --- Inference ---
-    // Get a handle to the cached model, loading it if necessary.
+    // NOTE: ONNX inference is CPU-intensive and may block the async runtime for 10-100ms.
+    // Callers should wrap this in `tokio::task::spawn_blocking` if running in a latency-sensitive
+    // async context. We don't do this internally because the ONNX Session is not `Send`.
     let handle = get_or_load_model_handle(&assets)?;
     let texts = [text];
-    // Run the ONNX model to get the embeddings.
     let mut vectors = run_onnx_embeddings(
         handle.as_ref(),
         &texts,
@@ -208,6 +209,8 @@ where
     };
 
     // --- Inference ---
+    // NOTE: ONNX inference is CPU-intensive and may block the async runtime.
+    // See note in `semanticize` above for details.
     let handle = get_or_load_model_handle(&assets)?;
     let text_refs: Vec<&str> = docs.iter().map(|(_, text)| text.as_ref()).collect();
     let embeddings = run_onnx_embeddings(

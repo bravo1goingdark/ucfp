@@ -23,7 +23,7 @@ zstd = "0.13"
 ndarray = "0.17"
 log = "0.4"
 thiserror = "2.0.17"
-anyhow = "1.0.100"
+anyhow = "1.0"
 hashbrown = "0.16.0"
 dashmap = "6.1"
 # ANN is always available but runtime configurable

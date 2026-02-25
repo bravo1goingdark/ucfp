@@ -195,9 +195,13 @@ Process a single document through the fingerprinting pipeline.
 **Error Codes:**
 - `400 Bad Request` - Invalid JSON or missing required fields
 - `401 Unauthorized` - Missing or invalid API key
-- `413 Payload Too Large` - Text exceeds max size
+- `413 Payload Too Large` - Text exceeds max size (10 MB per document)
 - `422 PIPELINE_ERROR` - Processing failed
 - `429 Rate Limit Exceeded` - Too many requests
+
+**Limits:**
+- Maximum text size: **10 MB** per document
+- Maximum batch size: **1000 documents** per request
 
 **Example:**
 ```bash
@@ -265,6 +269,10 @@ Process multiple documents in a single request.
   ]
 }
 ```
+
+**Limits:**
+- Maximum documents per batch: **1000**
+- Maximum text size per document: **10 MB**
 
 **Performance Notes:**
 - Documents are processed concurrently (up to 10 at a time) for optimal throughput

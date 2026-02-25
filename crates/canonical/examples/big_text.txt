@@ -1,0 +1,25 @@
+    In 2025, the Universal Content Fingerprint (UCFP) project aims to create a
+    truly global standard for identifying and linking *any* digital content.
+    
+    From simple text snippets — like this one — to complex multi-modal data
+    (videos, images, PDFs, and more), the system will extract canonical,
+    perceptual, structural, and semantic fingerprints.
+
+    Why? Because duplication, plagiarism, and untracked reuse have become
+    universal problems — especially in AI training data. By providing a
+    language-agnostic, deterministic pipeline for fingerprinting, UCFP makes
+    it possible to know when two pieces of content *mean* the same thing,
+    even if they look different.
+
+    The prototype includes:
+        - Canonicalizer: normalizes Unicode, whitespace, and case.
+        - Perceptual layer: shingles, winnows, and hashes text regions.
+        - RocksDB-based index: stores token-to-document mappings.
+        - Matching service: retrieves and ranks similar documents.
+    
+    Developers can use the Rust crate directly, or call the REST/gRPC APIs
+    from Python, Node.js, Go, or Java bindings.
+
+    Visit https://ucfp.dev/docs for updates, or contact team@ucfp.dev.
+
+        -- The UCFP Engineering Team (v0.3-alpha)

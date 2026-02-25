@@ -5,6 +5,22 @@ All notable changes to the UCFP Server crate will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Request Size Limits**: Added explicit limits to prevent DoS attacks
+  - Maximum text size: 10 MB per document
+  - Maximum batch size: 1000 documents
+- **Matcher Runtime Panic**: Fixed potential panic when no Tokio runtime is available
+- **HNSW Index Locking**: Changed Mutex to RwLock for concurrent search during rebuilds
+- **Pipeline Stage Logic**: Fixed wasteful processing where both perceptual and semantic could run unintentionally
+
+### Documentation
+
+- Added request limits documentation to API.md and README.md
+- Added blocking behavior note for ONNX inference in semantic docs
+
 ## [0.2.0] - 2025-02-02
 
 ### Performance Improvements

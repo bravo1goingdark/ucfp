@@ -153,17 +153,15 @@ impl Matcher {
     ) -> Result<SemanticEmbedding, MatchError> {
         let doc = self.run_ingest_canonical(raw)?;
 
-        Ok(if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            tokio::task::block_in_place(|| {
-                handle.block_on(async {
-                    semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg).await
-                })
-            })?
-        } else {
-            tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| {
+            MatchError::Pipeline("No Tokio runtime available for semantic processing".into())
+        })?;
+
+        Ok(tokio::task::block_in_place(|| {
+            handle.block_on(async {
                 semanticize(&doc.doc_id, &doc.canonical_text, &self.semantic_cfg).await
-            })?
-        })
+            })
+        })?)
     }
 
     /// Run the full pipeline: ingest → canonical → perceptual

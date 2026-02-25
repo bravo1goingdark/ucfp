@@ -529,6 +529,33 @@ let cfg = SemanticConfig {
 };
 ```
 
+### 6. Use `spawn_blocking` for ONNX in Async Contexts
+
+**Important:** ONNX inference is CPU-intensive and may block the async runtime for 10-100ms. 
+When using `semanticize` or `semanticize_batch` in an async context (e.g., Tokio), wrap the calls 
+in `spawn_blocking` to prevent thread pool exhaustion:
+
+```rust
+use tokio::task;
+
+// For single document
+let embedding = task::spawn_blocking(move || {
+    // Note: This won't work directly due to thread-local cache
+    // See integration guide for proper patterns
+}).await??;
+
+// Better approach: Use API mode or dedicated thread pool
+let cfg = SemanticConfig {
+    mode: "api".into(),  // API mode is naturally async
+    ..Default::default()
+};
+let embedding = semanticize(doc_id, text, &cfg).await?;
+```
+
+**Note:** The ONNX Session is not `Send`, so it cannot be moved across threads. 
+The crate uses thread-local caching for performance. For truly non-blocking ONNX inference,
+consider using the **API mode** which makes HTTP requests instead of local inference.
+
 ---
 
 ## Performance

@@ -228,7 +228,7 @@ impl UfpIndex {
                 if let Some(query_embedding) = query_embedding {
                     if self.should_use_ann() {
                         // Use ANN for approximate search
-                        if let Ok(ann_lock) = self.ann_index.try_lock() {
+                        if let Ok(ann_lock) = self.ann_index.try_read() {
                             if let Some(ref ann) = *ann_lock {
                                 // Convert query from i8 to f32
                                 let query_f32: Vec<f32> =

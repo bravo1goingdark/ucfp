@@ -217,6 +217,10 @@ curl -X POST http://localhost:8080/api/v1/process \
   }'
 ```
 
+**API Limits:**
+- Maximum text size: **10 MB** per document
+- Maximum batch size: **1000 documents**
+
 See [`crates/server/API.md`](crates/server/API.md) for full API reference.
 
 ## Roadmap

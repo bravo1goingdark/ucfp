@@ -212,8 +212,8 @@ fn build_index_with_docs() -> Result<(Matcher, String, String), MatchError> {
     Ok((matcher, doc_a_can.sha256_hex, doc_b_can.sha256_hex))
 }
 
-#[test]
-fn semantic_match_returns_results() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn semantic_match_returns_results() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -243,8 +243,8 @@ fn semantic_match_returns_results() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn tenant_isolation_enforced() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn tenant_isolation_enforced() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -304,8 +304,8 @@ impl MatchMetrics for RecordingMetrics {
     }
 }
 
-#[test]
-fn metrics_recorder_observes_matches() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn metrics_recorder_observes_matches() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
     let metrics = Arc::new(RecordingMetrics::new());
     set_match_metrics(Some(metrics.clone()));
@@ -368,8 +368,8 @@ fn perceptual_match_returns_results() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn hybrid_match_returns_results() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn hybrid_match_returns_results() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -400,8 +400,8 @@ fn hybrid_match_returns_results() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn exact_hash_match_returns_perfect_score() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn exact_hash_match_returns_perfect_score() -> Result<(), MatchError> {
     let (matcher, hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -432,8 +432,8 @@ fn exact_hash_match_returns_perfect_score() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn min_score_threshold_filters_results() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn min_score_threshold_filters_results() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     // Query with a high minimum score - should filter out low-similarity results
@@ -464,8 +464,8 @@ fn min_score_threshold_filters_results() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn max_results_limits_output() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn max_results_limits_output() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -494,8 +494,8 @@ fn max_results_limits_output() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn and_strategy_requires_both_conditions() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn and_strategy_requires_both_conditions() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -536,8 +536,8 @@ fn and_strategy_requires_both_conditions() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn or_strategy_returns_union() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn or_strategy_returns_union() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -573,8 +573,8 @@ fn or_strategy_returns_union() -> Result<(), MatchError> {
     Ok(())
 }
 
-#[test]
-fn weighted_strategy_combines_scores() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn weighted_strategy_combines_scores() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     let req = MatchRequest {
@@ -669,8 +669,8 @@ fn empty_query_text_rejected() {
     }
 }
 
-#[test]
-fn without_tenant_enforcement_returns_all() -> Result<(), MatchError> {
+#[tokio::test(flavor = "multi_thread")]
+async fn without_tenant_enforcement_returns_all() -> Result<(), MatchError> {
     let (matcher, _hash_a, _hash_b) = build_index_with_docs()?;
 
     // Query with tenant enforcement disabled

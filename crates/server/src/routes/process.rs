@@ -13,6 +13,11 @@ use ucfp::{
     SemanticConfig,
 };
 
+/// Maximum allowed text size for a single document (10 MB)
+const MAX_TEXT_SIZE_BYTES: usize = 10 * 1024 * 1024;
+/// Maximum number of documents in a batch
+const MAX_BATCH_SIZE: usize = 1000;
+
 /// Request to process a single document
 #[derive(Debug, Deserialize)]
 pub struct ProcessRequest {
@@ -145,6 +150,13 @@ pub async fn process_document(
     State(state): State<Arc<ServerState>>,
     Json(request): Json<ProcessRequest>,
 ) -> ServerResult<impl IntoResponse> {
+    // Validate text size
+    if request.text.len() > MAX_TEXT_SIZE_BYTES {
+        return Err(ServerError::PayloadTooLarge(
+            MAX_TEXT_SIZE_BYTES / 1024 / 1024,
+        ));
+    }
+
     let doc_id = request
         .doc_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -306,6 +318,27 @@ pub async fn process_batch(
     Json(request): Json<BatchProcessRequest>,
 ) -> ServerResult<impl IntoResponse> {
     const CONCURRENCY: usize = 10;
+
+    // Validate batch size
+    if request.documents.len() > MAX_BATCH_SIZE {
+        return Err(ServerError::BadRequest(format!(
+            "Batch size exceeds maximum of {} documents (got {})",
+            MAX_BATCH_SIZE,
+            request.documents.len()
+        )));
+    }
+
+    // Validate individual document sizes
+    for (idx, doc) in request.documents.iter().enumerate() {
+        if doc.text.len() > MAX_TEXT_SIZE_BYTES {
+            return Err(ServerError::BadRequest(format!(
+                "Document at index {} exceeds maximum size of {} bytes (got {} bytes)",
+                idx,
+                MAX_TEXT_SIZE_BYTES,
+                doc.text.len()
+            )));
+        }
+    }
 
     let ingest_cfg = IngestConfig::default();
     let canonical_cfg = CanonicalizeConfig::default();

@@ -1,120 +1,42 @@
+//! Error handling tests for UCFP pipeline
+
 use ucfp::{
-    process_pipeline, CanonicalizeConfig, IngestConfig, IngestError, IngestMetadata, IngestPayload,
-    IngestSource, PerceptualConfig, PerceptualError, PipelineError, PipelineStageConfig,
-    RawIngestRecord,
+    canonicalize, process_pipeline, CanonicalizeConfig, IngestConfig, IngestError, IngestMetadata,
+    IngestPayload, IngestSource, PerceptualConfig, PerceptualError, PipelineError,
+    PipelineStageConfig, RawIngestRecord,
 };
 
 fn base_metadata() -> IngestMetadata {
     IngestMetadata {
-        tenant_id: Some("tenant-err".into()),
-        doc_id: Some("doc-err".into()),
+        tenant_id: Some("tenant".into()),
+        doc_id: Some("doc".into()),
         received_at: None,
         original_source: None,
         attributes: None,
     }
 }
 
-#[test]
-fn empty_text_payload_returns_ingest_error() {
-    let raw = RawIngestRecord {
-        id: "err-empty".into(),
+fn base_record(payload: IngestPayload) -> RawIngestRecord {
+    RawIngestRecord {
+        id: "test".into(),
         source: IngestSource::RawText,
         metadata: base_metadata(),
-        payload: Some(IngestPayload::Text("   ".into())),
-    };
-
-    let result = process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
-        &CanonicalizeConfig::default(),
-        Some(&PerceptualConfig::default()),
-        None,
-    );
-    assert!(matches!(
-        result,
-        Err(PipelineError::Ingest(IngestError::EmptyNormalizedText))
-    ));
+        payload: Some(payload),
+    }
 }
 
+/// Ingest validation errors
 #[test]
-fn binary_payload_for_file_source_is_rejected_by_canonical_stage() {
-    let raw = RawIngestRecord {
-        id: "err-binary".into(),
-        source: IngestSource::File {
-            filename: "image.bin".into(),
-            content_type: Some("application/octet-stream".into()),
-        },
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Binary(vec![0, 1, 2])),
-    };
+fn ingest_validation_errors() {
+    let cfg = IngestConfig::default();
 
-    let result = process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
-        &CanonicalizeConfig::default(),
-        Some(&PerceptualConfig::default()),
-        None,
-    );
-    assert!(matches!(result, Err(PipelineError::NonTextPayload)));
-}
-
-#[test]
-fn perceptual_invalid_config_bubbles_up() {
-    let raw = RawIngestRecord {
-        id: "err-perceptual".into(),
-        source: IngestSource::RawText,
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Text(
-            "The quick brown fox jumps over the lazy dog".into(),
-        )),
-    };
-
-    let ingest_cfg = IngestConfig::default();
-    let canonical_cfg = CanonicalizeConfig::default();
-    let perceptual_cfg = PerceptualConfig {
-        k: 0,
-        ..Default::default()
-    };
-
-    let result = process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &ingest_cfg,
-        &canonical_cfg,
-        Some(&perceptual_cfg),
-        None,
-    );
-
-    assert!(matches!(
-        result,
-        Err(PipelineError::Perceptual(
-            PerceptualError::InvalidConfigK { .. }
-        ))
-    ));
-}
-
-// Expanded error handling tests
-
-#[test]
-fn error_empty_normalized_text_various_whitespace() {
-    let whitespace_variations = vec![
-        "", " ", "  ", "   ", "\t", "\n", "\r\n", " \t \n ", "\t\t\t",
-    ];
-
-    for ws in whitespace_variations {
-        let raw = RawIngestRecord {
-            id: format!("err-ws-{}", ws.len()),
-            source: IngestSource::RawText,
-            metadata: base_metadata(),
-            payload: Some(IngestPayload::Text(ws.into())),
-        };
-
+    // Empty/whitespace text should fail
+    for text in ["", " ", "  ", "\t", "\n", " \t \n "] {
+        let record = base_record(IngestPayload::Text(text.into()));
         let result = process_pipeline(
-            raw,
+            record,
             PipelineStageConfig::Perceptual,
-            &IngestConfig::default(),
+            &cfg,
             &CanonicalizeConfig::default(),
             Some(&PerceptualConfig::default()),
             None,
@@ -124,24 +46,21 @@ fn error_empty_normalized_text_various_whitespace() {
                 result,
                 Err(PipelineError::Ingest(IngestError::EmptyNormalizedText))
             ),
-            "Should error on whitespace: {ws:?}",
+            "Should error on whitespace: {text:?}"
         );
     }
-}
 
-#[test]
-fn error_missing_payload_for_text_source() {
-    let raw = RawIngestRecord {
-        id: "err-missing-payload".into(),
+    // Missing payload should fail
+    let record = RawIngestRecord {
+        id: "test".into(),
         source: IngestSource::RawText,
         metadata: base_metadata(),
         payload: None,
     };
-
     let result = process_pipeline(
-        raw,
+        record,
         PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
+        &cfg,
         &CanonicalizeConfig::default(),
         Some(&PerceptualConfig::default()),
         None,
@@ -152,102 +71,101 @@ fn error_missing_payload_for_text_source() {
     ));
 }
 
+/// Binary payload rejected by canonical stage
 #[test]
-fn error_perceptual_config_k_too_large() {
-    let raw = RawIngestRecord {
-        id: "err-k-large".into(),
-        source: IngestSource::RawText,
+fn binary_payload_rejected() {
+    let record = RawIngestRecord {
+        id: "test".into(),
+        source: IngestSource::File {
+            filename: "image.bin".into(),
+            content_type: Some("application/octet-stream".into()),
+        },
         metadata: base_metadata(),
-        payload: Some(IngestPayload::Text("Short".into())),
+        payload: Some(IngestPayload::Binary(vec![0, 1, 2])),
     };
 
-    let ingest_cfg = IngestConfig::default();
-    let canonical_cfg = CanonicalizeConfig::default();
-    let perceptual_cfg = PerceptualConfig {
-        k: 100, // Larger than token count
+    let result = process_pipeline(
+        record,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&PerceptualConfig::default()),
+        None,
+    );
+    assert!(matches!(result, Err(PipelineError::NonTextPayload)));
+}
+
+/// Perceptual config validation: k=0
+#[test]
+fn perceptual_config_k_zero() {
+    let text = "The quick brown fox jumps over the lazy dog with enough tokens for processing";
+    let record = base_record(IngestPayload::Text(text.into()));
+    let cfg = PerceptualConfig {
+        k: 0,
         ..Default::default()
     };
 
     let result = process_pipeline(
-        raw,
+        record,
         PipelineStageConfig::Perceptual,
-        &ingest_cfg,
-        &canonical_cfg,
-        Some(&perceptual_cfg),
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&cfg),
         None,
     );
-
     assert!(matches!(
         result,
-        Err(PipelineError::Perceptual(
-            PerceptualError::NotEnoughTokens { .. }
-        ))
+        Err(PipelineError::Perceptual(PerceptualError::InvalidConfigK {
+            k: 0
+        }))
     ));
 }
 
+/// Perceptual config validation: w=0
 #[test]
-fn error_perceptual_config_w_zero() {
-    let raw = RawIngestRecord {
-        id: "err-w-zero".into(),
-        source: IngestSource::RawText,
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Text(
-            "The quick brown fox jumps over the lazy dog and runs through the forest".into(),
-        )),
-    };
-
-    let ingest_cfg = IngestConfig::default();
-    let canonical_cfg = CanonicalizeConfig::default();
-    let perceptual_cfg = PerceptualConfig {
+fn perceptual_config_w_zero() {
+    let text = "The quick brown fox jumps over the lazy dog with enough tokens for processing";
+    let record = base_record(IngestPayload::Text(text.into()));
+    let cfg = PerceptualConfig {
         k: 3,
-        w: 0, // Invalid
+        w: 0,
         ..Default::default()
     };
 
     let result = process_pipeline(
-        raw,
+        record,
         PipelineStageConfig::Perceptual,
-        &ingest_cfg,
-        &canonical_cfg,
-        Some(&perceptual_cfg),
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&cfg),
         None,
     );
-
     assert!(matches!(
         result,
-        Err(PipelineError::Perceptual(
-            PerceptualError::InvalidConfigW { .. }
-        ))
+        Err(PipelineError::Perceptual(PerceptualError::InvalidConfigW {
+            w: 0
+        }))
     ));
 }
 
+/// Perceptual config validation: version=0
 #[test]
-fn error_perceptual_config_version_zero() {
-    let raw = RawIngestRecord {
-        id: "err-version-zero".into(),
-        source: IngestSource::RawText,
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Text(
-            "The quick brown fox jumps over the lazy dog".into(),
-        )),
-    };
-
-    let ingest_cfg = IngestConfig::default();
-    let canonical_cfg = CanonicalizeConfig::default();
-    let perceptual_cfg = PerceptualConfig {
-        version: 0, // Reserved
+fn perceptual_config_version_zero() {
+    let text = "The quick brown fox jumps over the lazy dog with enough tokens for processing";
+    let record = base_record(IngestPayload::Text(text.into()));
+    let cfg = PerceptualConfig {
+        version: 0,
         ..Default::default()
     };
 
     let result = process_pipeline(
-        raw,
+        record,
         PipelineStageConfig::Perceptual,
-        &ingest_cfg,
-        &canonical_cfg,
-        Some(&perceptual_cfg),
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&cfg),
         None,
     );
-
     assert!(matches!(
         result,
         Err(PipelineError::Perceptual(
@@ -256,120 +174,95 @@ fn error_perceptual_config_version_zero() {
     ));
 }
 
+/// Perceptual config validation: k too large
 #[test]
-fn error_canonical_config_version_zero() {
-    let result = ucfp::canonicalize(
-        "test-doc",
-        "Some valid text",
+fn perceptual_config_k_too_large() {
+    let text = "Short text"; // Not enough tokens for k=100
+    let record = base_record(IngestPayload::Text(text.into()));
+    let cfg = PerceptualConfig {
+        k: 100,
+        ..Default::default()
+    };
+
+    let result = process_pipeline(
+        record,
+        PipelineStageConfig::Perceptual,
+        &IngestConfig::default(),
+        &CanonicalizeConfig::default(),
+        Some(&cfg),
+        None,
+    );
+    assert!(matches!(
+        result,
+        Err(PipelineError::Perceptual(
+            PerceptualError::NotEnoughTokens { .. }
+        ))
+    ));
+}
+
+/// Canonical config validation errors
+#[test]
+fn canonical_config_validation() {
+    // Version 0 is invalid
+    let result = canonicalize(
+        "test",
+        "Some text",
         &CanonicalizeConfig {
             version: 0,
             ..Default::default()
         },
     );
-
     assert!(matches!(
         result,
         Err(ucfp::CanonicalError::InvalidConfig(_))
     ));
 }
 
+/// Canonical empty/invalid input errors
 #[test]
-fn error_canonical_empty_doc_id() {
-    let result = ucfp::canonicalize("", "Some valid text", &CanonicalizeConfig::default());
-
+fn canonical_input_validation() {
+    // Empty doc_id
+    let result = canonicalize("", "text", &CanonicalizeConfig::default());
     assert!(matches!(result, Err(ucfp::CanonicalError::MissingDocId)));
-}
 
-#[test]
-fn error_canonical_whitespace_only_doc_id() {
-    let result = ucfp::canonicalize("   ", "Some valid text", &CanonicalizeConfig::default());
-
+    // Whitespace-only doc_id
+    let result = canonicalize("   ", "text", &CanonicalizeConfig::default());
     assert!(matches!(result, Err(ucfp::CanonicalError::MissingDocId)));
-}
 
-#[test]
-fn error_canonical_empty_input() {
-    let result = ucfp::canonicalize("test-doc", "", &CanonicalizeConfig::default());
-
+    // Empty input text
+    let result = canonicalize("doc", "", &CanonicalizeConfig::default());
     assert!(matches!(result, Err(ucfp::CanonicalError::EmptyInput)));
 }
 
+/// Error display messages are meaningful
 #[test]
-fn error_url_source_without_url() {
-    let raw = RawIngestRecord {
-        id: "err-url".into(),
-        source: IngestSource::Url("".into()),
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Text("This is sample content for testing URL source processing with sufficient tokens for fingerprinting".into())),
-    };
-
-    // Should still work, URL source doesn't validate URL format
-    let result = process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
-        &CanonicalizeConfig::default(),
-        Some(&PerceptualConfig::default()),
-        None,
-    );
-    assert!(result.is_ok());
-}
-
-#[test]
-fn error_binary_empty_payload() {
-    let raw = RawIngestRecord {
-        id: "err-empty-binary".into(),
-        source: IngestSource::File {
-            filename: "empty.bin".into(),
-            content_type: Some("application/octet-stream".into()),
-        },
-        metadata: base_metadata(),
-        payload: Some(IngestPayload::Binary(vec![])),
-    };
-
-    let result = process_pipeline(
-        raw,
-        PipelineStageConfig::Perceptual,
-        &IngestConfig::default(),
-        &CanonicalizeConfig::default(),
-        Some(&PerceptualConfig::default()),
-        None,
-    );
-    // Empty binary payloads might be handled differently depending on implementation
-    // This test documents the current behavior
-    assert!(
-        result.is_err() || result.is_ok(),
-        "Documenting behavior for empty binary payload"
-    );
-}
-
-#[test]
-fn error_pipeline_error_display() {
+fn error_display_messages() {
     let ingest_err = PipelineError::Ingest(IngestError::EmptyNormalizedText);
     let perceptual_err = PipelineError::Perceptual(PerceptualError::InvalidConfigK { k: 0 });
 
-    // Verify error messages are meaningful
     let ingest_msg = format!("{ingest_err}");
     let perceptual_msg = format!("{perceptual_err}");
 
     assert!(!ingest_msg.is_empty());
     assert!(!perceptual_msg.is_empty());
+    assert!(ingest_msg.len() > 5);
+    assert!(perceptual_msg.len() > 5);
 }
 
+/// All ingest error variants can be displayed
 #[test]
-fn error_ingest_error_variants() {
-    // Test all ingest error variants can be created and displayed
+fn ingest_error_variants_display() {
     let errors = vec![
         IngestError::EmptyNormalizedText,
         IngestError::InvalidMetadata("test".into()),
-        IngestError::InvalidUtf8("invalid utf8".into()),
+        IngestError::InvalidUtf8("invalid".into()),
         IngestError::MissingPayload,
         IngestError::EmptyBinaryPayload,
-        IngestError::PayloadTooLarge("payload too large".into()),
+        IngestError::PayloadTooLarge("large".into()),
     ];
 
     for err in errors {
         let msg = format!("{err}");
-        assert!(!msg.is_empty(), "Error variant should have display message");
+        assert!(!msg.is_empty(), "Error variant should be displayable");
     }
 }

@@ -70,6 +70,10 @@ Configuration can be provided via:
 | `timeout_secs` | `30` | Request timeout in seconds |
 | `max_body_size_mb` | `10` | Maximum request body size |
 | `rate_limit_per_minute` | `100` | Rate limit per API key |
+
+**Request Limits:**
+- Maximum text size per document: **10 MB**
+- Maximum documents per batch: **1000**
 | `api_keys` | `[]` | Valid API keys (empty = demo key) |
 | `enable_cors` | `true` | Enable CORS headers |
 | `log_level` | `info` | Logging level |
