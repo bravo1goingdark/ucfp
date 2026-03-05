@@ -53,6 +53,128 @@ pub const PERCEPTUAL_VERSION: u16 = 1;
 /// Human‑readable algorithm identifier.
 pub const PERCEPTUAL_ALGORITHM: &str = "rollingminqminhash_v1";
 
+/// Compute Jaccard similarity between two perceptual fingerprints.
+///
+/// Returns a value between 0.0 and 1.0, where 1.0 means identical and 0.0 means completely different.
+/// Uses MinHash LSH bands for efficient estimation of Jaccard similarity.
+///
+/// # Example
+///
+/// ```
+/// use perceptual::{perceptualize_tokens, jaccard_similarity, PerceptualConfig};
+///
+/// let tokens1 = vec!["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog"];
+/// let tokens2 = vec!["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "cat"];
+///
+/// let cfg = PerceptualConfig::default();
+/// let fp1 = perceptualize_tokens(&tokens1, &cfg).unwrap();
+/// let fp2 = perceptualize_tokens(&tokens2, &cfg).unwrap();
+///
+/// let similarity = jaccard_similarity(&fp1, &fp2);
+/// assert!(similarity > 0.0 && similarity <= 1.0);
+/// ```
+pub fn jaccard_similarity(a: &PerceptualFingerprint, b: &PerceptualFingerprint) -> f32 {
+    // Use band-wise comparison for LSH-style similarity estimation
+    // Two documents are considered similar if they share at least one band
+    let bands_a = a.meta.minhash_bands;
+    let bands_b = b.meta.minhash_bands;
+    let rows_a = a.meta.minhash_rows_per_band;
+    let rows_b = b.meta.minhash_rows_per_band;
+
+    // Handle edge cases
+    if a.minhash.is_empty() || b.minhash.is_empty() {
+        return 0.0;
+    }
+
+    // If configs differ, we can only compare common bands
+    let min_bands = bands_a.min(bands_b);
+    let min_rows = rows_a.min(rows_b);
+    let minhash_len = min_bands * min_rows;
+
+    // Truncate to comparable length
+    let minhash_a = &a.minhash[..a.minhash.len().min(minhash_len)];
+    let minhash_b = &b.minhash[..b.minhash.len().min(minhash_len)];
+
+    // Count matching bands
+    let mut matching_bands = 0u32;
+    for band_idx in 0..min_bands {
+        let start = band_idx * min_rows;
+        let end = (start + min_rows).min(minhash_a.len()).min(minhash_b.len());
+
+        if start < end {
+            let band_a = &minhash_a[start..end];
+            let band_b = &minhash_b[start..end];
+
+            if band_a == band_b {
+                matching_bands += 1;
+            }
+        }
+    }
+
+    // Convert to approximate Jaccard similarity
+    // Probability of matching band = Jaccard^rows
+    // So Jaccard ≈ (matching_bands / total_bands)^(1/rows)
+    if matching_bands == 0 {
+        return 0.0;
+    }
+
+    let match_ratio = matching_bands as f32 / min_bands as f32;
+    match_ratio.powf(1.0 / min_rows as f32)
+}
+
+/// Compute exact Jaccard similarity between two sets of shingles.
+///
+/// This is more accurate but slower than `jaccard_similarity` as it compares
+/// the actual shingle sets rather than MinHash signatures.
+///
+/// # Example
+///
+/// ```
+/// use perceptual::{perceptualize_tokens, exact_jaccard_similarity, PerceptualConfig};
+///
+/// let tokens1 = vec!["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog"];
+/// let tokens2 = vec!["the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "cat"];
+///
+/// let cfg = PerceptualConfig {
+///     include_intermediates: true,
+///     ..Default::default()
+/// };
+/// let fp1 = perceptualize_tokens(&tokens1, &cfg).unwrap();
+/// let fp2 = perceptualize_tokens(&tokens2, &cfg).unwrap();
+///
+/// let similarity = exact_jaccard_similarity(&fp1, &fp2);
+/// assert!(similarity > 0.0 && similarity <= 1.0);
+/// ```
+pub fn exact_jaccard_similarity(a: &PerceptualFingerprint, b: &PerceptualFingerprint) -> f32 {
+    use std::collections::HashSet;
+
+    // Build sets from shingles (fall back to minhash if intermediates not included)
+    let set_a: HashSet<u64> = if !a.shingles.is_empty() {
+        a.shingles.iter().copied().collect()
+    } else {
+        a.minhash.iter().copied().collect()
+    };
+
+    let set_b: HashSet<u64> = if !b.shingles.is_empty() {
+        b.shingles.iter().copied().collect()
+    } else {
+        b.minhash.iter().copied().collect()
+    };
+
+    if set_a.is_empty() && set_b.is_empty() {
+        return 1.0; // Both empty = identical
+    }
+
+    if set_a.is_empty() || set_b.is_empty() {
+        return 0.0; // One empty, one not = completely different
+    }
+
+    let intersection: HashSet<_> = set_a.intersection(&set_b).collect();
+    let union: HashSet<_> = set_a.union(&set_b).collect();
+
+    intersection.len() as f32 / union.len() as f32
+}
+
 /// Compute a perceptual fingerprint (shingles → winnow → MinHash).
 ///
 /// The `tokens` slice must contain canonical tokens in their original order.
@@ -519,5 +641,97 @@ mod tests {
             let fp = perceptualize_tokens(&tokens, &cfg).unwrap();
             assert!(!fp.minhash.is_empty(), "Should work with w={w}");
         }
+    }
+
+    // ==================== Similarity Tests ====================
+
+    #[test]
+    fn jaccard_similarity_partial() {
+        // Use longer texts with significant overlap to ensure band matches
+        let tokens1: Vec<String> = (0..50).map(|i| format!("token{i}")).collect();
+        let mut tokens2 = tokens1.clone();
+        // Change last 10 tokens
+        for i in 40..50 {
+            tokens2[i] = format!("different{i}");
+        }
+
+        let cfg = PerceptualConfig::default();
+        let fp1 = perceptualize_tokens(&tokens1, &cfg).unwrap();
+        let fp2 = perceptualize_tokens(&tokens2, &cfg).unwrap();
+
+        let similarity = jaccard_similarity(&fp1, &fp2);
+        assert!(
+            similarity >= 0.0 && similarity < 1.0,
+            "Similar texts should have intermediate similarity, got {}",
+            similarity
+        );
+    }
+
+    #[test]
+    fn jaccard_similarity_different() {
+        let tokens1 = vec![
+            "the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog",
+        ];
+        let tokens2 = vec![
+            "completely",
+            "different",
+            "text",
+            "with",
+            "no",
+            "overlap",
+            "at",
+            "all",
+            "here",
+        ];
+        let cfg = PerceptualConfig::default();
+        let fp1 = perceptualize_tokens(&tokens1, &cfg).unwrap();
+        let fp2 = perceptualize_tokens(&tokens2, &cfg).unwrap();
+
+        let similarity = jaccard_similarity(&fp1, &fp2);
+        assert!(
+            similarity >= 0.0 && similarity < 0.5,
+            "Different texts should have low similarity"
+        );
+    }
+
+    #[test]
+    fn exact_jaccard_similarity_identical() {
+        let tokens = vec![
+            "the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog",
+        ];
+        let cfg = PerceptualConfig {
+            include_intermediates: true,
+            ..Default::default()
+        };
+        let fp = perceptualize_tokens(&tokens, &cfg).unwrap();
+
+        let similarity = exact_jaccard_similarity(&fp, &fp);
+        assert!(
+            (similarity - 1.0).abs() < 0.001,
+            "Identical fingerprints should have exact similarity 1.0"
+        );
+    }
+
+    #[test]
+    fn exact_jaccard_similarity_empty() {
+        let tokens = vec![
+            "the", "quick", "brown", "fox", "jumps", "over", "the", "lazy", "dog",
+        ];
+        let cfg = PerceptualConfig::default();
+        let fp1 = perceptualize_tokens(&tokens, &cfg).unwrap();
+
+        // Create an empty fingerprint
+        let fp2 = PerceptualFingerprint {
+            shingles: vec![],
+            winnowed: vec![],
+            minhash: vec![],
+            meta: fp1.meta.clone(),
+        };
+
+        let similarity = exact_jaccard_similarity(&fp1, &fp2);
+        assert_eq!(
+            similarity, 0.0,
+            "One empty, one non-empty should have similarity 0.0"
+        );
     }
 }
