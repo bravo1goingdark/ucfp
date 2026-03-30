@@ -1,14 +1,14 @@
-use once_cell::sync::OnceCell;
 use onnxruntime::{environment::Environment, session::Session};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::OnceLock;
 use tokenizers::Tokenizer;
 
 use crate::assets::ModelAssets;
 use crate::SemanticError;
 
-static ORT_ENV: OnceCell<Environment> = OnceCell::new();
+static ORT_ENV: OnceLock<Environment> = OnceLock::new();
 
 thread_local! {
     static MODEL_CACHE: RefCell<std::collections::HashMap<ModelCacheKey, Rc<CachedModel>>> =
@@ -66,10 +66,15 @@ pub(crate) fn get_or_load_model_handle(
 }
 
 fn ort_environment() -> Result<&'static Environment, SemanticError> {
-    ORT_ENV.get_or_try_init(|| {
-        Environment::builder()
-            .with_name("semantic")
-            .build()
-            .map_err(|e| SemanticError::Inference(e.to_string()))
-    })
+    if let Some(env) = ORT_ENV.get() {
+        return Ok(env);
+    }
+    let env = Environment::builder()
+        .with_name("semantic")
+        .build()
+        .map_err(|e| SemanticError::Inference(e.to_string()))?;
+    ORT_ENV
+        .set(env)
+        .map_err(|_| SemanticError::Inference("ORT environment already initialized".to_string()))?;
+    Ok(ORT_ENV.get().unwrap())
 }

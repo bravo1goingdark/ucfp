@@ -14,7 +14,8 @@ use ucfp::{
     process_pipeline, CanonicalizeConfig, PerceptualConfig, PipelineStageConfig, SemanticConfig,
 };
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let ingest_cfg = IngestConfig::default();
     let canonical_cfg = CanonicalizeConfig::default();
     let perceptual_cfg = PerceptualConfig {

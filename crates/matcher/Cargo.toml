@@ -15,7 +15,6 @@ index = { package = "content-index", version = "0.1.0", path = "../index" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0.17"
-once_cell = "1.19"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1.42", features = ["rt", "rt-multi-thread"] }
 

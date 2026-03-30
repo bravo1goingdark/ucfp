@@ -8,4 +8,18 @@ web/dist
 
 # Profiling artifacts
 perf.data
-perf.data.*web/node_modules/
+perf.data.*
+
+# Environment / secrets
+.env
+.env.*
+
+# Coverage output
+coverage/
+
+# Heap profiling
+dhat-heap.json
+
+# Redb databases outside data/
+*.redb
+*.redb-*

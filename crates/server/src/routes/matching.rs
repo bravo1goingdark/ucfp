@@ -121,15 +121,7 @@ pub async fn match_documents(
     };
 
     // Get tenant ID from request or use default
-    let tenant_id = request.tenant_id.unwrap_or_else(|| {
-        state
-            .config
-            .api_keys
-            .iter()
-            .next()
-            .cloned()
-            .unwrap_or_default()
-    });
+    let tenant_id = request.tenant_id.unwrap_or_else(|| "default".to_string());
 
     // Build match request
     let query_text = request.query.clone();
@@ -258,7 +250,7 @@ pub async fn compare_documents(
 
         if let Ok((_, fingerprint, embedding)) = ucfp::process_pipeline(
             raw,
-            ucfp::PipelineStageConfig::Perceptual,
+            ucfp::PipelineStageConfig::PerceptualAndSemantic,
             ingest_cfg,
             canonical_cfg,
             Some(perceptual_cfg),

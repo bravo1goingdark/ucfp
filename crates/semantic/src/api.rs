@@ -1,6 +1,6 @@
-use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::normalize::l2_normalize_in_place;
@@ -11,12 +11,12 @@ use crate::resilience::{
 use crate::{SemanticConfig, SemanticEmbedding, SemanticError};
 
 // Global managers for resilience (lazy-initialized)
-static CIRCUIT_BREAKER_MANAGER: Lazy<CircuitBreakerManager> =
-    Lazy::new(CircuitBreakerManager::default);
-static RATE_LIMIT_MANAGER: Lazy<RateLimitManager> = Lazy::new(RateLimitManager::default);
+static CIRCUIT_BREAKER_MANAGER: LazyLock<CircuitBreakerManager> =
+    LazyLock::new(CircuitBreakerManager::default);
+static RATE_LIMIT_MANAGER: LazyLock<RateLimitManager> = LazyLock::new(RateLimitManager::default);
 
 // Global HTTP client with connection pooling
-static HTTP_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+static HTTP_CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .connect_timeout(Duration::from_secs(10))
@@ -262,7 +262,7 @@ async fn execute_api_request_with_retry(
         async move {
             // Log retry attempt
             if attempt > 0 {
-                eprintln!("[semantic] Retry attempt {attempt} for provider '{provider}'");
+                tracing::warn!(attempt, provider, "Retrying API request");
             }
 
             match send_api_request(&url, &cfg, payload).await {

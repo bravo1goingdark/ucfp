@@ -417,7 +417,7 @@ impl UfpIndex {
                         let quantized = entry.value();
 
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> = Self::dequantize(quantized);
+                        let float_vec: Vec<f32> = self.dequantize(quantized);
                         dimension = float_vec.len();
                         vectors_to_insert.push((hash, float_vec));
                     }
@@ -446,9 +446,10 @@ impl UfpIndex {
         out
     }
 
-    /// Dequantize i8 embeddings -> f32 using scale of 100.0.
-    fn dequantize(embedding: &[i8]) -> Vec<f32> {
-        embedding.iter().map(|&v| v as f32 / 100.0).collect()
+    /// Dequantize i8 embeddings -> f32 using the configured scale.
+    fn dequantize(&self, embedding: &[i8]) -> Vec<f32> {
+        let scale = self.cfg.quantization.scale();
+        embedding.iter().map(|&v| v as f32 / scale).collect()
     }
 
     /// Insert or update a record.
@@ -456,12 +457,29 @@ impl UfpIndex {
     pub fn upsert(&self, rec: &IndexRecord) -> Result<(), IndexError> {
         let payload = self.encode_record(rec)?;
 
+        // If updating an existing record, remove old perceptual entries first
+        if let Ok(Some(old_data)) = self.backend.get(&rec.canonical_hash) {
+            if let Ok(old_rec) = self.decode_record(&old_data) {
+                if let Some(ref old_perceptual) = old_rec.perceptual {
+                    for &hash_val in old_perceptual {
+                        if let Some(mut entry) = self.perceptual_index.get_mut(&hash_val) {
+                            entry.retain(|h| h != &rec.canonical_hash);
+                        }
+                    }
+                }
+            }
+        }
+
         // Update auxiliary indexes for faster queries using lock-free DashMap
         if let Some(ref perceptual) = rec.perceptual {
             for &hash_val in perceptual {
                 self.perceptual_index
                     .entry(hash_val)
-                    .and_modify(|v| v.push(rec.canonical_hash.clone()))
+                    .and_modify(|v| {
+                        if !v.contains(&rec.canonical_hash) {
+                            v.push(rec.canonical_hash.clone());
+                        }
+                    })
                     .or_insert_with(|| vec![rec.canonical_hash.clone()]);
             }
         }
@@ -475,7 +493,7 @@ impl UfpIndex {
                 if let Ok(mut ann_lock) = self.ann_index.try_write() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> = Self::dequantize(embedding);
+                        let float_vec: Vec<f32> = self.dequantize(embedding);
                         let _ = ann.insert(rec.canonical_hash.clone(), float_vec);
                     }
                 }
@@ -487,6 +505,22 @@ impl UfpIndex {
 
     /// Remove a record from the index.
     pub fn delete(&self, hash: &str) -> Result<(), IndexError> {
+        // Remove from perceptual index
+        if let Ok(Some(data)) = self.backend.get(hash) {
+            if let Ok(rec) = self.decode_record(&data) {
+                if let Some(ref perceptual) = rec.perceptual {
+                    for &hash_val in perceptual {
+                        if let Some(mut entry) = self.perceptual_index.get_mut(&hash_val) {
+                            entry.retain(|h| h != hash);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Remove from semantic index
+        self.semantic_index.remove(hash);
+
         self.backend.delete(hash)
     }
 
@@ -557,7 +591,7 @@ impl UfpIndex {
                 if let Ok(mut ann_lock) = self.ann_index.try_write() {
                     if let Some(ref mut ann) = *ann_lock {
                         // Dequantize from i8 to f32 for ANN
-                        let float_vec: Vec<f32> = Self::dequantize(embedding);
+                        let float_vec: Vec<f32> = self.dequantize(embedding);
                         let _ = ann.insert(canonical_hash.to_string(), float_vec);
                         ann_needs_rebuild = true;
                     }
@@ -585,6 +619,16 @@ impl UfpIndex {
     fn encode_record(&self, rec: &IndexRecord) -> Result<Vec<u8>, IndexError> {
         let encoded = encode_to_vec(rec, standard())?;
         self.cfg.compression.compress(&encoded)
+    }
+
+    /// Get a reference to the index configuration.
+    pub fn config(&self) -> &IndexConfig {
+        &self.cfg
+    }
+
+    /// Get the quantization scale used by this index.
+    pub fn quantization_scale(&self) -> f32 {
+        self.cfg.quantization.scale()
     }
 
     /// Get index statistics

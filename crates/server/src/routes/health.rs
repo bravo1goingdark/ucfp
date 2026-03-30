@@ -5,11 +5,11 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use std::time::SystemTime;
 
 /// Global server start time for uptime calculation
-static SERVER_START_TIME: once_cell::sync::Lazy<SystemTime> =
-    once_cell::sync::Lazy::new(SystemTime::now);
+static SERVER_START_TIME: LazyLock<SystemTime> = LazyLock::new(SystemTime::now);
 
 /// Health check endpoint (liveness)
 /// Returns 200 if server is running

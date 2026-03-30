@@ -191,10 +191,7 @@ impl Matcher {
     }
 
     fn quantize_embedding(&self, embedding: &SemanticEmbedding) -> Vec<i8> {
-        // For now, reuse a default IndexConfig's quantization scale. This keeps the
-        // API stable until UfpIndex exposes its runtime config.
-        let cfg = IndexConfig::new();
-        let scale = cfg.quantization.scale();
+        let scale = self.index.quantization_scale();
         embedding
             .vector
             .iter()
@@ -208,7 +205,7 @@ impl Matcher {
         mut hits_semantic: Option<Vec<QueryResult>>,
         mut hits_perceptual: Option<Vec<QueryResult>>,
     ) -> Vec<MatchHit> {
-        let mut hits = Vec::new();
+        let mut hits = Vec::with_capacity(req.config.max_results);
         let mut map: std::collections::HashMap<String, (Option<QueryResult>, Option<QueryResult>)> =
             std::collections::HashMap::new();
 

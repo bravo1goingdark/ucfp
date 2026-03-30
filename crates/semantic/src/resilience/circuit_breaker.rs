@@ -4,7 +4,6 @@
 //! after a threshold of failures is reached. It periodically attempts to reset (half-open state)
 //! to check if the service has recovered.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -51,14 +50,19 @@ pub enum CircuitState {
     HalfOpen,
 }
 
+/// All mutable state for the circuit breaker, behind a single mutex.
+struct CircuitBreakerInner {
+    state: CircuitState,
+    failure_count: u64,
+    success_count: u64,
+    last_failure_time: Option<Instant>,
+    last_state_change: Instant,
+}
+
 /// Circuit breaker implementation for preventing cascading failures.
 pub struct CircuitBreaker {
     config: CircuitBreakerConfig,
-    state: Mutex<CircuitState>,
-    failure_count: AtomicU64,
-    success_count: AtomicU64,
-    last_failure_time: Mutex<Option<Instant>>,
-    last_state_change: Mutex<Instant>,
+    inner: Mutex<CircuitBreakerInner>,
 }
 
 impl CircuitBreaker {
@@ -66,26 +70,29 @@ impl CircuitBreaker {
     pub fn new(config: CircuitBreakerConfig) -> Self {
         Self {
             config,
-            state: Mutex::new(CircuitState::Closed),
-            failure_count: AtomicU64::new(0),
-            success_count: AtomicU64::new(0),
-            last_failure_time: Mutex::new(None),
-            last_state_change: Mutex::new(Instant::now()),
+            inner: Mutex::new(CircuitBreakerInner {
+                state: CircuitState::Closed,
+                failure_count: 0,
+                success_count: 0,
+                last_failure_time: None,
+                last_state_change: Instant::now(),
+            }),
         }
     }
 
     /// Check if a request should be allowed through.
     pub fn allow_request(&self) -> bool {
-        let mut state = self.state.lock().unwrap();
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
-        match *state {
+        match inner.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
-                // Check if we should transition to half-open
-                let last_change = *self.last_state_change.lock().unwrap();
-                if last_change.elapsed() >= self.config.reset_timeout {
-                    *state = CircuitState::HalfOpen;
-                    *self.last_state_change.lock().unwrap() = Instant::now();
+                if inner.last_state_change.elapsed() >= self.config.reset_timeout {
+                    inner.state = CircuitState::HalfOpen;
+                    inner.last_state_change = Instant::now();
                     true
                 } else {
                     false
@@ -97,19 +104,20 @@ impl CircuitBreaker {
 
     /// Record a successful request.
     pub fn record_success(&self) {
-        self.success_count.fetch_add(1, Ordering::Relaxed);
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inner.success_count += 1;
 
-        let mut state = self.state.lock().unwrap();
-        match *state {
+        match inner.state {
             CircuitState::HalfOpen => {
-                // Transition back to closed after success in half-open
-                *state = CircuitState::Closed;
-                self.failure_count.store(0, Ordering::Relaxed);
-                *self.last_state_change.lock().unwrap() = Instant::now();
+                inner.state = CircuitState::Closed;
+                inner.failure_count = 0;
+                inner.last_state_change = Instant::now();
             }
             CircuitState::Closed => {
-                // Reset failure count on success
-                self.failure_count.store(0, Ordering::Relaxed);
+                inner.failure_count = 0;
             }
             CircuitState::Open => {}
         }
@@ -117,21 +125,23 @@ impl CircuitBreaker {
 
     /// Record a failed request.
     pub fn record_failure(&self) {
-        let failures = self.failure_count.fetch_add(1, Ordering::Relaxed) + 1;
-        *self.last_failure_time.lock().unwrap() = Some(Instant::now());
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        inner.failure_count += 1;
+        inner.last_failure_time = Some(Instant::now());
 
-        let mut state = self.state.lock().unwrap();
-        match *state {
+        match inner.state {
             CircuitState::Closed => {
-                if failures >= self.config.failure_threshold as u64 {
-                    *state = CircuitState::Open;
-                    *self.last_state_change.lock().unwrap() = Instant::now();
+                if inner.failure_count >= self.config.failure_threshold as u64 {
+                    inner.state = CircuitState::Open;
+                    inner.last_state_change = Instant::now();
                 }
             }
             CircuitState::HalfOpen => {
-                // Transition back to open on failure in half-open
-                *state = CircuitState::Open;
-                *self.last_state_change.lock().unwrap() = Instant::now();
+                inner.state = CircuitState::Open;
+                inner.last_state_change = Instant::now();
             }
             CircuitState::Open => {}
         }
@@ -139,17 +149,26 @@ impl CircuitBreaker {
 
     /// Get the current state.
     pub fn current_state(&self) -> CircuitState {
-        *self.state.lock().unwrap()
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .state
     }
 
     /// Get failure count.
     pub fn failure_count(&self) -> u64 {
-        self.failure_count.load(Ordering::Relaxed)
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .failure_count
     }
 
     /// Get success count.
     pub fn success_count(&self) -> u64 {
-        self.success_count.load(Ordering::Relaxed)
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .success_count
     }
 }
 
@@ -170,7 +189,10 @@ impl CircuitBreakerManager {
 
     /// Get or create a circuit breaker for a provider.
     pub fn get_or_create(&self, provider: &str) -> Arc<CircuitBreaker> {
-        let mut breakers = self.breakers.lock().unwrap();
+        let mut breakers = self
+            .breakers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         breakers
             .entry(provider.to_string())
             .or_insert_with(|| Arc::new(CircuitBreaker::new(self.default_config)))
@@ -179,7 +201,10 @@ impl CircuitBreakerManager {
 
     /// Get all circuit breaker stats.
     pub fn get_all_stats(&self) -> Vec<(String, CircuitState, u64)> {
-        let breakers = self.breakers.lock().unwrap();
+        let breakers = self
+            .breakers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         breakers
             .iter()
             .map(|(name, cb)| (name.clone(), cb.current_state(), cb.failure_count()))
@@ -188,13 +213,19 @@ impl CircuitBreakerManager {
 
     /// Reset all circuit breakers.
     pub fn reset_all(&self) {
-        let mut breakers = self.breakers.lock().unwrap();
+        let mut breakers = self
+            .breakers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         breakers.clear();
     }
 
     /// Check if a provider is healthy (circuit closed).
     pub fn is_healthy(&self, provider: &str) -> bool {
-        let breakers = self.breakers.lock().unwrap();
+        let breakers = self
+            .breakers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         breakers
             .get(provider)
             .map(|cb| cb.current_state() == CircuitState::Closed)

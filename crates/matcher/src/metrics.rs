@@ -7,7 +7,7 @@
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use once_cell::sync::OnceCell;
+use std::sync::OnceLock;
 
 use crate::types::MatchMode;
 
@@ -23,7 +23,7 @@ pub trait MatchMetrics: Send + Sync {
 }
 
 fn metrics_lock() -> &'static RwLock<Option<Arc<dyn MatchMetrics>>> {
-    static METRICS: OnceCell<RwLock<Option<Arc<dyn MatchMetrics>>>> = OnceCell::new();
+    static METRICS: OnceLock<RwLock<Option<Arc<dyn MatchMetrics>>>> = OnceLock::new();
     METRICS.get_or_init(|| RwLock::new(None))
 }
 
@@ -40,6 +40,8 @@ pub(crate) fn metrics_recorder() -> Option<Arc<dyn MatchMetrics>> {
 /// instances share the same metrics backend.
 pub fn set_match_metrics(recorder: Option<Arc<dyn MatchMetrics>>) {
     let lock = metrics_lock();
-    let mut guard = lock.write().expect("match metrics lock poisoned");
+    let mut guard = lock
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = recorder;
 }

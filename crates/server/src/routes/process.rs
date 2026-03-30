@@ -147,7 +147,7 @@ fn default_true() -> bool {
 /// }
 /// ```
 pub async fn process_document(
-    State(state): State<Arc<ServerState>>,
+    State(_state): State<Arc<ServerState>>,
     Json(request): Json<ProcessRequest>,
 ) -> ServerResult<impl IntoResponse> {
     // Validate text size
@@ -161,15 +161,7 @@ pub async fn process_document(
         .doc_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let tenant_id = request.tenant_id.unwrap_or_else(|| {
-        state
-            .config
-            .api_keys
-            .iter()
-            .next()
-            .cloned()
-            .unwrap_or_default()
-    });
+    let tenant_id = request.tenant_id.unwrap_or_else(|| "default".to_string());
 
     // Create raw ingest record
     let raw = RawIngestRecord {
@@ -200,14 +192,13 @@ pub async fn process_document(
 
     // Process based on enabled features
     if request.enable_perceptual && request.enable_semantic {
-        // Both perceptual and semantic - run separately
+        // Both perceptual and semantic - run together
         let perceptual_cfg = request.perceptual_config.unwrap_or_default();
         let semantic_cfg = request.semantic_config.unwrap_or_default();
 
-        // Process both perceptual and semantic using process_pipeline
         match process_pipeline(
             raw,
-            PipelineStageConfig::Perceptual,
+            PipelineStageConfig::PerceptualAndSemantic,
             &ingest_cfg,
             &canonical_cfg,
             Some(&perceptual_cfg),
@@ -314,7 +305,7 @@ pub async fn process_document(
 /// Documents are processed concurrently with a configurable concurrency limit (default: 10).
 /// Results are returned in the same order as the input documents.
 pub async fn process_batch(
-    State(state): State<Arc<ServerState>>,
+    State(_state): State<Arc<ServerState>>,
     Json(request): Json<BatchProcessRequest>,
 ) -> ServerResult<impl IntoResponse> {
     const CONCURRENCY: usize = 10;
@@ -348,7 +339,6 @@ pub async fn process_batch(
     // Create a stream from documents with their indices to preserve order
     let results: Vec<(usize, ProcessResponse)> =
         stream::iter(request.documents.into_iter().enumerate().map(|(idx, doc)| {
-            let state = state.clone();
             let ingest_cfg = ingest_cfg.clone();
             let canonical_cfg = canonical_cfg.clone();
 
@@ -356,15 +346,7 @@ pub async fn process_batch(
                 let doc_id = doc
                     .doc_id
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-                let tenant_id = doc.tenant_id.unwrap_or_else(|| {
-                    state
-                        .config
-                        .api_keys
-                        .iter()
-                        .next()
-                        .cloned()
-                        .unwrap_or_default()
-                });
+                let tenant_id = doc.tenant_id.unwrap_or_else(|| "default".to_string());
 
                 let raw = RawIngestRecord {
                     id: doc_id.clone(),
@@ -393,7 +375,7 @@ pub async fn process_batch(
                 let (stage, perceptual_cfg, semantic_cfg) = if enable_perceptual && enable_semantic
                 {
                     (
-                        PipelineStageConfig::Perceptual,
+                        PipelineStageConfig::PerceptualAndSemantic,
                         Some(PerceptualConfig::default()),
                         Some(SemanticConfig::default()),
                     )

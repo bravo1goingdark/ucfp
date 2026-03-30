@@ -71,11 +71,16 @@ impl RateLimitConfig {
     }
 }
 
+/// All mutable state for the token bucket, behind a single mutex.
+struct TokenBucketInner {
+    tokens: f64,
+    last_update: Instant,
+}
+
 /// Token bucket rate limiter.
 pub struct TokenBucket {
     config: RateLimitConfig,
-    tokens: Mutex<f64>,
-    last_update: Mutex<Instant>,
+    inner: Mutex<TokenBucketInner>,
     total_requests: AtomicU64,
     throttled_requests: AtomicU64,
 }
@@ -85,8 +90,10 @@ impl TokenBucket {
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             config,
-            tokens: Mutex::new(config.burst_size as f64),
-            last_update: Mutex::new(Instant::now()),
+            inner: Mutex::new(TokenBucketInner {
+                tokens: config.burst_size as f64,
+                last_update: Instant::now(),
+            }),
             total_requests: AtomicU64::new(0),
             throttled_requests: AtomicU64::new(0),
         }
@@ -96,19 +103,21 @@ impl TokenBucket {
     pub fn try_acquire(&self) -> bool {
         self.total_requests.fetch_add(1, Ordering::Relaxed);
 
-        let mut tokens = self.tokens.lock().unwrap();
-        let mut last_update = self.last_update.lock().unwrap();
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         // Add tokens based on elapsed time
         let now = Instant::now();
-        let elapsed = now.duration_since(*last_update);
+        let elapsed = now.duration_since(inner.last_update);
         let tokens_to_add = elapsed.as_secs_f64() * self.config.requests_per_second;
-        *tokens = (*tokens + tokens_to_add).min(self.config.burst_size as f64);
-        *last_update = now;
+        inner.tokens = (inner.tokens + tokens_to_add).min(self.config.burst_size as f64);
+        inner.last_update = now;
 
         // Try to consume a token
-        if *tokens >= 1.0 {
-            *tokens -= 1.0;
+        if inner.tokens >= 1.0 {
+            inner.tokens -= 1.0;
             true
         } else {
             self.throttled_requests.fetch_add(1, Ordering::Relaxed);
@@ -124,17 +133,19 @@ impl TokenBucket {
 
     /// Get current token count.
     pub fn tokens(&self) -> f64 {
-        let mut tokens = self.tokens.lock().unwrap();
-        let mut last_update = self.last_update.lock().unwrap();
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         // Update tokens based on elapsed time
         let now = Instant::now();
-        let elapsed = now.duration_since(*last_update);
+        let elapsed = now.duration_since(inner.last_update);
         let tokens_to_add = elapsed.as_secs_f64() * self.config.requests_per_second;
-        *tokens = (*tokens + tokens_to_add).min(self.config.burst_size as f64);
-        *last_update = now;
+        inner.tokens = (inner.tokens + tokens_to_add).min(self.config.burst_size as f64);
+        inner.last_update = now;
 
-        *tokens
+        inner.tokens
     }
 
     /// Get total requests.
@@ -202,7 +213,10 @@ impl RateLimitManager {
 
     /// Get or create a rate limiter for a provider.
     pub fn get_or_create(&self, provider: &str) -> Arc<TokenBucket> {
-        let mut limiters = self.limiters.lock().unwrap();
+        let mut limiters = self
+            .limiters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         limiters
             .entry(provider.to_string())
             .or_insert_with(|| Arc::new(TokenBucket::new(self.default_config)))
@@ -215,7 +229,10 @@ impl RateLimitManager {
         provider: &str,
         config: RateLimitConfig,
     ) -> Arc<TokenBucket> {
-        let mut limiters = self.limiters.lock().unwrap();
+        let mut limiters = self
+            .limiters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         limiters
             .entry(provider.to_string())
             .or_insert_with(|| Arc::new(TokenBucket::new(config)))
@@ -224,7 +241,10 @@ impl RateLimitManager {
 
     /// Get all rate limiter stats.
     pub fn get_all_stats(&self) -> Vec<(String, RateLimitStats)> {
-        let limiters = self.limiters.lock().unwrap();
+        let limiters = self
+            .limiters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         limiters
             .iter()
             .map(|(name, bucket)| (name.clone(), bucket.stats()))
@@ -233,7 +253,10 @@ impl RateLimitManager {
 
     /// Reset all rate limiters.
     pub fn reset_all(&self) {
-        let mut limiters = self.limiters.lock().unwrap();
+        let mut limiters = self
+            .limiters
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         limiters.clear();
     }
 }

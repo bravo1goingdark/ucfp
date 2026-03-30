@@ -70,11 +70,8 @@ impl ServerConfig {
 
         let config: ServerConfig = builder.build()?.try_deserialize()?;
 
-        // Add demo API key if none configured (for development)
-        let mut config = config;
         if config.api_keys.is_empty() {
-            tracing::warn!("No API keys configured, using demo key 'demo-key-12345'");
-            config.api_keys.insert("demo-key-12345".to_string());
+            tracing::warn!("No API keys configured — authentication is disabled");
         }
 
         Ok(config)

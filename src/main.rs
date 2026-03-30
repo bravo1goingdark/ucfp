@@ -36,6 +36,7 @@ async fn main() -> anyhow::Result<()> {
 
     let index_cfg = IndexConfig::new().with_backend(BackendConfig::redb("./data/ucfp.redb"));
     let index = UfpIndex::new(index_cfg.clone()).context("index init")?;
+    let quant_scale = index.quantization_scale();
 
     let corpus = corpus::generate_large_corpus();
     let total_docs = corpus.len();
@@ -122,7 +123,10 @@ async fn main() -> anyhow::Result<()> {
             schema_version: INDEX_SCHEMA_VERSION,
             canonical_hash: doc.sha256_hex,
             perceptual: Some(fingerprint.minhash),
-            embedding: Some(UfpIndex::quantize(&Array1::from(semantic.vector), 127.0)),
+            embedding: Some(UfpIndex::quantize(
+                &Array1::from(semantic.vector),
+                quant_scale,
+            )),
             metadata: {
                 let mut source: String = doc.canonical_text.chars().take(80).collect();
                 source.push_str("...");
@@ -188,7 +192,7 @@ async fn main() -> anyhow::Result<()> {
         perceptual: Some(query_fingerprint.minhash),
         embedding: Some(UfpIndex::quantize(
             &Array1::from(query_semantic.vector),
-            127.0,
+            quant_scale,
         )),
         metadata: json!({}),
     };
@@ -249,7 +253,7 @@ fn print_search_results(index: &UfpIndex, label: &str, hits: &[index::QueryResul
         println!(
             "\n  {}. {} ({:.3})",
             rank + 1,
-            &hit.canonical_hash[..16],
+            &hit.canonical_hash[..hit.canonical_hash.len().min(16)],
             hit.score
         );
         if let Ok(Some(rec)) = index.get(&hit.canonical_hash) {

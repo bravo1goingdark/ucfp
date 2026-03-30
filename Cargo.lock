@@ -703,7 +703,6 @@ dependencies = [
  "dashmap",
  "fastrand",
  "fxhash",
- "once_cell",
  "onnxruntime",
  "reqwest 0.12.28",
  "serde",
@@ -711,6 +710,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokenizers",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1985,7 +1985,6 @@ dependencies = [
  "content-ingest",
  "content-perceptual",
  "content-semantic",
- "once_cell",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3760,6 +3759,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
  "ucfp-server",
 ]
 
@@ -3779,7 +3779,6 @@ dependencies = [
  "dashmap",
  "futures",
  "matcher",
- "once_cell",
  "reqwest 0.13.2",
  "serde",
  "serde_json",

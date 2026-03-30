@@ -12,7 +12,8 @@
 //! and the configuration bundles that describe how each stage should behave.
 //! Use [`PipelineStageConfig::Canonical`] for ingest + canonicalization only,
 //! [`PipelineStageConfig::Perceptual`] to include perceptual fingerprinting,
-//! or [`PipelineStageConfig::Semantic`] for semantic embeddings.
+//! [`PipelineStageConfig::Semantic`] for semantic embeddings, or
+//! [`PipelineStageConfig::PerceptualAndSemantic`] for both perceptual and semantic.
 //!
 //! ```ignore
 //! use chrono::Utc;
@@ -380,7 +381,9 @@ impl PipelineEventLogger for KeyValueLogger {
 /// Install or clear the global pipeline metrics recorder.
 pub fn set_pipeline_metrics(recorder: Option<Arc<dyn PipelineMetrics>>) {
     let lock = metrics_lock();
-    let mut guard = lock.write().expect("pipeline metrics lock poisoned");
+    let mut guard = lock
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = recorder;
 }
 
@@ -399,7 +402,9 @@ fn metrics_recorder() -> Option<Arc<dyn PipelineMetrics>> {
 /// Install or clear the structured pipeline event logger.
 pub fn set_pipeline_logger(logger: Option<Arc<dyn PipelineEventLogger>>) {
     let lock = logger_lock();
-    let mut guard = lock.write().expect("pipeline logger lock poisoned");
+    let mut guard = lock
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = logger;
 }
 
@@ -548,6 +553,8 @@ pub enum PipelineStageConfig {
     Perceptual,
     /// Run full pipeline through semantic embedding.
     Semantic,
+    /// Run full pipeline through both perceptual fingerprinting and semantic embedding.
+    PerceptualAndSemantic,
 }
 
 /// Process a raw ingest record through configured pipeline stages.
@@ -569,13 +576,23 @@ pub enum PipelineStageConfig {
 /// )?;
 ///
 /// // With perceptual fingerprint (replaces process_record_with_perceptual)
-/// let (doc, fp) = process_pipeline(
+/// let (doc, fp, _) = process_pipeline(
 ///     raw,
 ///     PipelineStageConfig::Perceptual,
 ///     &IngestConfig::default(),
 ///     &CanonicalizeConfig::default(),
 ///     Some(&PerceptualConfig::default()),
 ///     None,
+/// )?;
+///
+/// // With both perceptual and semantic
+/// let (doc, fp, emb) = process_pipeline(
+///     raw,
+///     PipelineStageConfig::PerceptualAndSemantic,
+///     &IngestConfig::default(),
+///     &CanonicalizeConfig::default(),
+///     Some(&PerceptualConfig::default()),
+///     Some(&SemanticConfig::default()),
 /// )?;
 /// ```
 pub fn process_pipeline(
@@ -660,9 +677,13 @@ pub fn process_pipeline(
     }
 
     // --- Perceptual Stage ---
-    // Only run perceptual if stage is Perceptual AND perceptual config is provided.
-    // Don't run perceptual if stage is Semantic (even if perceptual_cfg is accidentally provided).
-    let fingerprint = if stage == PipelineStageConfig::Perceptual {
+    // Run perceptual if stage is Perceptual or PerceptualAndSemantic.
+    let run_perceptual = stage == PipelineStageConfig::Perceptual
+        || stage == PipelineStageConfig::PerceptualAndSemantic;
+    let run_semantic = stage == PipelineStageConfig::Semantic
+        || stage == PipelineStageConfig::PerceptualAndSemantic;
+
+    let fingerprint = if run_perceptual {
         let cfg = perceptual_cfg.ok_or(PipelineError::Perceptual(
             perceptual::PerceptualError::InvalidConfigVersion { version: 0 },
         ))?;
@@ -692,8 +713,8 @@ pub fn process_pipeline(
     }
 
     // --- Semantic Stage ---
-    // Only run semantic if stage is Semantic AND semantic config is provided.
-    let embedding = if stage == PipelineStageConfig::Semantic {
+    // Run semantic if stage is Semantic or PerceptualAndSemantic.
+    let embedding = if run_semantic {
         let cfg = semantic_cfg.ok_or(PipelineError::Semantic(
             semantic::SemanticError::Inference("missing semantic config".into()),
         ))?;
@@ -708,9 +729,9 @@ pub fn process_pipeline(
         } else {
             // Fall back to stub embedding if no runtime available
             // This prevents panics when called outside of a Tokio runtime
-            eprintln!(
-                "Warning: No Tokio runtime available for semantic processing for doc {}, using stub embedding",
-                doc.doc_id
+            tracing::warn!(
+                doc_id = %doc.doc_id,
+                "No Tokio runtime available for semantic processing, using stub embedding"
             );
             Ok(semantic::make_stub_embedding(
                 &doc.doc_id,

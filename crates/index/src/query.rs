@@ -180,7 +180,7 @@ impl UfpIndex {
             set
         });
 
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(top_k);
         let mut scratch = HashSet::new();
         let mut processed_hashes = std::collections::HashSet::new();
 
