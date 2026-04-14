@@ -73,8 +73,10 @@ fn ort_environment() -> Result<&'static Environment, SemanticError> {
         .with_name("semantic")
         .build()
         .map_err(|e| SemanticError::Inference(e.to_string()))?;
+    // set() fails only if another thread initialized concurrently, which is
+    // safe: fall through and return whichever value won the race.
+    let _ = ORT_ENV.set(env);
     ORT_ENV
-        .set(env)
-        .map_err(|_| SemanticError::Inference("ORT environment already initialized".to_string()))?;
-    Ok(ORT_ENV.get().unwrap())
+        .get()
+        .ok_or_else(|| SemanticError::Inference("ORT environment unavailable".to_string()))
 }

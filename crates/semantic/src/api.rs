@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use crate::normalize::l2_normalize_in_place;
 use crate::resilience::{
-    execute_with_retry_async, is_retryable_error, CircuitBreakerManager, CircuitState,
-    RateLimitManager, RateLimitStats, RetryConfig, RetryResult, TokenBucket,
+    execute_with_retry_async, is_retryable_error, CircuitBreakerManager, RateLimitManager,
+    RetryConfig, RetryResult, TokenBucket,
 };
 use crate::{SemanticConfig, SemanticEmbedding, SemanticError};
 
@@ -478,40 +478,12 @@ fn parse_embedding_vector(value: Value) -> Result<Vec<f32>, SemanticError> {
     }
 }
 
-/// Public API for getting circuit breaker stats.
-#[allow(dead_code)]
-pub fn get_circuit_breaker_stats() -> Vec<(String, CircuitState, u64)> {
-    CIRCUIT_BREAKER_MANAGER.get_all_stats()
-}
-
-/// Public API for getting rate limit stats.
-#[allow(dead_code)]
-pub fn get_rate_limit_stats() -> Vec<(String, RateLimitStats)> {
-    RATE_LIMIT_MANAGER.get_all_stats()
-}
-
-/// Reset all circuit breakers (useful for testing or admin operations).
-#[allow(dead_code)]
-pub fn reset_circuit_breakers() {
-    CIRCUIT_BREAKER_MANAGER.reset_all();
-}
-
-/// Reset all rate limiters (useful for testing or admin operations).
-#[allow(dead_code)]
-pub fn reset_rate_limiters() {
-    RATE_LIMIT_MANAGER.reset_all();
-}
-
-/// Check if a provider's circuit breaker is healthy.
-#[allow(dead_code)]
-pub fn is_provider_healthy(provider: &str) -> bool {
-    CIRCUIT_BREAKER_MANAGER.is_healthy(provider)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resilience::{CircuitBreaker, CircuitBreakerConfig, RateLimitConfig, RetryConfig};
+    use crate::resilience::{
+        CircuitBreaker, CircuitBreakerConfig, CircuitState, RateLimitConfig, RetryConfig,
+    };
 
     #[test]
     fn test_provider_name_extraction() {
@@ -573,19 +545,18 @@ mod tests {
 
     #[test]
     fn test_is_provider_healthy() {
-        reset_circuit_breakers();
+        CIRCUIT_BREAKER_MANAGER.reset_all();
 
-        assert!(is_provider_healthy("new_provider"));
+        assert!(CIRCUIT_BREAKER_MANAGER.is_healthy("new_provider"));
 
-        // Simulate failure to open circuit
         let cb = CIRCUIT_BREAKER_MANAGER.get_or_create("failing_provider");
         for _ in 0..5 {
             cb.record_failure();
         }
 
-        assert!(!is_provider_healthy("failing_provider"));
+        assert!(!CIRCUIT_BREAKER_MANAGER.is_healthy("failing_provider"));
 
-        reset_circuit_breakers();
+        CIRCUIT_BREAKER_MANAGER.reset_all();
     }
 
     #[test]

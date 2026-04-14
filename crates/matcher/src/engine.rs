@@ -87,7 +87,10 @@ impl Matcher {
         let raw = self.build_raw_record(tenant_id, "query-semantic", query_text);
         let embedding = self.run_semantic_pipeline(&raw)?;
 
-        let quantized = self.quantize_embedding(&embedding);
+        let quantized = crate::demo_utils::quantize_with_scale(
+            &embedding,
+            self.index.quantization_scale(),
+        );
         let record = IndexRecord {
             schema_version: INDEX_SCHEMA_VERSION,
             canonical_hash: "query-semantic".into(),
@@ -190,15 +193,6 @@ impl Matcher {
         }
     }
 
-    fn quantize_embedding(&self, embedding: &SemanticEmbedding) -> Vec<i8> {
-        let scale = self.index.quantization_scale();
-        embedding
-            .vector
-            .iter()
-            .map(|v| (v * scale).clamp(-128.0f32, 127.0f32) as i8)
-            .collect()
-    }
-
     fn postprocess_hits(
         &self,
         req: &MatchRequest,
@@ -241,12 +235,15 @@ impl Matcher {
                 .metadata
                 .clone();
 
-            let (score, exact_score) = self.calculate_final_score(
+            let exact_score = req
+                .query_canonical_hash
+                .as_deref()
+                .map(|q_hash| if q_hash == hash { 1.0 } else { 0.0 });
+            let score = self.calculate_final_score(
                 &req.config.strategy,
                 semantic_score,
                 perceptual_score,
-                &hash,
-                req.query_canonical_hash.as_deref(),
+                exact_score,
             );
 
             if self.should_include(&req.config.strategy, score) {
@@ -276,19 +273,14 @@ impl Matcher {
         hits
     }
 
-    #[allow(clippy::only_used_in_recursion)]
     fn calculate_final_score(
         &self,
         strategy: &MatchExpr,
         semantic_score: Option<f32>,
         perceptual_score: Option<f32>,
-        canonical_hash: &str,
-        query_canonical_hash: Option<&str>,
-    ) -> (f32, Option<f32>) {
-        let exact_score =
-            query_canonical_hash.map(|q_hash| if q_hash == canonical_hash { 1.0 } else { 0.0 });
-
-        let score = match strategy {
+        exact_score: Option<f32>,
+    ) -> f32 {
+        match strategy {
             MatchExpr::Exact => exact_score.unwrap_or(0.0),
             MatchExpr::Semantic { .. } => semantic_score.unwrap_or(0.0),
             MatchExpr::Perceptual { .. } => perceptual_score.unwrap_or(0.0),
@@ -301,42 +293,16 @@ impl Matcher {
                 alpha * s + (1.0 - alpha) * p
             }
             MatchExpr::And { left, right } => {
-                let (left_score, _): (f32, _) = self.calculate_final_score(
-                    left,
-                    semantic_score,
-                    perceptual_score,
-                    canonical_hash,
-                    query_canonical_hash,
-                );
-                let (right_score, _): (f32, _) = self.calculate_final_score(
-                    right,
-                    semantic_score,
-                    perceptual_score,
-                    canonical_hash,
-                    query_canonical_hash,
-                );
-                left_score.min(right_score)
+                let l = self.calculate_final_score(left, semantic_score, perceptual_score, exact_score);
+                let r = self.calculate_final_score(right, semantic_score, perceptual_score, exact_score);
+                l.min(r)
             }
             MatchExpr::Or { left, right } => {
-                let (left_score, _): (f32, _) = self.calculate_final_score(
-                    left,
-                    semantic_score,
-                    perceptual_score,
-                    canonical_hash,
-                    query_canonical_hash,
-                );
-                let (right_score, _): (f32, _) = self.calculate_final_score(
-                    right,
-                    semantic_score,
-                    perceptual_score,
-                    canonical_hash,
-                    query_canonical_hash,
-                );
-                left_score.max(right_score)
+                let l = self.calculate_final_score(left, semantic_score, perceptual_score, exact_score);
+                let r = self.calculate_final_score(right, semantic_score, perceptual_score, exact_score);
+                l.max(r)
             }
-        };
-
-        (score, exact_score)
+        }
     }
 
     #[allow(clippy::only_used_in_recursion)]

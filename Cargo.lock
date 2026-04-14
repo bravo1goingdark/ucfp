@@ -660,7 +660,6 @@ dependencies = [
  "dashmap",
  "hashbrown 0.16.0",
  "hnsw_rs",
- "log",
  "ndarray 0.17.1",
  "redb",
  "serde",

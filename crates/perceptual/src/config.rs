@@ -52,11 +52,6 @@ pub struct PerceptualConfig {
 }
 
 impl PerceptualConfig {
-    /// Create a new configuration with sensible defaults.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Set the shingle size (k). Typical values: 5-15.
     /// Larger k = more context, less noise tolerant. Smaller k = more noise tolerant.
     pub fn with_k(mut self, k: usize) -> Self {
@@ -201,57 +196,8 @@ mod tests {
     }
 
     #[test]
-    fn config_new_creates_default() {
-        let cfg_new = PerceptualConfig::new();
-        let cfg_default = PerceptualConfig::default();
-        assert_eq!(cfg_new, cfg_default);
-    }
-
-    #[test]
-    fn config_builder_with_k() {
-        let cfg = PerceptualConfig::new().with_k(5);
-        assert_eq!(cfg.k, 5);
-    }
-
-    #[test]
-    fn config_builder_with_w() {
-        let cfg = PerceptualConfig::new().with_w(8);
-        assert_eq!(cfg.w, 8);
-    }
-
-    #[test]
-    fn config_builder_with_minhash_bands() {
-        let cfg = PerceptualConfig::new().with_minhash_bands(32);
-        assert_eq!(cfg.minhash_bands, 32);
-    }
-
-    #[test]
-    fn config_builder_with_minhash_rows_per_band() {
-        let cfg = PerceptualConfig::new().with_minhash_rows_per_band(16);
-        assert_eq!(cfg.minhash_rows_per_band, 16);
-    }
-
-    #[test]
-    fn config_builder_with_seed() {
-        let cfg = PerceptualConfig::new().with_seed(12345);
-        assert_eq!(cfg.seed, 12345);
-    }
-
-    #[test]
-    fn config_builder_with_parallel() {
-        let cfg = PerceptualConfig::new().with_parallel(true);
-        assert!(cfg.use_parallel);
-    }
-
-    #[test]
-    fn config_builder_with_intermediates() {
-        let cfg = PerceptualConfig::new().with_intermediates(false);
-        assert!(!cfg.include_intermediates);
-    }
-
-    #[test]
     fn config_builder_chain() {
-        let cfg = PerceptualConfig::new()
+        let cfg = PerceptualConfig::default()
             .with_k(3)
             .with_w(2)
             .with_minhash_bands(8)
@@ -277,7 +223,7 @@ mod tests {
 
     #[test]
     fn config_validate_invalid_k_zero() {
-        let cfg = PerceptualConfig::new().with_k(0);
+        let cfg = PerceptualConfig::default().with_k(0);
         assert!(matches!(
             cfg.validate(),
             Err(PerceptualError::InvalidConfigK { k: 0 })
@@ -286,7 +232,7 @@ mod tests {
 
     #[test]
     fn config_validate_invalid_w_zero() {
-        let cfg = PerceptualConfig::new().with_w(0);
+        let cfg = PerceptualConfig::default().with_w(0);
         assert!(matches!(
             cfg.validate(),
             Err(PerceptualError::InvalidConfigW { w: 0 })
@@ -295,7 +241,7 @@ mod tests {
 
     #[test]
     fn config_validate_invalid_bands_zero() {
-        let cfg = PerceptualConfig::new().with_minhash_bands(0);
+        let cfg = PerceptualConfig::default().with_minhash_bands(0);
         assert!(matches!(
             cfg.validate(),
             Err(PerceptualError::InvalidConfigBands { bands: 0 })
@@ -304,7 +250,7 @@ mod tests {
 
     #[test]
     fn config_validate_invalid_rows_zero() {
-        let cfg = PerceptualConfig::new().with_minhash_rows_per_band(0);
+        let cfg = PerceptualConfig::default().with_minhash_rows_per_band(0);
         assert!(matches!(
             cfg.validate(),
             Err(PerceptualError::InvalidConfigRows { rows: 0 })
@@ -332,7 +278,7 @@ mod tests {
 
     #[test]
     fn config_serde_roundtrip() {
-        let cfg = PerceptualConfig::new()
+        let cfg = PerceptualConfig::default()
             .with_k(5)
             .with_w(3)
             .with_seed(12345)

@@ -21,9 +21,9 @@ fn process_document(
         Some(perceptual_cfg),
         None,
     )?;
-    fingerprint.ok_or_else(|| {
-        ucfp::PipelineError::Perceptual(ucfp::PerceptualError::InvalidConfigVersion { version: 0 })
-    })
+    fingerprint.ok_or(ucfp::PipelineError::Perceptual(
+        ucfp::PerceptualError::InvalidConfigVersion { version: 0 },
+    ))
 }
 
 fn base_record(text: &str) -> RawIngestRecord {

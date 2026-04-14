@@ -70,8 +70,6 @@ pub mod types;
 // Resilience patterns for API calls
 pub mod resilience;
 
-mod serde_millis;
-
 mod api;
 mod assets;
 mod cache;

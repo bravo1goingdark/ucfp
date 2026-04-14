@@ -2,6 +2,7 @@ use crate::error::ServerError;
 use crate::state::ServerState;
 use axum::extract::Request;
 use axum::http::header::AUTHORIZATION;
+use axum::http::HeaderValue;
 use axum::middleware::Next;
 use axum::response::Response;
 use std::sync::Arc;
@@ -47,25 +48,24 @@ pub async fn api_key_auth(
 
 /// Request ID injection middleware
 pub async fn request_id(mut request: Request, next: Next) -> Response {
-    // Generate or extract request ID
-    let request_id = request
+    let header_value: HeaderValue = request
         .headers()
         .get("x-request-id")
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+        .and_then(|s| HeaderValue::from_str(s).ok())
+        .unwrap_or_else(|| {
+            HeaderValue::from_str(&uuid::Uuid::new_v4().to_string())
+                .expect("uuid v4 hyphenated form is always a valid HeaderValue")
+        });
 
-    // Add to request extensions for handlers to access
-    request.extensions_mut().insert(request_id.clone());
+    let request_id_str = header_value
+        .to_str()
+        .expect("header_value constructed from valid UTF-8")
+        .to_string();
+    request.extensions_mut().insert(request_id_str);
 
-    // Process request
     let mut response = next.run(request).await;
-
-    // Add request ID to response headers
-    response
-        .headers_mut()
-        .insert("x-request-id", request_id.parse().unwrap());
-
+    response.headers_mut().insert("x-request-id", header_value);
     response
 }
 

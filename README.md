@@ -153,6 +153,203 @@ println!("Found {} matches", hits.len());
 
 ![UCFP Architecture Diagram](ucfp.png)
 
+### System Overview
+
+How a request flows through the system, from the HTTP client down to storage and back:
+
+```mermaid
+flowchart LR
+    classDef client fill:#fef3c7,stroke:#d97706,stroke-width:2px,color:#78350f
+    classDef edge fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+    classDef pipe fill:#ede9fe,stroke:#7c3aed,stroke-width:2px,color:#4c1d95
+    classDef store fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+
+    Client([Client / Web UI]):::client
+
+    subgraph Edge["ucfp-server (axum)"]
+        direction TB
+        MW[/"middleware:
+        auth · request-id · CORS · logging"/]:::edge
+        Routes[/"REST routes:
+        /process · /index · /match · /compare"/]:::edge
+        MW --> Routes
+    end
+
+    subgraph Pipe["Pipeline (ucfp umbrella)"]
+        direction TB
+        Ingest[[ingest]]:::pipe
+        Canon[[canonical]]:::pipe
+        Perc[[perceptual]]:::pipe
+        Sem[[semantic]]:::pipe
+        Ingest --> Canon --> Perc
+        Canon --> Sem
+    end
+
+    subgraph Store["State"]
+        direction TB
+        Idx[("index<br/>redb · HNSW · DashMap")]:::store
+        Match[[matcher]]:::store
+    end
+
+    Client ==>|HTTP| MW
+    Routes --> Pipe
+    Perc -->|MinHash bands| Idx
+    Sem  -->|i8 quantized vec| Idx
+    Routes --> Match
+    Match <--> Idx
+    Routes ==>|JSON hits| Client
+```
+
+### Pipeline Data Flow
+
+Each stage produces a strongly-typed artifact that the next stage consumes. Perceptual and semantic branches are independent — either or both can be enabled per request:
+
+```mermaid
+flowchart TD
+    classDef input  fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef stage  fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef artifact fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef output fill:#dcfce7,stroke:#16a34a,color:#14532d
+
+    Raw["RawIngestRecord<br/><i>id · source · metadata · payload</i>"]:::input
+
+    Ingest["ingest::ingest()<br/>validate · normalize metadata"]:::stage
+    CanonStep["canonical::canonicalize()<br/>NFKC · lowercase · whitespace · SHA-256"]:::stage
+    PercStep["perceptual::perceptualize_tokens()<br/>k-shingles · winnowing · MinHash LSH"]:::stage
+    SemStep["semantic::semanticize()<br/>ONNX / API embedding · L2 normalize"]:::stage
+
+    CIR["CanonicalIngestRecord"]:::artifact
+    Doc["CanonicalizedDocument<br/><i>tokens · canonical_hash</i>"]:::artifact
+    FP["PerceptualFingerprint<br/><i>shingles · minhash[128]</i>"]:::artifact
+    Emb["SemanticEmbedding<br/><i>Vec&lt;f32&gt; → quantize → Vec&lt;i8&gt;</i>"]:::artifact
+
+    IR["IndexRecord<br/><i>canonical_hash · perceptual · embedding · metadata</i>"]:::output
+
+    Raw --> Ingest --> CIR --> CanonStep --> Doc
+    Doc -->|tokens| PercStep --> FP
+    Doc -->|canonical text| SemStep --> Emb
+    Doc  --> IR
+    FP   --> IR
+    Emb  --> IR
+```
+
+### Match Strategies
+
+`MatchExpr` is a composable tree — leaves run against the index, inner nodes combine scores:
+
+```mermaid
+flowchart TD
+    classDef q fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef leaf fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef combine fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef out fill:#dcfce7,stroke:#16a34a,color:#14532d
+
+    Q["MatchRequest<br/><i>tenant · query_text · MatchExpr</i>"]:::q
+
+    Exact["MatchExpr::Exact<br/>query.canonical_hash == doc.canonical_hash"]:::leaf
+    Perc["MatchExpr::Perceptual { min_score }<br/>Jaccard over MinHash bands"]:::leaf
+    Sem["MatchExpr::Semantic { min_score }<br/>cosine over i8 embedding (HNSW)"]:::leaf
+    Weight["MatchExpr::Weighted { alpha, min_overall }<br/>α·sem + (1-α)·perc"]:::combine
+    And["MatchExpr::And<br/>min(left, right)"]:::combine
+    Or["MatchExpr::Or<br/>max(left, right)"]:::combine
+
+    Rank["rank · tenant filter · truncate(max_results)"]:::combine
+    Hits(["Vec&lt;MatchHit&gt;<br/>hash · score · per-mode scores · metadata"]):::out
+
+    Q --> Exact
+    Q --> Perc
+    Q --> Sem
+    Q --> Weight
+    Q --> And
+    Q --> Or
+    Exact  --> Rank
+    Perc   --> Rank
+    Sem    --> Rank
+    Weight --> Rank
+    And    --> Rank
+    Or     --> Rank
+    Rank --> Hits
+```
+
+### Crate Layering
+
+The workspace is strictly layered — no cycles. Lower crates know nothing of higher ones:
+
+```mermaid
+flowchart BT
+    classDef foundation fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef feature fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef glue fill:#fce7f3,stroke:#db2777,color:#831843
+    classDef top fill:#dcfce7,stroke:#16a34a,color:#14532d
+
+    ingest[ingest]:::foundation
+    canonical[canonical]:::foundation
+
+    perceptual[perceptual]:::feature
+    semantic[semantic]:::feature
+
+    index[index]:::glue
+    matcher[matcher]:::glue
+
+    ucfp[ucfp<br/><i>umbrella</i>]:::top
+    server[ucfp-server]:::top
+
+    canonical --> perceptual
+    canonical --> semantic
+    ingest    --> ucfp
+    canonical --> ucfp
+    perceptual --> ucfp
+    semantic   --> ucfp
+    ingest    --> matcher
+    canonical --> matcher
+    perceptual --> matcher
+    semantic  --> matcher
+    index     --> matcher
+    ucfp      --> server
+    matcher   --> server
+    index     --> server
+```
+
+### Request Lifecycle: `POST /api/v1/match`
+
+A traced view of a single match request — useful for understanding latency hotspots:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant MW as Middleware<br/>(auth · request-id · rate limit)
+    participant R as Route<br/>matching::match_documents
+    participant M as Matcher
+    participant P as Pipeline<br/>(ingest → canonical → sem/perc)
+    participant I as UfpIndex<br/>(HNSW + DashMap)
+
+    C->>MW: POST /api/v1/match + X-API-Key
+    MW->>MW: validate key · tag request-id
+    MW->>R: forward
+    R->>M: MatchRequest { tenant, query_text, MatchExpr }
+
+    rect rgba(237,233,254,0.4)
+        note over M,P: query → fingerprint
+        M->>P: build RawIngestRecord(query_text)
+        P->>P: ingest · canonicalize · (perceptual | semantic)
+        P-->>M: CanonicalizedDocument + FP / Embedding
+    end
+
+    rect rgba(224,242,254,0.4)
+        note over M,I: index lookup
+        M->>I: query_perceptual(fp)
+        I-->>M: Vec&lt;QueryResult&gt;
+        M->>I: query_semantic(quantized_vec)
+        I-->>M: Vec&lt;QueryResult&gt;
+    end
+
+    M->>M: score · tenant filter · rank · truncate
+    M-->>R: Vec&lt;MatchHit&gt;
+    R-->>MW: JSON response
+    MW-->>C: 200 OK + hits
+```
+
 ## Configuration
 
 ```yaml

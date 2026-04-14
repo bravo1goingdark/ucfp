@@ -544,7 +544,6 @@ mod tests {
         let fp1 = perceptualize_tokens(&tokens1, &cfg).unwrap();
         let fp2 = perceptualize_tokens(&tokens2, &cfg).unwrap();
 
-        // Count matching MinHash values
         let matches = fp1
             .minhash
             .iter()
@@ -552,12 +551,7 @@ mod tests {
             .filter(|(a, b)| a == b)
             .count();
 
-        // Document the behavior - note this is probabilistic
-        // Similar documents typically share some MinHash values
-        println!("Matching MinHash values: {matches}/128");
-        // This test documents the behavior - note that matches is always >= 0 for usize
-        // Similar documents should have some matching MinHash values with high probability
-        println!("Similar documents may share some MinHash values (found {matches} matches)");
+        assert!(matches <= fp1.minhash.len());
     }
 
     // ==================== Doc Test Verification ====================
@@ -653,9 +647,8 @@ mod tests {
         // Use longer texts with significant overlap to ensure band matches
         let tokens1: Vec<String> = (0..50).map(|i| format!("token{i}")).collect();
         let mut tokens2 = tokens1.clone();
-        // Change last 10 tokens
-        for i in 40..50 {
-            tokens2[i] = format!("different{i}");
+        for (i, slot) in tokens2.iter_mut().enumerate().take(50).skip(40) {
+            *slot = format!("different{i}");
         }
 
         let cfg = PerceptualConfig::default();
@@ -664,9 +657,8 @@ mod tests {
 
         let similarity = jaccard_similarity(&fp1, &fp2);
         assert!(
-            similarity >= 0.0 && similarity < 1.0,
-            "Similar texts should have intermediate similarity, got {}",
-            similarity
+            (0.0..1.0).contains(&similarity),
+            "Similar texts should have intermediate similarity, got {similarity}",
         );
     }
 
@@ -692,7 +684,7 @@ mod tests {
 
         let similarity = jaccard_similarity(&fp1, &fp2);
         assert!(
-            similarity >= 0.0 && similarity < 0.5,
+            (0.0..0.5).contains(&similarity),
             "Different texts should have low similarity"
         );
     }
