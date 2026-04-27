@@ -14,7 +14,12 @@ categories   = ["database", "multimedia"]
 default = ["embedded", "server", "audio", "image", "text"]
 
 # Storage + ANN. The day-one backend per docs/ARCHITECTURE.md §2.
-embedded = ["dep:redb", "dep:hnsw_rs", "dep:pulp", "dep:roaring", "dep:rkyv", "dep:rayon"]
+# Pulls a slim tokio for spawn_blocking on the redb tx; the full server
+# runtime stays gated under `server`.
+embedded = [
+    "dep:redb", "dep:hnsw_rs", "dep:pulp", "dep:roaring", "dep:rkyv", "dep:rayon",
+    "dep:tokio",
+]
 
 # HTTP server binary. Disable for library-only consumers.
 server = [
@@ -57,7 +62,7 @@ rayon   = { version = "1.12", optional = true }
 
 # ── Server (feature-gated) ──────────────────────────────────────────────
 axum                        = { version = "0.8", optional = true }
-tokio                       = { version = "1.47", features = ["rt-multi-thread", "macros", "signal"], optional = true }
+tokio                       = { version = "1.47", features = ["rt-multi-thread", "macros", "signal", "rt"], optional = true }
 tower                       = { version = "0.5", features = ["limit", "timeout"], optional = true }
 tower-http                  = { version = "0.6", features = ["validate-request", "limit", "trace", "timeout"], optional = true }
 tracing-subscriber          = { version = "0.3.22", features = ["json", "env-filter"], optional = true }
@@ -67,6 +72,10 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false, opti
 # ── Optional graduations ────────────────────────────────────────────────
 qdrant-client = { version = "1", optional = true }
 ort           = { version = "=2.0.0-rc.10", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio    = { version = "1.47", features = ["rt-multi-thread", "macros"] }
 
 [[bin]]
 name              = "ucfp"
