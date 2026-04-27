@@ -25,6 +25,7 @@ embedded = [
 server = [
     "dep:axum", "dep:tokio", "dep:tower", "dep:tower-http",
     "dep:tracing-subscriber", "dep:metrics", "dep:metrics-exporter-prometheus",
+    "dep:subtle",
 ]
 
 # Per-modality SDKs. Each pulls only its own crate; off-by-default for slim builds.
@@ -65,10 +66,11 @@ rayon   = { version = "1.12", optional = true }
 axum                        = { version = "0.8", optional = true }
 tokio                       = { version = "1.47", features = ["rt-multi-thread", "macros", "signal", "rt"], optional = true }
 tower                       = { version = "0.5", features = ["limit", "timeout"], optional = true }
-tower-http                  = { version = "0.6", features = ["auth", "validate-request", "limit", "trace", "timeout"], optional = true }
+tower-http                  = { version = "0.6", features = ["limit", "trace", "timeout"], optional = true }
 tracing-subscriber          = { version = "0.3.22", features = ["json", "env-filter"], optional = true }
 metrics                     = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.18", default-features = false, optional = true }
+subtle                      = { version = "2.6", optional = true }
 
 # ── Optional graduations ────────────────────────────────────────────────
 qdrant-client = { version = "1", optional = true }

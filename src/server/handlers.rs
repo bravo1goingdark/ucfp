@@ -33,8 +33,14 @@ use axum::extract::Query as Qs;
 
 // ── GET /healthz ───────────────────────────────────────────────────────
 
-pub(super) async fn healthz() -> &'static str {
-    "ok"
+/// Ping the index — a 200 means "process is up AND the DB is reachable".
+/// A non-200 (5xx via `ApiError`) signals the orchestrator to stop
+/// routing here; the underlying error variant determines which code.
+pub(super) async fn healthz<I: IndexBackend>(
+    State(index): State<Arc<I>>,
+) -> Result<&'static str, ApiError> {
+    index.flush().await?;
+    Ok("ok")
 }
 
 // ── GET /v1/info ───────────────────────────────────────────────────────

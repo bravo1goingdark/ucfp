@@ -1,11 +1,23 @@
-//! HTTP routes — `/healthz`, `/v1/info`, `/v1/records`, `/v1/query`.
+//! HTTP routes — `/healthz`, `/v1/info`, `/v1/records`, `/v1/query`,
+//! and feature-gated modality ingest paths.
 //!
 //! Generic over [`crate::IndexBackend`] so the same router serves the
 //! embedded backend today and a managed graduation backend later. The
-//! bin entry in `bin/ucfp.rs` instantiates it with `Arc<EmbeddedBackend>`.
+//! bin entry in `bin/ucfp.rs` instantiates with `Arc<EmbeddedBackend>`.
 //!
 //! All handlers funnel through [`error::ApiError`] for a consistent
 //! error envelope; HTTP status codes map per [`crate::Error`] variant.
+//!
+//! ## Auth shape
+//!
+//! Routes split into two halves so bin/ucfp.rs can layer bearer-token
+//! auth on the protected ones without a path-string allowlist:
+//!
+//! - [`public_router`] — `/healthz`, `/v1/info` (probe + version)
+//! - [`protected_router`] — everything else (records + query + ingest)
+//!
+//! [`router`] returns the merged form (no auth) for tests and library
+//! consumers that handle auth elsewhere.
 
 #![cfg(feature = "server")]
 
@@ -25,15 +37,26 @@ use axum::{
 
 use crate::index::IndexBackend;
 
-/// Build the UCFP router. State is a single `Arc<I>` — clone-friendly
-/// for axum's `with_state` and shareable across requests.
-pub fn router<I>(index: Arc<I>) -> Router
+/// Routes that are safe to expose without authentication — k8s probes
+/// and version discovery. Composed under `with_state` so the healthz
+/// handler can ping the backing index.
+pub fn public_router<I>(index: Arc<I>) -> Router
+where
+    I: IndexBackend + 'static,
+{
+    Router::new()
+        .route("/healthz", get(handlers::healthz::<I>))
+        .route("/v1/info", get(handlers::info))
+        .with_state(index)
+}
+
+/// Routes that read or mutate tenant data. Bin layers bearer-token auth
+/// on this router before merging with [`public_router`].
+pub fn protected_router<I>(index: Arc<I>) -> Router
 where
     I: IndexBackend + 'static,
 {
     let r = Router::new()
-        .route("/healthz", get(handlers::healthz))
-        .route("/v1/info", get(handlers::info))
         .route("/v1/records", post(handlers::upsert::<I>))
         .route(
             "/v1/records/{tenant_id}/{record_id}",
@@ -60,4 +83,13 @@ where
     );
 
     r.with_state(index)
+}
+
+/// Merged router — public + protected, no auth applied. Convenient for
+/// tests and library consumers that wire their own auth.
+pub fn router<I>(index: Arc<I>) -> Router
+where
+    I: IndexBackend + 'static,
+{
+    public_router(index.clone()).merge(protected_router(index))
 }
