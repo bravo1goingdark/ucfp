@@ -29,6 +29,9 @@ mod matcher;
 mod modality;
 mod rerank;
 
+#[cfg(feature = "server")]
+pub mod server;
+
 pub use crate::core::{HitSource, Modality, Query, Record};
 pub use crate::error::{Error, Result};
 pub use crate::index::IndexBackend;

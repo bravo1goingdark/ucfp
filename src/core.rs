@@ -45,7 +45,10 @@ pub struct Record {
     pub format_version: u32,
     /// Stable algorithm tag, e.g. `"wang"`, `"imgfprint-multihash-v1"`,
     /// `"minhash-h128"`. Frozen for the lifetime of `format_version`.
-    pub algorithm: &'static str,
+    /// Owned `String` (rather than `&'static str`) so HTTP-supplied tags
+    /// from runtime DTOs can flow through unchanged; modality adapters
+    /// build with `ALGORITHM.into()`.
+    pub algorithm: String,
     /// SDK-specific config hash (e.g. `txtfp::config_hash`). Two records
     /// with the same `algorithm` but different `config_hash` are not
     /// directly comparable.

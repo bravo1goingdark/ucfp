@@ -366,7 +366,7 @@ mod tests {
             record_id: rid,
             modality: Modality::Image,
             format_version: 1,
-            algorithm: "test",
+            algorithm: "test".into(),
             config_hash: 0,
             fingerprint: Bytes::from_static(b"fp"),
             embedding: Some(embedding),

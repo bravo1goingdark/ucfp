@@ -39,7 +39,7 @@ pub fn fingerprint_wang(
         record_id,
         modality: Modality::Audio,
         format_version: 1, // audiofp 0.2.x; replace with audiofp::FORMAT_VERSION when added.
-        algorithm: ALGORITHM_WANG,
+        algorithm: ALGORITHM_WANG.into(),
         config_hash: 0,
         fingerprint: bytes,
         embedding: None,

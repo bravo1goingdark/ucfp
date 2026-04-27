@@ -3637,6 +3637,7 @@ version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
+ "base64 0.22.1",
  "bitflags 2.11.1",
  "bytes",
  "futures-util",
@@ -3797,6 +3798,7 @@ dependencies = [
  "bytemuck",
  "bytes",
  "hnsw_rs",
+ "http-body-util",
  "imgfprint",
  "metrics",
  "metrics-exporter-prometheus",
@@ -3808,6 +3810,7 @@ dependencies = [
  "rkyv",
  "roaring",
  "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",

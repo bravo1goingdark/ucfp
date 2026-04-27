@@ -43,7 +43,7 @@ pub fn fingerprint_minhash(text: &str, tenant_id: u32, record_id: u64) -> Result
         record_id,
         modality: Modality::Text,
         format_version: txtfp::FORMAT_VERSION,
-        algorithm: ALGORITHM_MINHASH_128,
+        algorithm: ALGORITHM_MINHASH_128.into(),
         config_hash: cfg,
         fingerprint: bytes,
         embedding: None,

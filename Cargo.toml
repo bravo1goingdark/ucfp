@@ -43,6 +43,7 @@ rerank        = ["dep:ort"]                      # cross-encoder rerank step
 bytemuck    = { version = "1.25", features = ["derive"] }
 bytes       = "1.10"
 serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
 thiserror   = "2.0"
 tracing     = "0.1"
 async-trait = "0.1"
@@ -64,7 +65,7 @@ rayon   = { version = "1.12", optional = true }
 axum                        = { version = "0.8", optional = true }
 tokio                       = { version = "1.47", features = ["rt-multi-thread", "macros", "signal", "rt"], optional = true }
 tower                       = { version = "0.5", features = ["limit", "timeout"], optional = true }
-tower-http                  = { version = "0.6", features = ["validate-request", "limit", "trace", "timeout"], optional = true }
+tower-http                  = { version = "0.6", features = ["auth", "validate-request", "limit", "trace", "timeout"], optional = true }
 tracing-subscriber          = { version = "0.3.22", features = ["json", "env-filter"], optional = true }
 metrics                     = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.18", default-features = false, optional = true }
@@ -74,8 +75,11 @@ qdrant-client = { version = "1", optional = true }
 ort           = { version = "=2.0.0-rc.10", optional = true }
 
 [dev-dependencies]
-tempfile = "3"
-tokio    = { version = "1.47", features = ["rt-multi-thread", "macros"] }
+tempfile        = "3"
+tokio           = { version = "1.47", features = ["rt-multi-thread", "macros"] }
+tower           = { version = "0.5", features = ["util"] }
+http-body-util  = "0.1"
+serde_json      = "1.0"
 
 [[bin]]
 name              = "ucfp"

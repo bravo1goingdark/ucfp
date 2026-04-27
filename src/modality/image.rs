@@ -35,7 +35,7 @@ pub fn fingerprint_with(
         record_id,
         modality: Modality::Image,
         format_version: imgfprint::FORMAT_VERSION,
-        algorithm: ALGORITHM,
+        algorithm: ALGORITHM.into(),
         // imgfprint's compare-time config is per-call (MultiHashConfig),
         // not folded into the stored fingerprint, so config_hash is 0
         // for stored records — callers attach it at compare time.

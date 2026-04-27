@@ -51,14 +51,36 @@ pub fn rrf(rankings: &[&[Hit]], rrf_k: u32) -> Vec<Hit> {
 /// Query-time orchestrator. Holds references to the index backend and
 /// (optionally) a reranker; `search` runs the right combination given
 /// the query shape.
-pub struct Matcher<'a, I: IndexBackend, R: Reranker> {
+///
+/// Default `R = NoopReranker` lets retrieval-only callers write
+/// `Matcher::new(&index)` without a turbofish.
+pub struct Matcher<'a, I: IndexBackend, R: Reranker = crate::rerank::NoopReranker> {
     /// Storage + ANN backend.
     pub index: &'a I,
     /// Optional second-stage reranker. Pass `None` for retrieval-only.
     pub reranker: Option<&'a R>,
 }
 
+impl<'a, I: IndexBackend> Matcher<'a, I, crate::rerank::NoopReranker> {
+    /// Construct a retrieval-only matcher (no reranker).
+    pub fn new(index: &'a I) -> Self {
+        Self {
+            index,
+            reranker: None,
+        }
+    }
+}
+
 impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
+    /// Construct a matcher with a custom reranker. The reranker runs
+    /// on the top-`k` after retrieval / RRF fusion.
+    pub fn with_reranker(index: &'a I, reranker: &'a R) -> Self {
+        Self {
+            index,
+            reranker: Some(reranker),
+        }
+    }
+
     /// Run retrieval per the query shape:
     /// - `vector.is_some() && !terms.is_empty()` → hybrid (vector ∥ BM25 → RRF)
     /// - `vector.is_some()` → vector-only
