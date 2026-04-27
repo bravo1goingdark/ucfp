@@ -16,11 +16,11 @@
 //! message until the FST + roaring postings layout from §4 is wired.
 
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use rayon::prelude::*;
 use redb::{Database, ReadableDatabase, TableDefinition};
 
 use crate::core::{Hit, HitSource, Record};
@@ -211,69 +211,79 @@ impl IndexBackend for EmbeddedBackend {
         let query: Vec<f32> = query.to_vec();
 
         tokio::task::spawn_blocking(move || -> Result<Vec<Hit>> {
-            let txn = db.begin_read().map_err(|e| Error::Index(e.to_string()))?;
-            let table = txn
-                .open_table(VECTORS)
-                .map_err(|e| Error::Index(e.to_string()))?;
-
             let q_norm = l2_norm(&query);
             if q_norm == 0.0 {
                 return Ok(Vec::new());
             }
 
-            // Min-heap keyed by score so we evict the worst when full.
-            let mut heap: BinaryHeap<HeapItem> = BinaryHeap::with_capacity(k);
-
-            for entry in table
-                .range((tenant_id, 0u64)..=(tenant_id, u64::MAX))
-                .map_err(|e| Error::Index(e.to_string()))?
-            {
-                let (key_guard, val_guard) = entry.map_err(|e| Error::Index(e.to_string()))?;
-                let (_tid, rid) = key_guard.value();
-                let bytes = val_guard.value();
-
-                if bytes.len() % std::mem::size_of::<f32>() != 0 {
-                    continue;
-                }
-                let stored: &[f32] = bytemuck::cast_slice(bytes);
-                if stored.len() != query.len() {
-                    continue;
-                }
-
-                let s_norm = l2_norm(stored);
-                if s_norm == 0.0 {
-                    continue;
-                }
-                let dot = dot_product(&query, stored);
-                let cos = dot / (q_norm * s_norm);
-
-                let item = HeapItem {
-                    record_id: rid,
-                    score: cos,
-                };
-                if heap.len() < k {
-                    heap.push(item);
-                } else if let Some(top) = heap.peek() {
-                    // BinaryHeap is a max-heap on `Ord`; we invert via
-                    // HeapItem's Ord so the *worst* score sits at top.
-                    if item < *top {
-                        heap.pop();
-                        heap.push(item);
+            // ── Phase 1: collect candidates from redb ─────────────────────
+            //
+            // Parse stored f32 vectors via `from_le_bytes` rather than
+            // `bytemuck::cast_slice`. redb returns `&[u8]` slices into its
+            // mmap; their alignment is not guaranteed to be 4 bytes, so a
+            // direct cast would panic on architectures that enforce it.
+            let candidates: Vec<(u64, Vec<f32>)> = {
+                let txn = db.begin_read().map_err(|e| Error::Index(e.to_string()))?;
+                let table = txn
+                    .open_table(VECTORS)
+                    .map_err(|e| Error::Index(e.to_string()))?;
+                let mut out: Vec<(u64, Vec<f32>)> = Vec::new();
+                for entry in table
+                    .range((tenant_id, 0u64)..=(tenant_id, u64::MAX))
+                    .map_err(|e| Error::Index(e.to_string()))?
+                {
+                    let (key_guard, val_guard) =
+                        entry.map_err(|e| Error::Index(e.to_string()))?;
+                    let (_tid, rid) = key_guard.value();
+                    let bytes = val_guard.value();
+                    if bytes.len() % 4 != 0 || bytes.len() / 4 != query.len() {
+                        continue;
                     }
+                    let v: Vec<f32> = bytes
+                        .chunks_exact(4)
+                        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+                        .collect();
+                    out.push((rid, v));
                 }
-            }
+                out
+            };
 
-            let mut hits: Vec<Hit> = heap
+            // ── Phase 2: rayon parallel cosine + top-k merge ──────────────
+            //
+            // Per-thread fold builds a local top-k descending; reduce
+            // merges with a bounded insert. Final sort is on a vec of size
+            // ≤ k, so it's free relative to the scan.
+            let mut merged: Vec<(u64, f32)> = candidates
+                .par_iter()
+                .fold(
+                    Vec::<(u64, f32)>::new,
+                    |mut local, (rid, v)| {
+                        let v_norm = l2_norm(v);
+                        if v_norm == 0.0 {
+                            return local;
+                        }
+                        let score = dot_product(&query, v) / (q_norm * v_norm);
+                        insert_topk(&mut local, *rid, score, k);
+                        local
+                    },
+                )
+                .reduce(Vec::<(u64, f32)>::new, |mut a, b| {
+                    for (rid, score) in b {
+                        insert_topk(&mut a, rid, score, k);
+                    }
+                    a
+                });
+
+            merged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
+            Ok(merged
                 .into_iter()
-                .map(|h| Hit {
+                .map(|(rid, score)| Hit {
                     tenant_id,
-                    record_id: h.record_id,
-                    score: h.score,
+                    record_id: rid,
+                    score,
                     source: HitSource::Vector,
                 })
-                .collect();
-            hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-            Ok(hits)
+                .collect())
         })
         .await
         .map_err(|e| Error::Index(format!("join error: {e}")))?
@@ -308,9 +318,31 @@ impl IndexBackend for EmbeddedBackend {
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
+/// Dot product with chunked independent accumulators.
+///
+/// Eight parallel f32 lanes break the dependency chain so LLVM emits a
+/// SIMD-friendly inner loop (AVX2 on x86_64, NEON on aarch64) at
+/// `opt-level >= 2`. The scalar `iter().zip().map().sum()` form depends
+/// on a single accumulator and stalls vectorization.
 #[inline]
 fn dot_product(a: &[f32], b: &[f32]) -> f32 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    debug_assert_eq!(a.len(), b.len());
+    const LANES: usize = 8;
+    let mut accs = [0f32; LANES];
+    let a_chunks = a.chunks_exact(LANES);
+    let b_chunks = b.chunks_exact(LANES);
+    let a_rem = a_chunks.remainder();
+    let b_rem = b_chunks.remainder();
+    for (ac, bc) in a_chunks.zip(b_chunks) {
+        for j in 0..LANES {
+            accs[j] += ac[j] * bc[j];
+        }
+    }
+    let mut sum: f32 = accs.iter().sum();
+    for (x, y) in a_rem.iter().zip(b_rem.iter()) {
+        sum += x * y;
+    }
+    sum
 }
 
 #[inline]
@@ -318,36 +350,21 @@ fn l2_norm(v: &[f32]) -> f32 {
     dot_product(v, v).sqrt()
 }
 
-/// Min-heap item: smaller score = "worse", floats to top so the worst
-/// is evicted when the heap is full.
-#[derive(Copy, Clone, Debug)]
-struct HeapItem {
-    record_id: u64,
-    score: f32,
-}
-
-impl PartialEq for HeapItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.score.eq(&other.score) && self.record_id == other.record_id
-    }
-}
-impl Eq for HeapItem {}
-
-impl PartialOrd for HeapItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for HeapItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // BinaryHeap is a max-heap; we want the *worst* (lowest) score
-        // at the top so it gets popped when a better candidate arrives.
-        // So Self < Other when Self has a HIGHER score.
-        other
-            .score
-            .partial_cmp(&self.score)
-            .unwrap_or(Ordering::Equal)
-            .then_with(|| self.record_id.cmp(&other.record_id))
+/// Maintain a sorted-descending top-k buffer in place. O(k) per call —
+/// fine for k ≤ a few hundred. For larger k, a min-heap would amortize
+/// better, but the partition_point + insert pattern compiles to tight,
+/// branch-predictable code at small k.
+#[inline]
+fn insert_topk(local: &mut Vec<(u64, f32)>, rid: u64, score: f32, k: usize) {
+    if local.len() < k {
+        let pos = local.partition_point(|(_, s)| *s > score);
+        local.insert(pos, (rid, score));
+    } else if let Some((_, worst)) = local.last() {
+        if score > *worst {
+            let pos = local.partition_point(|(_, s)| *s > score);
+            local.insert(pos, (rid, score));
+            local.pop();
+        }
     }
 }
 
