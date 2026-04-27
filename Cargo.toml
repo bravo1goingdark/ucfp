@@ -8,10 +8,7 @@ repository = "https://github.com/bravo1goingdark/ucfp"
 include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
-canonical = { package = "content-canonical", version = "0.1.0", path = "crates/canonical" }
 ingest = { package = "content-ingest", version = "0.1.0", path = "crates/ingest" }
-perceptual = { package = "content-perceptual", version = "0.1.0", path = "crates/perceptual" }
-semantic = { package = "content-semantic", version = "0.1.0", path = "crates/semantic" }
 index = { package = "content-index", version = "0.1.0", path = "crates/index" }
 matcher = { version = "0.1.0", path = "crates/matcher" }
 chrono = { version = "0.4", features = ["serde"] }
@@ -84,10 +81,7 @@ opt-level = 0
 
 [workspace]
 members = [
-    "crates/canonical",
     "crates/ingest",
-    "crates/perceptual",
-    "crates/semantic",
     "crates/index",
     "crates/matcher",
     "crates/server"
