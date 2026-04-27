@@ -170,6 +170,129 @@ async fn delete_returns_204_and_removes_record() {
     assert_eq!(body["hits"].as_array().unwrap().len(), 0);
 }
 
+// ── Modality-specific ingest routes ────────────────────────────────────
+
+#[cfg(feature = "text")]
+#[tokio::test]
+async fn ingest_text_round_trip() {
+    let (app, _dir) = fixture().await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/text/3/77")
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::from("the quick brown fox jumps over the lazy dog"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body: serde_json::Value = read_json(resp).await;
+    assert_eq!(body["tenant_id"], 3);
+    assert_eq!(body["record_id"], 77);
+    assert_eq!(body["modality"], "Text");
+    assert_eq!(body["algorithm"], "minhash-h128");
+    assert!(body["fingerprint_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(body["has_embedding"], false);
+}
+
+#[cfg(feature = "text")]
+#[tokio::test]
+async fn ingest_text_rejects_invalid_utf8() {
+    let (app, _dir) = fixture().await;
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/text/1/1")
+                // Lone continuation byte — invalid UTF-8.
+                .body(Body::from(vec![0x80u8]))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = read_json(resp).await;
+    assert_eq!(body["error"], "modality");
+}
+
+#[cfg(feature = "image")]
+fn synthetic_png(w: u32, h: u32) -> Vec<u8> {
+    let img = image::ImageBuffer::from_fn(w, h, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, 128u8])
+    });
+    let mut buf = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .unwrap();
+    buf
+}
+
+#[cfg(feature = "image")]
+#[tokio::test]
+async fn ingest_image_round_trip() {
+    let (app, _dir) = fixture().await;
+
+    let png = synthetic_png(64, 64);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/image/9/1234")
+                .header("content-type", "image/png")
+                .body(Body::from(png))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body: serde_json::Value = read_json(resp).await;
+    assert_eq!(body["tenant_id"], 9);
+    assert_eq!(body["record_id"], 1234);
+    assert_eq!(body["modality"], "Image");
+    assert_eq!(body["algorithm"], "imgfprint-multihash-v1");
+    assert!(body["fingerprint_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(body["has_embedding"], false);
+}
+
+#[cfg(feature = "image")]
+#[tokio::test]
+async fn ingest_image_rejects_garbage_bytes() {
+    let (app, _dir) = fixture().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/image/1/1")
+                .body(Body::from(b"not an image".to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[cfg(feature = "audio")]
+#[tokio::test]
+async fn ingest_audio_rejects_misaligned_body() {
+    let (app, _dir) = fixture().await;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/audio/1/1?sample_rate=8000")
+                .body(Body::from(vec![0u8, 0, 0])) // 3 bytes — not a multiple of 4
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn info_returns_format_version() {
     let (app, _dir) = fixture().await;

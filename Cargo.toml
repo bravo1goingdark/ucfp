@@ -80,6 +80,9 @@ tokio           = { version = "1.47", features = ["rt-multi-thread", "macros"] }
 tower           = { version = "0.5", features = ["util"] }
 http-body-util  = "0.1"
 serde_json      = "1.0"
+# For synthesizing test PNGs in HTTP integration tests. imgfprint already
+# pulls `image` transitively, so this is a free build-graph addition.
+image           = { version = "0.25", default-features = false, features = ["png"] }
 
 [[bin]]
 name              = "ucfp"

@@ -3799,6 +3799,7 @@ dependencies = [
  "bytes",
  "hnsw_rs",
  "http-body-util",
+ "image",
  "imgfprint",
  "metrics",
  "metrics-exporter-prometheus",

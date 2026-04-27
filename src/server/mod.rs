@@ -31,7 +31,7 @@ pub fn router<I>(index: Arc<I>) -> Router
 where
     I: IndexBackend + 'static,
 {
-    Router::new()
+    let r = Router::new()
         .route("/healthz", get(handlers::healthz))
         .route("/v1/info", get(handlers::info))
         .route("/v1/records", post(handlers::upsert::<I>))
@@ -39,6 +39,25 @@ where
             "/v1/records/{tenant_id}/{record_id}",
             delete(handlers::delete_record::<I>),
         )
-        .route("/v1/query", post(handlers::query::<I>))
-        .with_state(index)
+        .route("/v1/query", post(handlers::query::<I>));
+
+    #[cfg(feature = "image")]
+    let r = r.route(
+        "/v1/ingest/image/{tenant_id}/{record_id}",
+        post(handlers::ingest_image::<I>),
+    );
+
+    #[cfg(feature = "text")]
+    let r = r.route(
+        "/v1/ingest/text/{tenant_id}/{record_id}",
+        post(handlers::ingest_text::<I>),
+    );
+
+    #[cfg(feature = "audio")]
+    let r = r.route(
+        "/v1/ingest/audio/{tenant_id}/{record_id}",
+        post(handlers::ingest_audio::<I>),
+    );
+
+    r.with_state(index)
 }

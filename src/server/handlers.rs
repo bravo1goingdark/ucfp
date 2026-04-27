@@ -18,6 +18,19 @@ use super::dto::{
 };
 use super::error::ApiError;
 
+// Imports only the ingest handlers need — feature-gated so a build
+// with all three modality features off doesn't warn.
+#[cfg(feature = "audio")]
+use super::dto::AudioParams;
+#[cfg(any(feature = "audio", feature = "image", feature = "text"))]
+use super::dto::IngestResponse;
+#[cfg(any(feature = "audio", feature = "text"))]
+use crate::error::Error;
+#[cfg(any(feature = "audio", feature = "image", feature = "text"))]
+use axum::body::Bytes;
+#[cfg(feature = "audio")]
+use axum::extract::Query as Qs;
+
 // ── GET /healthz ───────────────────────────────────────────────────────
 
 pub(super) async fn healthz() -> &'static str {
@@ -93,4 +106,80 @@ fn hit_source_str(s: HitSource) -> &'static str {
         HitSource::Reranker => "reranker",
         HitSource::Fused => "fused",
     }
+}
+
+// ── POST /v1/ingest/* ──────────────────────────────────────────────────
+//
+// Each modality-specific ingest route takes the raw bytes, hands them to
+// the right SDK adapter, and upserts a fully-formed Record. Clients no
+// longer need to compute fingerprints themselves.
+
+#[cfg(any(feature = "audio", feature = "image", feature = "text"))]
+fn ingest_response(rec: &Record) -> IngestResponse {
+    IngestResponse {
+        tenant_id: rec.tenant_id,
+        record_id: rec.record_id,
+        modality: rec.modality,
+        format_version: rec.format_version,
+        algorithm: rec.algorithm.clone(),
+        config_hash: rec.config_hash,
+        fingerprint_bytes: rec.fingerprint.len(),
+        has_embedding: rec.embedding.is_some(),
+    }
+}
+
+#[cfg(feature = "image")]
+pub(super) async fn ingest_image<I: IndexBackend>(
+    State(index): State<Arc<I>>,
+    Path((tenant_id, record_id)): Path<(u32, u64)>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
+    let rec = crate::modality::image::fingerprint(&body, tenant_id, record_id)?;
+    index.upsert(std::slice::from_ref(&rec)).await?;
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+}
+
+#[cfg(feature = "text")]
+pub(super) async fn ingest_text<I: IndexBackend>(
+    State(index): State<Arc<I>>,
+    Path((tenant_id, record_id)): Path<(u32, u64)>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
+    let text = std::str::from_utf8(&body)
+        .map_err(|e| Error::Modality(format!("body is not valid UTF-8: {e}")))?;
+    let rec = crate::modality::text::fingerprint_minhash(text, tenant_id, record_id)?;
+    index.upsert(std::slice::from_ref(&rec)).await?;
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+}
+
+#[cfg(feature = "audio")]
+pub(super) async fn ingest_audio<I: IndexBackend>(
+    State(index): State<Arc<I>>,
+    Path((tenant_id, record_id)): Path<(u32, u64)>,
+    Qs(params): Qs<AudioParams>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
+    if body.len() % 4 != 0 {
+        return Err(Error::Modality(format!(
+            "audio body must be a multiple of 4 bytes (raw f32 LE samples), got {}",
+            body.len()
+        ))
+        .into());
+    }
+    // Decode body bytes → Vec<f32> via explicit little-endian conversion.
+    // Avoids alignment concerns from a direct `bytemuck::cast_slice` on
+    // arbitrary heap buffers across platforms.
+    let samples: Vec<f32> = body
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    let rec = crate::modality::audio::fingerprint_wang(
+        &samples,
+        params.sample_rate,
+        tenant_id,
+        record_id,
+    )?;
+    index.upsert(std::slice::from_ref(&rec)).await?;
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
 }

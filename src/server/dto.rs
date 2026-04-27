@@ -93,3 +93,28 @@ pub(super) struct HitOut {
     /// `"vector" | "bm25" | "filter" | "reranker" | "fused"`.
     pub source: &'static str,
 }
+
+// ── /v1/ingest/{modality}/{tid}/{rid} (POST) ───────────────────────────
+
+/// Returned by the modality-specific ingest routes after a successful
+/// upsert. Confirms what was stored so the client can reconcile.
+#[cfg(any(feature = "audio", feature = "image", feature = "text"))]
+#[derive(Serialize)]
+pub(super) struct IngestResponse {
+    pub tenant_id: u32,
+    pub record_id: u64,
+    pub modality: Modality,
+    pub format_version: u32,
+    pub algorithm: String,
+    pub config_hash: u64,
+    pub fingerprint_bytes: usize,
+    pub has_embedding: bool,
+}
+
+/// Query parameters for `POST /v1/ingest/audio/...` — sample rate is
+/// required since the body is raw f32 samples (no header carries it).
+#[cfg(feature = "audio")]
+#[derive(Deserialize)]
+pub(super) struct AudioParams {
+    pub sample_rate: u32,
+}
