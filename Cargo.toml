@@ -1,40 +1,77 @@
-[workspace]
-resolver = "3"
-members = []
+[package]
+name         = "ucfp"
+version      = "0.1.0"
+edition      = "2024"
+rust-version = "1.85"
+license      = "Apache-2.0"
+repository   = "https://github.com/bravo1goingdark/ucfp"
+description  = "Universal Content Fingerprinting integrator: ingest, index, match, store"
+readme       = "README.md"
+keywords     = ["fingerprint", "deduplication", "search", "ann", "lsh"]
+categories   = ["database", "multimedia"]
 
-# Rebuild in progress. New member crates land here per docs/ARCHITECTURE.md:
-# planned: ucfp-core, ucfp-index, ucfp-ingest, ucfp-matcher, ucfp-server.
+[features]
+default = ["embedded", "server", "audio", "image", "text"]
 
-[workspace.package]
-version       = "0.1.0"
-edition       = "2024"
-rust-version  = "1.85"
-license       = "Apache-2.0"
-repository    = "https://github.com/bravo1goingdark/ucfp"
+# Storage + ANN. The day-one backend per docs/ARCHITECTURE.md §2.
+embedded = ["dep:redb", "dep:hnsw_rs", "dep:pulp", "dep:roaring", "dep:rkyv", "dep:rayon"]
 
-# Dependency pinning — sources of truth match docs/ARCHITECTURE.md §1.
-# Adding a member crate? Reach for these workspace deps before pinning your own.
-[workspace.dependencies]
-axum                       = "0.8"
-tokio                      = { version = "1.47", features = ["rt-multi-thread", "macros", "signal"] }
-tower                      = { version = "0.5", features = ["limit", "timeout"] }
-tower-http                 = { version = "0.6", features = ["validate-request", "limit", "trace", "timeout"] }
-redb                       = "3.0"
-hnsw_rs                    = "0.3"
-pulp                       = "0.22"
-roaring                    = "0.11"
-rkyv                       = "0.8"
-bytemuck                   = { version = "1.25", features = ["derive"] }
-bytes                      = "1.10"
-rayon                      = "1.12"
-tracing                    = "0.1"
-tracing-subscriber         = { version = "0.3.22", features = ["json", "env-filter"] }
-metrics                    = "0.24"
-metrics-exporter-prometheus = { version = "0.18", default-features = false }
-serde                      = { version = "1.0", features = ["derive"] }
-serde_json                 = "1.0"
-thiserror                  = "2.0"
-async-trait                = "0.1"
+# HTTP server binary. Disable for library-only consumers.
+server = [
+    "dep:axum", "dep:tokio", "dep:tower", "dep:tower-http",
+    "dep:tracing-subscriber", "dep:metrics", "dep:metrics-exporter-prometheus",
+]
+
+# Per-modality SDKs. Each pulls only its own crate; off-by-default for slim builds.
+audio = ["dep:audiofp"]
+image = ["dep:imgfprint"]
+text  = ["dep:txtfp"]
+
+# Heavy / optional graduations. Off by default.
+text-semantic = ["text", "txtfp/semantic"]      # ONNX text embeddings via txtfp::semantic
+audio-neural  = ["audio", "audiofp/neural"]     # ONNX audio embeddings via audiofp::neural
+qdrant        = ["dep:qdrant-client"]            # graduate index to managed Qdrant
+rerank        = ["dep:ort"]                      # cross-encoder rerank step
+
+[dependencies]
+# ── Core, always on ─────────────────────────────────────────────────────
+bytemuck    = { version = "1.25", features = ["derive"] }
+bytes       = "1.10"
+serde       = { version = "1.0", features = ["derive"] }
+thiserror   = "2.0"
+tracing     = "0.1"
+async-trait = "0.1"
+
+# ── Per-modality SDKs (feature-gated) ───────────────────────────────────
+audiofp   = { version = "0.2.1", optional = true }
+imgfprint = { version = "0.4.1", optional = true }
+txtfp     = { version = "0.1.0", optional = true, default-features = false, features = ["std", "minhash", "simhash", "lsh", "serde", "parallel"] }
+
+# ── Embedded backend (feature-gated) ────────────────────────────────────
+redb    = { version = "3.0", optional = true }
+hnsw_rs = { version = "0.3", optional = true }
+pulp    = { version = "0.22", optional = true }
+roaring = { version = "0.11", optional = true }
+rkyv    = { version = "0.8",  optional = true }
+rayon   = { version = "1.12", optional = true }
+
+# ── Server (feature-gated) ──────────────────────────────────────────────
+axum                        = { version = "0.8", optional = true }
+tokio                       = { version = "1.47", features = ["rt-multi-thread", "macros", "signal"], optional = true }
+tower                       = { version = "0.5", features = ["limit", "timeout"], optional = true }
+tower-http                  = { version = "0.6", features = ["validate-request", "limit", "trace", "timeout"], optional = true }
+tracing-subscriber          = { version = "0.3.22", features = ["json", "env-filter"], optional = true }
+metrics                     = { version = "0.24", optional = true }
+metrics-exporter-prometheus = { version = "0.18", default-features = false, optional = true }
+
+# ── Optional graduations ────────────────────────────────────────────────
+qdrant-client = { version = "1", optional = true }
+ort           = { version = "=2.0.0-rc.10", optional = true }
+
+[[bin]]
+name              = "ucfp"
+path              = "src/bin/ucfp.rs"
+required-features = ["server", "embedded"]
 
 [profile.release]
 opt-level     = 3
