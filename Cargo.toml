@@ -1,100 +1,56 @@
-[package]
-name = "ucfp"
-version = "0.1.0"
-edition = "2021"
-description = "Universal Content Fingerprinting (UCFP) core library"
-license = "Apache-2.0"
-repository = "https://github.com/bravo1goingdark/ucfp"
-include = ["src/**/*", "Cargo.toml", "README.md", "LICENSE"]
+[workspace]
+resolver = "3"
+members = []
 
-[dependencies]
-ingest = { package = "content-ingest", version = "0.1.0", path = "crates/ingest" }
-index = { package = "content-index", version = "0.1.0", path = "crates/index" }
-matcher = { version = "0.1.0", path = "crates/matcher" }
-chrono = { version = "0.4", features = ["serde"] }
-anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-serde_yaml = "0.9"
-thiserror = "2.0.18"
-tokio = { version = "1.42", features = ["rt", "rt-multi-thread"] }
-tracing = "0.1"
-ndarray = "0.17"
+# Rebuild in progress. New member crates land here per docs/ARCHITECTURE.md:
+# planned: ucfp-core, ucfp-index, ucfp-ingest, ucfp-matcher, ucfp-server.
 
-[dev-dependencies]
-criterion = { version = "0.8.2", features = ["html_reports", "async_tokio"] }
-tempfile = "3"
-server = { package = "ucfp-server", version = "0.1.0", path = "crates/server" }
-rand = "0.10.0"
-rayon = "1.10"
+[workspace.package]
+version       = "0.1.0"
+edition       = "2024"
+rust-version  = "1.85"
+license       = "Apache-2.0"
+repository    = "https://github.com/bravo1goingdark/ucfp"
 
-[[bench]]
-name = "pipeline"
-harness = false
+# Dependency pinning — sources of truth match docs/ARCHITECTURE.md §1.
+# Adding a member crate? Reach for these workspace deps before pinning your own.
+[workspace.dependencies]
+axum                       = "0.8"
+tokio                      = { version = "1.47", features = ["rt-multi-thread", "macros", "signal"] }
+tower                      = { version = "0.5", features = ["limit", "timeout"] }
+tower-http                 = { version = "0.6", features = ["validate-request", "limit", "trace", "timeout"] }
+redb                       = "3.0"
+hnsw_rs                    = "0.3"
+pulp                       = "0.22"
+roaring                    = "0.11"
+rkyv                       = "0.8"
+bytemuck                   = { version = "1.25", features = ["derive"] }
+bytes                      = "1.10"
+rayon                      = "1.12"
+tracing                    = "0.1"
+tracing-subscriber         = { version = "0.3.22", features = ["json", "env-filter"] }
+metrics                    = "0.24"
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
+serde                      = { version = "1.0", features = ["derive"] }
+serde_json                 = "1.0"
+thiserror                  = "2.0"
+async-trait                = "0.1"
 
-[[bench]]
-name = "canonicalize_bench"
-harness = false
+[profile.release]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+panic         = "abort"
 
-[[bench]]
-name = "perceptual_bench"
-harness = false
-
-[[bench]]
-name = "index_bench"
-harness = false
-
-[[bench]]
-name = "semantic_bench"
-harness = false
-
-[[bench]]
-name = "ingest_bench"
-harness = false
-
-[[bench]]
-name = "matcher_bench"
-harness = false
-
-[[bench]]
-name = "storage_bench"
-harness = false
-
-[[bench]]
-name = "ann_bench"
-harness = false
-
-[[bench]]
-name = "scalability_bench"
-harness = false
-
-[[bench]]
-name = "concurrency_bench"
-harness = false
-
-[profile.test]
-opt-level = 1
-debug = true
+[profile.bench]
+opt-level     = 3
+lto           = "fat"
+codegen-units = 1
+debug         = true
 
 [profile.dev]
 opt-level = 0
 
-[workspace]
-members = [
-    "crates/ingest",
-    "crates/index",
-    "crates/matcher",
-    "crates/server"
-]
-
-[profile.release]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-panic = "abort"
-
-[profile.bench]
-opt-level = 3
-lto = "fat"
-codegen-units = 1
-debug = true
+[profile.test]
+opt-level = 1
+debug     = true
