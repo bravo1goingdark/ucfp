@@ -58,14 +58,12 @@ use axum::{
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use tower::limit::ConcurrencyLimitLayer;
-use tower_http::{
-    limit::RequestBodyLimitLayer, timeout::TimeoutLayer, trace::TraceLayer,
-};
+use tower_http::{limit::RequestBodyLimitLayer, timeout::TimeoutLayer, trace::TraceLayer};
 
 use ucfp::EmbeddedBackend;
 use ucfp::server::{
-    ApiKeyLookup, InMemoryTokenBucket, LogUsageSink, NoopUsageSink, ServerState,
-    StaticMapKey, StaticSingleKey, TenantRateLimiter, UsageSink, router_with_state,
+    ApiKeyLookup, InMemoryTokenBucket, LogUsageSink, NoopUsageSink, ServerState, StaticMapKey,
+    StaticSingleKey, TenantRateLimiter, UsageSink, router_with_state,
 };
 
 /// Per-request Prometheus metrics. Path label is the matched route
@@ -106,19 +104,22 @@ fn resolve_api_keys() -> Result<Arc<dyn ApiKeyLookup>, Box<dyn std::error::Error
     if let Ok(url) = std::env::var("UCFP_KEY_LOOKUP_URL") {
         #[cfg(feature = "multi-tenant")]
         {
-            let parsed = reqwest::Url::parse(&url)
-                .map_err(|e| format!("UCFP_KEY_LOOKUP_URL parse: {e}"))?;
+            let parsed =
+                reqwest::Url::parse(&url).map_err(|e| format!("UCFP_KEY_LOOKUP_URL parse: {e}"))?;
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(5))
                 .build()
                 .map_err(|e| format!("reqwest client build: {e}"))?;
-            return Ok(Arc::new(ucfp::server::WebhookKeyLookup::new(client, parsed)));
+            return Ok(Arc::new(ucfp::server::WebhookKeyLookup::new(
+                client, parsed,
+            )));
         }
         #[cfg(not(feature = "multi-tenant"))]
         {
             let _ = url;
-            return Err("UCFP_KEY_LOOKUP_URL set but binary built without `multi-tenant` feature"
-                .into());
+            return Err(
+                "UCFP_KEY_LOOKUP_URL set but binary built without `multi-tenant` feature".into(),
+            );
         }
     }
 
@@ -148,19 +149,22 @@ fn resolve_rate_limit() -> Result<Arc<dyn TenantRateLimiter>, Box<dyn std::error
     if let Ok(url) = std::env::var("UCFP_RATELIMIT_URL") {
         #[cfg(feature = "multi-tenant")]
         {
-            let parsed = reqwest::Url::parse(&url)
-                .map_err(|e| format!("UCFP_RATELIMIT_URL parse: {e}"))?;
+            let parsed =
+                reqwest::Url::parse(&url).map_err(|e| format!("UCFP_RATELIMIT_URL parse: {e}"))?;
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(2))
                 .build()
                 .map_err(|e| format!("reqwest client build: {e}"))?;
-            return Ok(Arc::new(ucfp::server::WebhookRateLimiter::new(client, parsed)));
+            return Ok(Arc::new(ucfp::server::WebhookRateLimiter::new(
+                client, parsed,
+            )));
         }
         #[cfg(not(feature = "multi-tenant"))]
         {
             let _ = url;
-            return Err("UCFP_RATELIMIT_URL set but binary built without `multi-tenant` feature"
-                .into());
+            return Err(
+                "UCFP_RATELIMIT_URL set but binary built without `multi-tenant` feature".into(),
+            );
         }
     }
     Ok(Arc::new(InMemoryTokenBucket::with_limits(100, 200)))
@@ -177,13 +181,16 @@ fn resolve_usage() -> Result<Arc<dyn UsageSink>, Box<dyn std::error::Error>> {
                 .timeout(Duration::from_secs(5))
                 .build()
                 .map_err(|e| format!("reqwest client build: {e}"))?;
-            return Ok(Arc::new(ucfp::server::WebhookUsageSink::spawn(client, parsed)));
+            return Ok(Arc::new(ucfp::server::WebhookUsageSink::spawn(
+                client, parsed,
+            )));
         }
         #[cfg(not(feature = "multi-tenant"))]
         {
             let _ = url;
-            return Err("UCFP_USAGE_WEBHOOK_URL set but binary built without `multi-tenant` feature"
-                .into());
+            return Err(
+                "UCFP_USAGE_WEBHOOK_URL set but binary built without `multi-tenant` feature".into(),
+            );
         }
     }
     if let Ok(path) = std::env::var("UCFP_USAGE_LOG_PATH") {

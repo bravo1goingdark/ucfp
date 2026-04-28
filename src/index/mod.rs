@@ -54,11 +54,7 @@ pub trait IndexBackend: Send + Sync {
     /// Default impl returns [`Error::Unsupported`] so backends that don't
     /// yet implement metadata lookup compose without breaking.
     /// Concrete backends should override with a cheap header read.
-    async fn get_record_metadata(
-        &self,
-        tenant_id: u32,
-        record_id: u64,
-    ) -> Result<FingerprintMeta> {
+    async fn get_record_metadata(&self, tenant_id: u32, record_id: u64) -> Result<FingerprintMeta> {
         let _ = (tenant_id, record_id);
         Err(Error::Unsupported(
             "get_record_metadata not implemented for this backend".into(),

@@ -193,7 +193,10 @@ pub fn fingerprint_minhash_with<const H: usize>(
     // and the inner `for_each_token` is statically dispatched.
     let (sig_bytes, tag): (Vec<u8>, String) = match opts.tokenizer {
         TokenizerKind::Word => {
-            let tok = ShingleTokenizer { k: opts.k, inner: WordTokenizer };
+            let tok = ShingleTokenizer {
+                k: opts.k,
+                inner: WordTokenizer,
+            };
             let fp = MinHashFingerprinter::<_, H>::new(canon.clone(), tok);
             let sig = fp
                 .fingerprint(&prepared)
@@ -201,7 +204,10 @@ pub fn fingerprint_minhash_with<const H: usize>(
             (sig.as_bytes().to_vec(), opts.tokenizer_tag())
         }
         TokenizerKind::Grapheme => {
-            let tok = ShingleTokenizer { k: opts.k, inner: GraphemeTokenizer };
+            let tok = ShingleTokenizer {
+                k: opts.k,
+                inner: GraphemeTokenizer,
+            };
             let fp = MinHashFingerprinter::<_, H>::new(canon.clone(), tok);
             let sig = fp
                 .fingerprint(&prepared)
@@ -242,7 +248,10 @@ fn cjk_minhash<const H: usize>(
     } else {
         CjkSegmenter::Lindera
     };
-    let tok = ShingleTokenizer { k: opts.k, inner: CjkTokenizer::new(segmenter) };
+    let tok = ShingleTokenizer {
+        k: opts.k,
+        inner: CjkTokenizer::new(segmenter),
+    };
     let fp = MinHashFingerprinter::<_, H>::new(canon.clone(), tok);
     let sig = fp
         .fingerprint(prepared)
@@ -276,7 +285,14 @@ pub fn fingerprint_simhash_tf(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    simhash_dispatch(text, opts, txtfp::Weighting::Tf, ALGORITHM_SIMHASH_TF, tenant_id, record_id)
+    simhash_dispatch(
+        text,
+        opts,
+        txtfp::Weighting::Tf,
+        ALGORITHM_SIMHASH_TF,
+        tenant_id,
+        record_id,
+    )
 }
 
 /// SimHash with TF·IDF weighting against a caller-supplied [`txtfp::IdfTable`].
@@ -289,7 +305,14 @@ pub fn fingerprint_simhash_idf(
     record_id: u64,
 ) -> Result<Record> {
     let weighting = txtfp::Weighting::IdfWeighted(idf.clone());
-    simhash_dispatch(text, opts, weighting, ALGORITHM_SIMHASH_IDF, tenant_id, record_id)
+    simhash_dispatch(
+        text,
+        opts,
+        weighting,
+        ALGORITHM_SIMHASH_IDF,
+        tenant_id,
+        record_id,
+    )
 }
 
 /// SimHash dispatcher monomorphic on tokenizer choice.
@@ -309,8 +332,8 @@ fn simhash_dispatch(
 
     let bytes: Vec<u8> = match opts.tokenizer {
         TokenizerKind::Word => {
-            let fp = SimHashFingerprinter::new(canon.clone(), WordTokenizer)
-                .with_weighting(weighting);
+            let fp =
+                SimHashFingerprinter::new(canon.clone(), WordTokenizer).with_weighting(weighting);
             fp.fingerprint(&prepared)
                 .map_err(|e| Error::Modality(e.to_string()))?
                 .as_bytes()
@@ -437,8 +460,8 @@ pub fn fingerprint_semantic_local(
 ) -> Result<Record> {
     use txtfp::semantic::{EmbeddingProvider, LocalProvider};
 
-    let provider = LocalProvider::from_pretrained(model_id)
-        .map_err(|e| Error::Modality(e.to_string()))?;
+    let provider =
+        LocalProvider::from_pretrained(model_id).map_err(|e| Error::Modality(e.to_string()))?;
     let emb = provider
         .embed(text)
         .map_err(|e| Error::Modality(e.to_string()))?;
@@ -600,7 +623,10 @@ impl StreamingMinHashSession {
         let canon = build_canonicalizer(opts);
         let inner_fp = MinHashFingerprinter::<_, DEFAULT_H>::new(
             canon.clone(),
-            ShingleTokenizer { k: opts.k, inner: WordTokenizer },
+            ShingleTokenizer {
+                k: opts.k,
+                inner: WordTokenizer,
+            },
         );
         Self {
             inner: Some(txtfp::MinHashStreaming::new(inner_fp)),

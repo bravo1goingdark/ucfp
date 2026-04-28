@@ -252,8 +252,7 @@ impl IndexBackend for EmbeddedBackend {
                     .range((tenant_id, 0u64)..=(tenant_id, u64::MAX))
                     .map_err(|e| Error::Index(e.to_string()))?
                 {
-                    let (key_guard, val_guard) =
-                        entry.map_err(|e| Error::Index(e.to_string()))?;
+                    let (key_guard, val_guard) = entry.map_err(|e| Error::Index(e.to_string()))?;
                     let (_tid, rid) = key_guard.value();
                     let bytes = val_guard.value();
                     if bytes.len() % 4 != 0 || bytes.len() / 4 != query.len() {
@@ -275,18 +274,15 @@ impl IndexBackend for EmbeddedBackend {
             // ≤ k, so it's free relative to the scan.
             let mut merged: Vec<(u64, f32)> = candidates
                 .par_iter()
-                .fold(
-                    Vec::<(u64, f32)>::new,
-                    |mut local, (rid, v)| {
-                        let v_norm = l2_norm(v);
-                        if v_norm == 0.0 {
-                            return local;
-                        }
-                        let score = dot_product(&query, v) / (q_norm * v_norm);
-                        insert_topk(&mut local, *rid, score, k);
-                        local
-                    },
-                )
+                .fold(Vec::<(u64, f32)>::new, |mut local, (rid, v)| {
+                    let v_norm = l2_norm(v);
+                    if v_norm == 0.0 {
+                        return local;
+                    }
+                    let score = dot_product(&query, v) / (q_norm * v_norm);
+                    insert_topk(&mut local, *rid, score, k);
+                    local
+                })
                 .reduce(Vec::<(u64, f32)>::new, |mut a, b| {
                     for (rid, score) in b {
                         insert_topk(&mut a, rid, score, k);
@@ -335,11 +331,7 @@ impl IndexBackend for EmbeddedBackend {
         .map_err(|e| Error::Index(format!("join error: {e}")))?
     }
 
-    async fn get_record_metadata(
-        &self,
-        tenant_id: u32,
-        record_id: u64,
-    ) -> Result<FingerprintMeta> {
+    async fn get_record_metadata(&self, tenant_id: u32, record_id: u64) -> Result<FingerprintMeta> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || -> Result<FingerprintMeta> {
             let txn = db.begin_read().map_err(|e| Error::Index(e.to_string()))?;

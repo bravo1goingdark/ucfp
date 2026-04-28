@@ -72,10 +72,7 @@ pub struct UsageEvent {
     pub ts: SystemTime,
 }
 
-fn serialize_systime_ms<S: serde::Serializer>(
-    ts: &SystemTime,
-    s: S,
-) -> Result<S::Ok, S::Error> {
+fn serialize_systime_ms<S: serde::Serializer>(ts: &SystemTime, s: S) -> Result<S::Ok, S::Error> {
     let ms = ts
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -214,11 +211,7 @@ mod webhook {
         }
     }
 
-    async fn post_with_retry(
-        client: &reqwest::Client,
-        url: &reqwest::Url,
-        batch: &[UsageEvent],
-    ) {
+    async fn post_with_retry(client: &reqwest::Client, url: &reqwest::Url, batch: &[UsageEvent]) {
         let mut delay = Duration::from_millis(100);
         for attempt in 0..5u32 {
             match client.post(url.clone()).json(batch).send().await {

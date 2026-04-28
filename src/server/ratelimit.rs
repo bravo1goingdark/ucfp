@@ -52,11 +52,7 @@ pub trait TenantRateLimiter: Send + Sync {
     /// Charge `cost` tokens against `ctx`'s tenant bucket. Returns a
     /// decision; never panics on overflow (cost is clamped at the
     /// bucket capacity).
-    async fn check(
-        &self,
-        ctx: &ApiKeyContext,
-        cost: u32,
-    ) -> crate::error::Result<RateDecision>;
+    async fn check(&self, ctx: &ApiKeyContext, cost: u32) -> crate::error::Result<RateDecision>;
 }
 
 // ── NoopRateLimiter ─────────────────────────────────────────────────────
@@ -68,11 +64,7 @@ pub struct NoopRateLimiter;
 
 #[async_trait::async_trait]
 impl TenantRateLimiter for NoopRateLimiter {
-    async fn check(
-        &self,
-        _ctx: &ApiKeyContext,
-        _cost: u32,
-    ) -> crate::error::Result<RateDecision> {
+    async fn check(&self, _ctx: &ApiKeyContext, _cost: u32) -> crate::error::Result<RateDecision> {
         Ok(RateDecision::Allow {
             remaining: u64::MAX,
             reset_ms: 0,
@@ -132,11 +124,7 @@ impl Default for InMemoryTokenBucket {
 
 #[async_trait::async_trait]
 impl TenantRateLimiter for InMemoryTokenBucket {
-    async fn check(
-        &self,
-        ctx: &ApiKeyContext,
-        cost: u32,
-    ) -> crate::error::Result<RateDecision> {
+    async fn check(&self, ctx: &ApiKeyContext, cost: u32) -> crate::error::Result<RateDecision> {
         let cost_f = f64::from(cost).min(self.burst);
         let now = Instant::now();
 
@@ -154,14 +142,12 @@ impl TenantRateLimiter for InMemoryTokenBucket {
         // Slow path: insert a fresh bucket. Re-check under write lock to
         // avoid double-insert on races.
         let mut g = self.buckets.write().map_err(poisoned)?;
-        let slot = g
-            .entry(ctx.tenant_id)
-            .or_insert_with(|| {
-                std::sync::Mutex::new(Bucket {
-                    tokens: self.burst,
-                    last_refill: now,
-                })
-            });
+        let slot = g.entry(ctx.tenant_id).or_insert_with(|| {
+            std::sync::Mutex::new(Bucket {
+                tokens: self.burst,
+                last_refill: now,
+            })
+        });
         // We hold the unique RwLock write guard, so no other thread can
         // observe `slot`; `get_mut` skips the inner Mutex syscall.
         let b = slot.get_mut().map_err(poisoned)?;
@@ -263,9 +249,7 @@ mod webhook {
                     remaining,
                     reset_ms,
                 },
-                WireDecision::Deny { retry_after_ms } => {
-                    RateDecision::Deny { retry_after_ms }
-                }
+                WireDecision::Deny { retry_after_ms } => RateDecision::Deny { retry_after_ms },
             })
         }
     }

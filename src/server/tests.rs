@@ -14,8 +14,8 @@ use tower::util::ServiceExt;
 use crate::index::embedded::EmbeddedBackend;
 
 use super::{
-    router, router_with_state, ApiKeyLookup, InMemoryTokenBucket, NoopUsageSink, ServerState,
-    StaticMapKey,
+    ApiKeyLookup, InMemoryTokenBucket, NoopUsageSink, ServerState, StaticMapKey, router,
+    router_with_state,
 };
 
 async fn fixture() -> (Router, tempfile::TempDir) {
@@ -445,7 +445,10 @@ async fn ingest_audio_neural_returns_unsupported_without_feature() {
     let body: serde_json::Value = read_json(resp).await;
     assert_eq!(body["error"], "unsupported");
     let msg = body["message"].as_str().unwrap();
-    assert!(msg.contains("audio-neural"), "message names the feature: {msg}");
+    assert!(
+        msg.contains("audio-neural"),
+        "message names the feature: {msg}"
+    );
 }
 
 #[cfg(feature = "image-perceptual")]
@@ -666,11 +669,8 @@ mod r4 {
             expected: token.as_bytes().to_vec(),
             tenant_id: 0,
         });
-        let (app, _dir) = fixture_with_state(
-            api_keys,
-            Arc::new(NoopRateLimiter),
-            Arc::new(NoopUsageSink),
-        );
+        let (app, _dir) =
+            fixture_with_state(api_keys, Arc::new(NoopRateLimiter), Arc::new(NoopUsageSink));
 
         let resp = app
             .oneshot(
@@ -696,11 +696,8 @@ mod r4 {
             expected: b"unused-secret".to_vec(),
             tenant_id: 0,
         });
-        let (app, _dir) = fixture_with_state(
-            api_keys,
-            Arc::new(NoopRateLimiter),
-            Arc::new(NoopUsageSink),
-        );
+        let (app, _dir) =
+            fixture_with_state(api_keys, Arc::new(NoopRateLimiter), Arc::new(NoopUsageSink));
 
         let resp = app
             .oneshot(
@@ -732,11 +729,8 @@ scopes = ["ingest", "query"]
 "#;
         let map = StaticMapKey::from_toml(toml).expect("toml parses");
         let api_keys: Arc<dyn ApiKeyLookup> = Arc::new(map);
-        let (app, _dir) = fixture_with_state(
-            api_keys,
-            Arc::new(NoopRateLimiter),
-            Arc::new(NoopUsageSink),
-        );
+        let (app, _dir) =
+            fixture_with_state(api_keys, Arc::new(NoopRateLimiter), Arc::new(NoopUsageSink));
 
         // Tenant 1 ingests under their own URL prefix.
         let resp = app
@@ -879,8 +873,7 @@ scopes = ["ingest", "query"]
         let sink: Arc<dyn UsageSink> =
             Arc::new(LogUsageSink::open(&log_path).expect("open log sink"));
 
-        let (app, _backend_dir) =
-            fixture_with_state(api_keys, Arc::new(NoopRateLimiter), sink);
+        let (app, _backend_dir) = fixture_with_state(api_keys, Arc::new(NoopRateLimiter), sink);
 
         let resp = app
             .oneshot(
@@ -917,8 +910,7 @@ scopes = ["ingest", "query"]
         // change set, so we only assert what the middleware actually
         // emits today.
         let line = contents.lines().next().expect("one line present");
-        let v: serde_json::Value =
-            serde_json::from_str(line).expect("first line parses as JSON");
+        let v: serde_json::Value = serde_json::from_str(line).expect("first line parses as JSON");
         assert_eq!(v["tenant_id"], 0);
         assert_eq!(v["key_id"], "static-single");
         assert_eq!(v["op"], "ingest");
@@ -998,4 +990,3 @@ async fn cross_tenant_read_is_forbidden() {
     let body: serde_json::Value = read_json(cross).await;
     assert_eq!(body["error"], "forbidden");
 }
-

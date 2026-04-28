@@ -24,9 +24,9 @@
 //! the simple `fingerprint`/`fingerprint_with` path can ignore it.
 
 use bytes::Bytes;
-use imgfprint::{ImageFingerprinter, MultiHashFingerprint, PreprocessConfig};
 #[cfg(feature = "image-perceptual")]
 use imgfprint::MultiHashConfig;
+use imgfprint::{ImageFingerprinter, MultiHashFingerprint, PreprocessConfig};
 
 use crate::core::{Modality, Record};
 use crate::error::{Error, Result};
@@ -114,7 +114,14 @@ pub fn fingerprint_phash(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    fingerprint_single(bytes, preprocess, imgfprint::HashAlgorithm::PHash, ALGORITHM_PHASH, tenant_id, record_id)
+    fingerprint_single(
+        bytes,
+        preprocess,
+        imgfprint::HashAlgorithm::PHash,
+        ALGORITHM_PHASH,
+        tenant_id,
+        record_id,
+    )
 }
 
 /// Compute a single DHash (gradient/difference hash) for the image.
@@ -125,7 +132,14 @@ pub fn fingerprint_dhash(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    fingerprint_single(bytes, preprocess, imgfprint::HashAlgorithm::DHash, ALGORITHM_DHASH, tenant_id, record_id)
+    fingerprint_single(
+        bytes,
+        preprocess,
+        imgfprint::HashAlgorithm::DHash,
+        ALGORITHM_DHASH,
+        tenant_id,
+        record_id,
+    )
 }
 
 /// Compute a single AHash (average hash) for the image.
@@ -136,7 +150,14 @@ pub fn fingerprint_ahash(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    fingerprint_single(bytes, preprocess, imgfprint::HashAlgorithm::AHash, ALGORITHM_AHASH, tenant_id, record_id)
+    fingerprint_single(
+        bytes,
+        preprocess,
+        imgfprint::HashAlgorithm::AHash,
+        ALGORITHM_AHASH,
+        tenant_id,
+        record_id,
+    )
 }
 
 /// Helper that runs a single-algorithm fingerprint and packs the
@@ -193,8 +214,8 @@ pub fn fingerprint_semantic(
 ) -> Result<Record> {
     use imgfprint::{EmbeddingProvider, LocalProvider};
 
-    let provider = LocalProvider::from_file(model_path)
-        .map_err(|e| Error::Modality(e.to_string()))?;
+    let provider =
+        LocalProvider::from_file(model_path).map_err(|e| Error::Modality(e.to_string()))?;
     let emb = provider
         .embed(bytes)
         .map_err(|e| Error::Modality(e.to_string()))?;

@@ -49,7 +49,13 @@ pub fn fingerprint_wang(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    fingerprint_wang_with(samples, sample_rate, &audiofp::classical::WangConfig::default(), tenant_id, record_id)
+    fingerprint_wang_with(
+        samples,
+        sample_rate,
+        &audiofp::classical::WangConfig::default(),
+        tenant_id,
+        record_id,
+    )
 }
 
 /// Fingerprint a mono f32 sample buffer with a tunable
@@ -102,7 +108,13 @@ pub fn fingerprint_panako(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
-    fingerprint_panako_with(samples, sample_rate, &audiofp::classical::PanakoConfig::default(), tenant_id, record_id)
+    fingerprint_panako_with(
+        samples,
+        sample_rate,
+        &audiofp::classical::PanakoConfig::default(),
+        tenant_id,
+        record_id,
+    )
 }
 
 /// Fingerprint with a tunable [`audiofp::classical::PanakoConfig`].
@@ -238,8 +250,7 @@ pub fn fingerprint_neural(
     let rate = SampleRate::new(sample_rate)
         .ok_or_else(|| Error::Modality(format!("invalid sample rate {sample_rate}")))?;
 
-    let mut emb = NeuralEmbedder::new(cfg)
-        .map_err(|e| Error::Modality(e.to_string()))?;
+    let mut emb = NeuralEmbedder::new(cfg).map_err(|e| Error::Modality(e.to_string()))?;
     let out = emb
         .extract(AudioBuffer { samples, rate })
         .map_err(|e| Error::Modality(e.to_string()))?;
@@ -313,8 +324,7 @@ pub fn detect_watermark(
     let rate = SampleRate::new(sample_rate)
         .ok_or_else(|| Error::Modality(format!("invalid sample rate {sample_rate}")))?;
 
-    let mut det = WatermarkDetector::new(cfg)
-        .map_err(|e| Error::Modality(e.to_string()))?;
+    let mut det = WatermarkDetector::new(cfg).map_err(|e| Error::Modality(e.to_string()))?;
     let out = det
         .detect(AudioBuffer { samples, rate })
         .map_err(|e| Error::Modality(e.to_string()))?;

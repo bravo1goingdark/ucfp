@@ -54,11 +54,11 @@ use axum::{
 use crate::index::IndexBackend;
 
 pub use apikey::{ApiKeyContext, ApiKeyLookup, StaticMapKey, StaticSingleKey};
+#[cfg(feature = "text")]
+pub use dto::{CanonicalizerDto, WeightingDto};
 pub use dto::{FingerprintDescription, WatermarkReport};
 #[cfg(feature = "image")]
 pub use dto::{MultiHashConfigDto, PreprocessConfigDto};
-#[cfg(feature = "text")]
-pub use dto::{CanonicalizerDto, WeightingDto};
 pub use ratelimit::{InMemoryTokenBucket, NoopRateLimiter, RateDecision, TenantRateLimiter};
 pub use usage::{LogUsageSink, NoopUsageSink, UsageEvent, UsageOp, UsageSink};
 
@@ -285,8 +285,7 @@ where
     {
         Some(t) => t.to_string(),
         None => {
-            return (StatusCode::UNAUTHORIZED, "missing or empty bearer token")
-                .into_response();
+            return (StatusCode::UNAUTHORIZED, "missing or empty bearer token").into_response();
         }
     };
 
