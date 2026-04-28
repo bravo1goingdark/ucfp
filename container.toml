@@ -1,0 +1,60 @@
+# Cloudflare Containers — ucfp API server
+#
+# Deploy:
+#   1. Push image to GHCR (done by .github/workflows/container.yml).
+#   2. wrangler container deploy --config container.toml
+#
+# Env vars that MUST be set as secrets in the CF dashboard or via
+#   wrangler secret put VARNAME --config container.toml
+#
+#   UCFP_TOKEN          — service bearer presented by the SvelteKit proxy
+#   (Optional extras)
+#   UCFP_KEYS_FILE      — path to a TOML key-map inside the container image
+#   UCFP_RATELIMIT_URL  — webhook URL for an external rate-limit service
+#   UCFP_USAGE_WEBHOOK_URL — webhook URL for usage event sink
+#   UCFP_USAGE_LOG_PATH    — path to NDJSON usage log inside the container
+
+name = "ucfp-api"
+
+account_id = "4626a3b709032bde90ee0d9c39f40723"
+
+[containers]
+# Container class name referenced by the CF routing layer.
+class_name = "UCFPServer"
+
+# Image pushed by .github/workflows/container.yml.
+image = "ghcr.io/bravo1goingdark/ucfp:latest"
+
+# Maximum simultaneously running instances.  Tune to expected RPS.
+max_instances = 3
+
+# The Rust binary listens on this port (matches UCFP_BIND default).
+port = 8080
+
+# ── Persistent storage via R2 snapshot loop ──────────────────────────────
+# Cloudflare Containers cannot mount R2 as a block device directly.  The
+# redb snapshot strategy is:
+#   • ucfp writes its embedded DB to /data/ucfp.redb in the container.
+#   • scripts/redb-snapshot.sh runs as a sidecar (or via a periodic Worker
+#     cron) and copies that file to R2 via the R2 REST API.
+#   • On restart, the container entrypoint restores from the latest R2
+#     snapshot before starting the server.
+#
+# To enable snapshots set these env vars (UCFP_SNAPSHOT_DIR is a local
+# staging directory; the shell script then uploads to R2 via rclone or
+# the CF R2 S3-compatible API):
+#
+#   UCFP_SNAPSHOT_DIR   = /data/snapshots  (local staging, not an R2 mount)
+#   AWS_ACCESS_KEY_ID   = R2 API token key  (from CF dashboard → R2 → API)
+#   AWS_SECRET_ACCESS_KEY = R2 API token secret
+#   R2_ENDPOINT         = https://<accountid>.r2.cloudflarestorage.com
+#   R2_BUCKET           = ucfp-redb-snapshots
+#
+# Alternatively, bind the container to a Workers KV namespace for a small
+# (<100 MB) embedded DB, or migrate to the Cloudflare Vectorize backend
+# (see docs/ARCHITECTURE.md §4 "future backends").
+
+# ── Vars baked into every container instance ─────────────────────────────
+[vars]
+UCFP_BIND      = "0.0.0.0:8080"
+UCFP_DATA_DIR  = "/data"

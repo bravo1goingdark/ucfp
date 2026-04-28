@@ -28,6 +28,9 @@ impl IntoResponse for ApiError {
             Error::Ingest(_) => (StatusCode::SERVICE_UNAVAILABLE, "ingest"),
             Error::Rerank(_) => (StatusCode::INTERNAL_SERVER_ERROR, "rerank"),
             Error::Io(_) => (StatusCode::INTERNAL_SERVER_ERROR, "io"),
+            Error::RecordNotFound { .. } => (StatusCode::NOT_FOUND, "not_found"),
+            Error::Unsupported(_) => (StatusCode::NOT_IMPLEMENTED, "unsupported"),
+            Error::Forbidden { .. } => (StatusCode::FORBIDDEN, "forbidden"),
         };
         let body = Json(serde_json::json!({
             "error": code,

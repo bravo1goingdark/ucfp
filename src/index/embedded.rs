@@ -23,7 +23,7 @@ use bytes::Bytes;
 use rayon::prelude::*;
 use redb::{Database, ReadableDatabase, TableDefinition};
 
-use crate::core::{Hit, HitSource, Record};
+use crate::core::{FingerprintMeta, Hit, HitSource, Modality, Record};
 use crate::error::{Error, Result};
 use crate::index::IndexBackend;
 
@@ -36,7 +36,9 @@ const FINGERPRINTS: TableDefinition<'_, (u32, u64), &[u8]> =
     TableDefinition::new("ucfp/fingerprints/v1");
 const METADATA: TableDefinition<'_, (u32, u64), &[u8]> = TableDefinition::new("ucfp/metadata/v1");
 const VECTORS: TableDefinition<'_, (u32, u64), &[u8]> = TableDefinition::new("ucfp/vectors/v1");
-const CATALOG: TableDefinition<'_, (u32, u64), &[u8]> = TableDefinition::new("ucfp/catalog/v1");
+// v2 carries algorithm + model_id alongside the original Pod fields. The
+// row is serde_json so the schema can grow without another bump.
+const CATALOG: TableDefinition<'_, (u32, u64), &[u8]> = TableDefinition::new("ucfp/catalog/v2");
 
 /// Single-file embedded backend.
 ///
@@ -88,11 +90,15 @@ impl EmbeddedBackend {
     }
 }
 
-/// Compact catalog row carried in the `catalog` table — lets the matcher
-/// answer "what does this fingerprint mean?" without re-decoding the
-/// metadata blob.
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+/// Catalog row carried in the `catalog` table — lets the matcher and
+/// describe endpoint answer "what does this fingerprint mean?" without
+/// re-decoding the fingerprint blob.
+///
+/// Stored as JSON so adding fields stays backwards-compatible: serde
+/// `#[serde(default)]` on new fields lets older rows decode into newer
+/// schemas. The performance hit is negligible — catalog reads happen
+/// per record, not per inner-loop iteration.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct CatalogEntry {
     /// Modality discriminator: 0 = audio, 1 = image, 2 = text.
     modality: u32,
@@ -104,6 +110,15 @@ struct CatalogEntry {
     fingerprint_len: u32,
     /// Length of the embedding vector in `f32`s (0 = no embedding).
     embedding_dim: u32,
+    /// SDK algorithm tag captured at ingest time.
+    #[serde(default)]
+    algorithm: String,
+    /// Embedding model identifier when present.
+    #[serde(default)]
+    model_id: Option<String>,
+    /// Length of the application metadata blob in bytes.
+    #[serde(default)]
+    metadata_len: u32,
 }
 
 #[async_trait::async_trait]
@@ -150,8 +165,13 @@ impl IndexBackend for EmbeddedBackend {
                         config_hash: rec.config_hash,
                         fingerprint_len: rec.fingerprint.len() as u32,
                         embedding_dim,
+                        algorithm: rec.algorithm.clone(),
+                        model_id: rec.model_id.clone(),
+                        metadata_len: rec.metadata.len() as u32,
                     };
-                    cat.insert(key, bytemuck::bytes_of(&entry))
+                    let row = serde_json::to_vec(&entry)
+                        .map_err(|e| Error::Index(format!("catalog encode: {e}")))?;
+                    cat.insert(key, row.as_slice())
                         .map_err(|e| Error::Index(e.to_string()))?;
                 }
             }
@@ -314,6 +334,59 @@ impl IndexBackend for EmbeddedBackend {
         .await
         .map_err(|e| Error::Index(format!("join error: {e}")))?
     }
+
+    async fn get_record_metadata(
+        &self,
+        tenant_id: u32,
+        record_id: u64,
+    ) -> Result<FingerprintMeta> {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || -> Result<FingerprintMeta> {
+            let txn = db.begin_read().map_err(|e| Error::Index(e.to_string()))?;
+            let table = txn
+                .open_table(CATALOG)
+                .map_err(|e| Error::Index(e.to_string()))?;
+            let row = table
+                .get((tenant_id, record_id))
+                .map_err(|e| Error::Index(e.to_string()))?
+                .ok_or(Error::RecordNotFound {
+                    tenant_id,
+                    record_id,
+                })?;
+            let entry: CatalogEntry = serde_json::from_slice(row.value())
+                .map_err(|e| Error::Index(format!("catalog decode: {e}")))?;
+            let modality = match entry.modality {
+                0 => Modality::Audio,
+                1 => Modality::Image,
+                2 => Modality::Text,
+                other => {
+                    return Err(Error::Index(format!(
+                        "catalog: unknown modality discriminator {other}"
+                    )));
+                }
+            };
+            let embedding_dim = if entry.embedding_dim == 0 {
+                None
+            } else {
+                Some(entry.embedding_dim as usize)
+            };
+            Ok(FingerprintMeta {
+                tenant_id,
+                record_id,
+                modality,
+                algorithm: entry.algorithm,
+                format_version: entry.format_version,
+                config_hash: entry.config_hash,
+                fingerprint_bytes: entry.fingerprint_len as usize,
+                has_embedding: embedding_dim.is_some(),
+                embedding_dim,
+                model_id: entry.model_id,
+                metadata_bytes: entry.metadata_len as usize,
+            })
+        })
+        .await
+        .map_err(|e| Error::Index(format!("join error: {e}")))?
+    }
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
@@ -359,12 +432,12 @@ fn insert_topk(local: &mut Vec<(u64, f32)>, rid: u64, score: f32, k: usize) {
     if local.len() < k {
         let pos = local.partition_point(|(_, s)| *s > score);
         local.insert(pos, (rid, score));
-    } else if let Some((_, worst)) = local.last() {
-        if score > *worst {
-            let pos = local.partition_point(|(_, s)| *s > score);
-            local.insert(pos, (rid, score));
-            local.pop();
-        }
+    } else if let Some((_, worst)) = local.last()
+        && score > *worst
+    {
+        let pos = local.partition_point(|(_, s)| *s > score);
+        local.insert(pos, (rid, score));
+        local.pop();
     }
 }
 

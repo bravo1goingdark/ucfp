@@ -2,7 +2,7 @@
 name         = "ucfp"
 version      = "0.1.0"
 edition      = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license      = "Apache-2.0"
 repository   = "https://github.com/bravo1goingdark/ucfp"
 description  = "Universal Content Fingerprinting integrator: ingest, index, match, store"
@@ -33,11 +33,57 @@ audio = ["dep:audiofp"]
 image = ["dep:imgfprint"]
 text  = ["dep:txtfp"]
 
-# Heavy / optional graduations. Off by default.
-text-semantic = ["text", "txtfp/semantic"]      # ONNX text embeddings via txtfp::semantic
-audio-neural  = ["audio", "audiofp/neural"]     # ONNX audio embeddings via audiofp::neural
-qdrant        = ["dep:qdrant-client"]            # graduate index to managed Qdrant
-rerank        = ["dep:ort"]                      # cross-encoder rerank step
+# ── Per-modality fine-grained algorithm gates ───────────────────────────
+# audiofp has no per-algorithm features upstream; these gate ucfp wrapper code only.
+audio-wang        = ["audio"]
+audio-panako      = ["audio"]
+audio-haitsma     = ["audio"]
+audio-streaming   = ["audio"]
+audio-neural      = ["audio", "audiofp/neural"]
+audio-watermark   = ["audio", "audiofp/watermark"]
+
+image-perceptual  = ["image"]                       # PHash / DHash / AHash separate routes
+image-semantic    = ["image", "imgfprint/local-embedding"]
+
+text-simhash         = ["text"]
+text-lsh             = ["text"]
+text-tlsh            = ["text", "txtfp/tlsh"]
+text-streaming       = ["text"]
+text-security        = ["text", "txtfp/security"]
+text-cjk-japanese    = ["text", "txtfp/cjk-japanese"]
+text-cjk-korean      = ["text", "txtfp/cjk-korean"]
+text-markup          = ["text", "txtfp/markup"]
+text-pdf             = ["text", "txtfp/pdf"]
+text-semantic        = ["text", "txtfp/semantic"]   # legacy alias
+text-semantic-local  = ["text", "txtfp/semantic"]
+text-semantic-openai = ["text-semantic-local", "txtfp/openai"]
+text-semantic-voyage = ["text-semantic-local", "txtfp/voyage"]
+text-semantic-cohere = ["text-semantic-local", "txtfp/cohere"]
+
+# ── Multi-tenant cloud / SaaS plumbing ──────────────────────────────────
+# Pluggable ApiKeyLookup / TenantRateLimiter / UsageSink webhook impls.
+multi-tenant = ["dep:reqwest"]
+
+# Multipart upload routes for streaming ingest. axum/multipart is heavy so
+# self-hosters who only want single-shot ingest can keep it off.
+multipart    = ["server", "axum/multipart"]
+
+# Existing graduations (kept).
+qdrant = ["dep:qdrant-client"]
+rerank = ["dep:ort"]
+
+# Convenience umbrella — what `cargo test --features full` and the cloud
+# Container build use. Excludes truly heavy `qdrant` and `rerank` which are
+# alternative backends, not additive features.
+full = [
+    "embedded", "server", "multi-tenant", "multipart",
+    "audio-wang", "audio-panako", "audio-haitsma", "audio-streaming",
+    "audio-neural", "audio-watermark",
+    "image-perceptual", "image-semantic",
+    "text-simhash", "text-lsh", "text-tlsh", "text-streaming", "text-security",
+    "text-cjk-japanese", "text-cjk-korean", "text-markup", "text-pdf",
+    "text-semantic-local", "text-semantic-openai", "text-semantic-voyage", "text-semantic-cohere",
+]
 
 [dependencies]
 # ── Core, always on ─────────────────────────────────────────────────────
@@ -50,9 +96,9 @@ tracing     = "0.1"
 async-trait = "0.1"
 
 # ── Per-modality SDKs (feature-gated) ───────────────────────────────────
-audiofp   = { version = "0.2.1", optional = true }
+audiofp   = { version = "0.3", optional = true }
 imgfprint = { version = "0.4.1", optional = true }
-txtfp     = { version = "0.1.0", optional = true, default-features = false, features = ["std", "minhash", "simhash", "lsh", "serde", "parallel"] }
+txtfp     = { version = "0.2", optional = true, default-features = false, features = ["std", "minhash", "simhash", "lsh", "serde", "parallel"] }
 
 # ── Embedded backend (feature-gated) ────────────────────────────────────
 redb    = { version = "3.0", optional = true }
@@ -75,6 +121,9 @@ subtle                      = { version = "2.6", optional = true }
 # ── Optional graduations ────────────────────────────────────────────────
 qdrant-client = { version = "1", optional = true }
 ort           = { version = "=2.0.0-rc.10", optional = true }
+
+# Webhook-based multi-tenant lookups (ApiKeyLookup / RateLimiter / UsageSink).
+reqwest       = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 [dev-dependencies]
 tempfile        = "3"

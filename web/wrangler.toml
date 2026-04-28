@@ -1,0 +1,45 @@
+name = "ucfp"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".svelte-kit/cloudflare"
+
+[vars]
+PUBLIC_SITE_NAME = "UCFP"
+# Set PUBLIC_TURNSTILE_SITE_KEY here once you have one (it's safe to commit
+# — it's the public site key, not the secret).
+
+# ── D1 — users / sessions / api_keys / usage_events ───────────────────────
+[[d1_databases]]
+binding = "DB"
+database_name = "ucfp_web"
+# database_id assigned by `wrangler d1 create ucfp_web`; paste here or set
+# in the Cloudflare Pages dashboard. Local dev (`wrangler pages dev`) uses
+# the local SQLite emulation regardless.
+database_id = "8b54dcbb-5bce-480e-80b1-edcfebc3f1a2"
+migrations_dir = "migrations"
+
+# ── KV — session cache + rate-limit counters ──────────────────────────────
+[[kv_namespaces]]
+binding = "RATE_LIMIT"
+id = "c4c82fbdff99479fb535fbed8fabc436"
+
+# ── Workers Analytics Engine — high-cardinality usage metrics ─────────────
+# Enable at: https://dash.cloudflare.com/.../workers/analytics-engine
+# then uncomment:
+# [[analytics_engine_datasets]]
+# binding = "ANALYTICS"
+# dataset = "ucfp_usage"
+
+# ── R2 — file uploads from the demo + (optional) audit blobs ──────────────
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "ucfp-uploads"
+
+# ── Secrets (NEVER commit; set via `wrangler secret put` or CF dashboard) ─
+#   UCFP_API_URL              — e.g. https://api.ucfp.dev
+#   UCFP_API_TOKEN            — service bearer matching backend UCFP_TOKEN
+#   TURNSTILE_SECRET          — Cloudflare Turnstile server secret
+#   SESSION_SECRET            — HMAC key for signing session cookies (32+ bytes random)
+#
+# When UCFP_API_URL/TOKEN are unset the /api/fingerprint route falls back to
+# the in-browser FNV-1a demo, which keeps preview deployments functional.

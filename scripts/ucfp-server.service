@@ -1,0 +1,18 @@
+[Unit]
+Description=UCFP Rust API Server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/RustroverProjects/ucfp
+EnvironmentFile=-/home/%i/RustroverProjects/ucfp/.env.ucfp
+ExecStart=/home/%i/RustroverProjects/ucfp/scripts/ucfp-server-start.sh
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/var/log/ucfp-server.log
+StandardError=append:/var/log/ucfp-server.log
+
+[Install]
+WantedBy=multi-user.target

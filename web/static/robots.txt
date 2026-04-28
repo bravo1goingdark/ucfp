@@ -1,0 +1,7 @@
+# UCFP — Universal Content Fingerprinting
+# All routes are open to crawlers.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://ucfp.dev/sitemap.xml

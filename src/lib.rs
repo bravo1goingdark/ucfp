@@ -32,12 +32,15 @@ mod rerank;
 #[cfg(feature = "server")]
 pub mod server;
 
-pub use crate::core::{HitSource, Modality, Query, Record};
+pub use crate::core::{FingerprintMeta, HitSource, Modality, Query, Record};
 pub use crate::error::{Error, Result};
 pub use crate::index::IndexBackend;
 pub use crate::ingest::IngestSource;
 pub use crate::matcher::{Matcher, rrf};
 pub use crate::rerank::{NoopReranker, Reranker};
+
+#[cfg(feature = "server")]
+pub use crate::server::{FingerprintDescription, ServerState, WatermarkReport};
 
 #[cfg(feature = "audio")]
 pub use crate::modality::audio;

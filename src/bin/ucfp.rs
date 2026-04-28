@@ -2,21 +2,46 @@
 //!
 //! Single-binary deploy. Composes [`ucfp::server`] routes with the
 //! production-hygiene middleware stack from ARCHITECTURE §8.3:
-//! bearer-token auth (timing-safe), per-request Prometheus metrics,
-//! body-size limit, concurrency cap, request timeout, structured trace.
+//! pluggable bearer-token auth, per-tenant rate limit, usage event sink,
+//! per-request Prometheus metrics, body-size limit, concurrency cap,
+//! request timeout, structured trace.
 //!
 //! ## Environment
+//!
+//! Auth source — at least ONE must be set (the binary refuses to start
+//! otherwise):
+//!
+//! | Var | Effect |
+//! |---|---|
+//! | `UCFP_TOKEN` | `StaticSingleKey` (legacy single-token, `tenant_id=0`) |
+//! | `UCFP_KEYS_FILE=/path/keys.toml` | `StaticMapKey` from a TOML file |
+//! | `UCFP_KEY_LOOKUP_URL` | `WebhookKeyLookup` (requires `multi-tenant` feature) |
+//!
+//! Rate limit:
+//!
+//! | Var | Effect |
+//! |---|---|
+//! | `UCFP_RATELIMIT_URL` set | `WebhookRateLimiter` (requires `multi-tenant`) |
+//! | `UCFP_RATELIMIT_URL` unset | `InMemoryTokenBucket::with_limits(100, 200)` |
+//!
+//! Usage sink:
+//!
+//! | Var | Effect |
+//! |---|---|
+//! | `UCFP_USAGE_WEBHOOK_URL` set | `WebhookUsageSink::spawn` (requires `multi-tenant`) |
+//! | `UCFP_USAGE_LOG_PATH` set | `LogUsageSink::open` (NDJSON file) |
+//! | neither set | `NoopUsageSink` |
+//!
+//! Other:
 //! - `UCFP_BIND` — listen address (default `0.0.0.0:8080`)
 //! - `UCFP_DATA_DIR` — directory for the redb file (default `./data`)
-//! - `UCFP_TOKEN` — bearer token required on protected routes; the
-//!   process refuses to start if unset or empty
 //! - `UCFP_BODY_LIMIT_MB` — request body cap (default 16 MiB)
 //!
 //! ## Auth shape
 //! `/healthz`, `/v1/info`, `/metrics` are public. Everything under
 //! `/v1/records*`, `/v1/query`, `/v1/ingest/*` requires
-//! `Authorization: Bearer $UCFP_TOKEN`. The token compare is constant
-//! time via [`subtle::ConstantTimeEq`] to deny a timing oracle.
+//! `Authorization: Bearer <token>` and is wired through the auth +
+//! rate-limit + usage middleware in [`ucfp::server::router_with_state`].
 
 #![cfg(all(feature = "server", feature = "embedded"))]
 
@@ -25,52 +50,23 @@ use std::time::{Duration, Instant};
 
 use axum::{
     Router,
-    extract::{MatchedPath, Request, State},
-    http::{HeaderMap, StatusCode, header},
+    extract::{MatchedPath, Request},
+    http::StatusCode,
     middleware::{self, Next},
     response::Response,
     routing::get,
 };
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use subtle::ConstantTimeEq;
 use tower::limit::ConcurrencyLimitLayer;
 use tower_http::{
     limit::RequestBodyLimitLayer, timeout::TimeoutLayer, trace::TraceLayer,
 };
 
 use ucfp::EmbeddedBackend;
-use ucfp::server::{protected_router, public_router};
-
-#[derive(Clone)]
-struct AuthState {
-    /// Expected bearer-token bytes. Held as `Arc<Vec<u8>>` so each
-    /// middleware invocation clones the pointer, not the secret.
-    expected: Arc<Vec<u8>>,
-}
-
-/// Bearer-token middleware with timing-safe compare. Replaces the
-/// deprecated `tower_http::validate_request::ValidateRequestHeaderLayer::bearer`,
-/// which deliberately advertises itself as too coarse for production.
-async fn require_bearer(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let presented = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-    let presented_b = presented.as_bytes();
-    if presented_b.len() != auth.expected.len() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    if !bool::from(presented_b.ct_eq(auth.expected.as_slice())) {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    Ok(next.run(req).await)
-}
+use ucfp::server::{
+    ApiKeyLookup, InMemoryTokenBucket, LogUsageSink, NoopUsageSink, ServerState,
+    StaticMapKey, StaticSingleKey, TenantRateLimiter, UsageSink, router_with_state,
+};
 
 /// Per-request Prometheus metrics. Path label is the matched route
 /// template (bounded cardinality, never the raw URI). `/metrics` is
@@ -103,6 +99,101 @@ async fn http_metrics(matched: Option<MatchedPath>, req: Request, next: Next) ->
     resp
 }
 
+/// Resolve the configured [`ApiKeyLookup`] from env vars. Returns the
+/// trait-object Arc directly; the bin never names the concrete type
+/// after this point.
+fn resolve_api_keys() -> Result<Arc<dyn ApiKeyLookup>, Box<dyn std::error::Error>> {
+    if let Ok(url) = std::env::var("UCFP_KEY_LOOKUP_URL") {
+        #[cfg(feature = "multi-tenant")]
+        {
+            let parsed = reqwest::Url::parse(&url)
+                .map_err(|e| format!("UCFP_KEY_LOOKUP_URL parse: {e}"))?;
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .map_err(|e| format!("reqwest client build: {e}"))?;
+            return Ok(Arc::new(ucfp::server::WebhookKeyLookup::new(client, parsed)));
+        }
+        #[cfg(not(feature = "multi-tenant"))]
+        {
+            let _ = url;
+            return Err("UCFP_KEY_LOOKUP_URL set but binary built without `multi-tenant` feature"
+                .into());
+        }
+    }
+
+    if let Ok(path) = std::env::var("UCFP_KEYS_FILE") {
+        let body = std::fs::read_to_string(&path)
+            .map_err(|e| format!("read UCFP_KEYS_FILE={path}: {e}"))?;
+        let map = StaticMapKey::from_toml(&body)
+            .map_err(|e| format!("parse UCFP_KEYS_FILE={path}: {e}"))?;
+        return Ok(Arc::new(map));
+    }
+
+    if let Ok(token) = std::env::var("UCFP_TOKEN") {
+        if token.is_empty() {
+            return Err("UCFP_TOKEN must not be empty".into());
+        }
+        return Ok(Arc::new(StaticSingleKey {
+            expected: token.into_bytes(),
+            tenant_id: 0,
+        }));
+    }
+
+    Err("none of UCFP_TOKEN, UCFP_KEYS_FILE, UCFP_KEY_LOOKUP_URL is set; refusing to start".into())
+}
+
+/// Resolve the configured [`TenantRateLimiter`] from env vars.
+fn resolve_rate_limit() -> Result<Arc<dyn TenantRateLimiter>, Box<dyn std::error::Error>> {
+    if let Ok(url) = std::env::var("UCFP_RATELIMIT_URL") {
+        #[cfg(feature = "multi-tenant")]
+        {
+            let parsed = reqwest::Url::parse(&url)
+                .map_err(|e| format!("UCFP_RATELIMIT_URL parse: {e}"))?;
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .build()
+                .map_err(|e| format!("reqwest client build: {e}"))?;
+            return Ok(Arc::new(ucfp::server::WebhookRateLimiter::new(client, parsed)));
+        }
+        #[cfg(not(feature = "multi-tenant"))]
+        {
+            let _ = url;
+            return Err("UCFP_RATELIMIT_URL set but binary built without `multi-tenant` feature"
+                .into());
+        }
+    }
+    Ok(Arc::new(InMemoryTokenBucket::with_limits(100, 200)))
+}
+
+/// Resolve the configured [`UsageSink`] from env vars.
+fn resolve_usage() -> Result<Arc<dyn UsageSink>, Box<dyn std::error::Error>> {
+    if let Ok(url) = std::env::var("UCFP_USAGE_WEBHOOK_URL") {
+        #[cfg(feature = "multi-tenant")]
+        {
+            let parsed = reqwest::Url::parse(&url)
+                .map_err(|e| format!("UCFP_USAGE_WEBHOOK_URL parse: {e}"))?;
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(5))
+                .build()
+                .map_err(|e| format!("reqwest client build: {e}"))?;
+            return Ok(Arc::new(ucfp::server::WebhookUsageSink::spawn(client, parsed)));
+        }
+        #[cfg(not(feature = "multi-tenant"))]
+        {
+            let _ = url;
+            return Err("UCFP_USAGE_WEBHOOK_URL set but binary built without `multi-tenant` feature"
+                .into());
+        }
+    }
+    if let Ok(path) = std::env::var("UCFP_USAGE_LOG_PATH") {
+        let sink = LogUsageSink::open(std::path::Path::new(&path))
+            .map_err(|e| format!("open UCFP_USAGE_LOG_PATH={path}: {e}"))?;
+        return Ok(Arc::new(sink));
+    }
+    Ok(Arc::new(NoopUsageSink))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -118,13 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .install_recorder()
         .map_err(|e| format!("install Prometheus recorder: {e}"))?;
 
-    let token = std::env::var("UCFP_TOKEN").map_err(|_| {
-        tracing::error!("UCFP_TOKEN env var is required");
-        "UCFP_TOKEN env var is required"
-    })?;
-    if token.is_empty() {
-        return Err("UCFP_TOKEN must not be empty".into());
-    }
+    let api_keys = resolve_api_keys()?;
+    let rate_limit = resolve_rate_limit()?;
+    let usage = resolve_usage()?;
 
     let data_dir = std::env::var("UCFP_DATA_DIR").unwrap_or_else(|_| "./data".into());
     let db_path = std::path::PathBuf::from(&data_dir).join("ucfp.redb");
@@ -136,15 +223,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(16);
 
-    let auth_state = AuthState {
-        expected: Arc::new(token.into_bytes()),
+    let state = ServerState {
+        index: backend.clone(),
+        api_keys,
+        rate_limit,
+        usage,
     };
-    let protected = protected_router(backend.clone())
-        .layer(middleware::from_fn_with_state(auth_state, require_bearer));
 
     // /metrics: public, returns Prometheus text exposition format.
-    // String → 200 with `content-type: text/plain; charset=utf-8`,
-    // which is exactly what scrapers expect.
     let metrics_route = Router::new().route(
         "/metrics",
         get({
@@ -156,15 +242,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     );
 
+    // router_with_state already merges public + protected (with auth +
+    // rate-limit + usage middleware on the protected half). Merge the
+    // metrics route on top and apply outer hygiene layers.
+    //
     // Layer order: each `.layer()` wraps the existing service, so the
     // last call is the *outermost*. http_metrics outermost → it sees
     // every final response, including 408/413/503 rejected by inner
     // layers. Body limit and concurrency are innermost so they reject
     // cheaply before the request reaches handlers.
-    let app = Router::new()
-        .merge(public_router(backend))
+    let app = router_with_state(state)
         .merge(metrics_route)
-        .merge(protected)
         .layer(RequestBodyLimitLayer::new(body_limit_mb * 1024 * 1024))
         .layer(ConcurrencyLimitLayer::new(512))
         .layer(TimeoutLayer::with_status_code(

@@ -63,6 +63,38 @@ pub struct Record {
     pub metadata: Bytes,
 }
 
+/// Metadata view of a stored fingerprint without materialising its bytes.
+///
+/// Returned by [`crate::IndexBackend::get_record_metadata`]; powers the
+/// `GET /v1/records/{tid}/{rid}` describe endpoint. Only sizes and
+/// identifiers are exposed — the raw fingerprint blob stays in the
+/// backend so the read cost is constant per record.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FingerprintMeta {
+    /// Tenant the record is scoped to.
+    pub tenant_id: u32,
+    /// Record identifier within the tenant.
+    pub record_id: u64,
+    /// Modality the record was produced from.
+    pub modality: Modality,
+    /// SDK algorithm tag captured at ingest time.
+    pub algorithm: String,
+    /// SDK FORMAT_VERSION captured at ingest time.
+    pub format_version: u32,
+    /// SDK config hash captured at ingest time.
+    pub config_hash: u64,
+    /// Length of the fingerprint blob in bytes.
+    pub fingerprint_bytes: usize,
+    /// `true` if the record carries a dense embedding vector.
+    pub has_embedding: bool,
+    /// Dimension of the dense embedding vector when present.
+    pub embedding_dim: Option<usize>,
+    /// Embedding model identifier when present.
+    pub model_id: Option<String>,
+    /// Length of the application metadata blob in bytes.
+    pub metadata_bytes: usize,
+}
+
 /// A single search result.
 #[derive(Clone, Debug)]
 pub struct Hit {

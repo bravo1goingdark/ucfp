@@ -1,0 +1,23 @@
+[Unit]
+Description=UCFP Cloudflare Tunnel (Quick Tunnel, auto-updates Pages secret)
+After=network-online.target ucfp-server.service
+Wants=network-online.target
+Requires=ucfp-server.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/RustroverProjects/ucfp
+Environment=CLOUDFLARED_BIN=/tmp/cloudflared
+Environment=UCFP_BACKEND_PORT=8080
+Environment=CF_PAGES_PROJECT=ucfp
+ExecStart=/home/%i/RustroverProjects/ucfp/scripts/ucfp-tunnel-start.sh
+Restart=always
+RestartSec=10s
+# On restart the tunnel gets a new trycloudflare URL; the start script
+# automatically pushes it to Cloudflare Pages and redeploys.
+StandardOutput=append:/var/log/ucfp-tunnel.log
+StandardError=append:/var/log/ucfp-tunnel.log
+
+[Install]
+WantedBy=multi-user.target

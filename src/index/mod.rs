@@ -6,8 +6,8 @@
 
 use bytes::Bytes;
 
-use crate::core::{Hit, Record};
-use crate::error::Result;
+use crate::core::{FingerprintMeta, Hit, Record};
+use crate::error::{Error, Result};
 
 #[cfg(feature = "embedded")]
 pub mod embedded;
@@ -46,4 +46,22 @@ pub trait IndexBackend: Send + Sync {
     /// Force pending writes to disk. Backends should already commit per
     /// upsert batch; this exists for explicit shutdown / snapshot points.
     async fn flush(&self) -> Result<()>;
+
+    /// Look up the metadata header of a stored record without
+    /// materialising its fingerprint bytes. Powers the `GET
+    /// /v1/records/{tid}/{rid}` describe endpoint.
+    ///
+    /// Default impl returns [`Error::Unsupported`] so backends that don't
+    /// yet implement metadata lookup compose without breaking.
+    /// Concrete backends should override with a cheap header read.
+    async fn get_record_metadata(
+        &self,
+        tenant_id: u32,
+        record_id: u64,
+    ) -> Result<FingerprintMeta> {
+        let _ = (tenant_id, record_id);
+        Err(Error::Unsupported(
+            "get_record_metadata not implemented for this backend".into(),
+        ))
+    }
 }

@@ -272,3 +272,51 @@ pub struct Query {
 ```
 
 `tenant_id` lives on every shape — see §8.1. `format_version` and `config_hash` on `Record` mirror the producing SDK's stability guarantees so the matcher can refuse cross-version compares without a separate manifest lookup. `Bytes` is `bytes::Bytes` (transitive via hyper) — zero-copy slices, ref-counted, free on the dep graph.
+
+## 9. Multi-tenant auth & quota
+
+Section §5 ("Trait boundaries") covers the three pipeline traits — `IngestSource`, `IndexBackend`, `Reranker`. The HTTP server adds three more, all in `src/server/`, that gate every protected request:
+
+| Trait | File | Responsibility |
+|---|---|---|
+| `ApiKeyLookup` | `src/server/apikey.rs` | Resolve `Authorization: Bearer <token>` → `ApiKeyContext { tenant_id, key_id, scopes, rate_class }`. `Ok(None)` → 401, `Err(_)` → 5xx. |
+| `TenantRateLimiter` | `src/server/ratelimit.rs` | Charge `cost` tokens against the tenant's bucket; return `Allow { remaining, reset_ms }` or `Deny { retry_after_ms }`. |
+| `UsageSink` | `src/server/usage.rs` | Receive a `UsageEvent` after each protected request. Must never block the request path — fire-and-forget over `tokio::spawn`. |
+
+The bin (`src/bin/ucfp.rs`) selects one impl per trait at startup from env vars and assembles a `ServerState<EmbeddedBackend>`. The `router_with_state` constructor in `src/server/mod.rs` wires the three traits onto the protected route table; the `public_router` half (`/healthz`, `/v1/info`, `/metrics`) is merged in unauthenticated.
+
+```text
+                     ┌── public ───────────────────────────────┐
+                     │  /healthz  /v1/info  /metrics           │
+   incoming HTTP ──► │                                         │
+                     ├── protected ────────────────────────────┤
+                     │  Bearer  ─►  ApiKeyLookup ─►  401 / ctx │
+                     │  ctx     ─►  TenantRateLimiter ─►  429  │
+                     │             handler                     │
+                     │             ↓                           │
+                     │             UsageSink (spawn, no wait)  │
+                     └─────────────────────────────────────────┘
+```
+
+### Env-var matrix (resolved at bin startup)
+
+The bin refuses to start if NONE of the three auth-source vars is set.
+
+| Concern | Env var | Concrete impl |
+|---|---|---|
+| Auth | `UCFP_TOKEN` | `StaticSingleKey { tenant_id: 0 }` (legacy compat) |
+| Auth | `UCFP_KEYS_FILE=/path` | `StaticMapKey::from_toml(read_to_string(path))` |
+| Auth | `UCFP_KEY_LOOKUP_URL` | `WebhookKeyLookup::new(client, url)` *(requires `multi-tenant`)* |
+| Rate limit | `UCFP_RATELIMIT_URL` set | `WebhookRateLimiter::new(client, url)` *(requires `multi-tenant`)* |
+| Rate limit | `UCFP_RATELIMIT_URL` unset | `InMemoryTokenBucket::with_limits(100, 200)` (100 rps × 200 burst) |
+| Usage | `UCFP_USAGE_WEBHOOK_URL` set | `WebhookUsageSink::spawn(client, url)` *(requires `multi-tenant`)* |
+| Usage | `UCFP_USAGE_LOG_PATH` set | `LogUsageSink::open(path)` (NDJSON append) |
+| Usage | both unset | `NoopUsageSink` |
+
+Webhook impls live behind the `multi-tenant` Cargo feature (which pulls `reqwest`); the bin emits a clean error if a webhook env var is set on a build without that feature.
+
+### Resolution order and precedence
+
+`ApiKeyLookup` resolution checks `UCFP_KEY_LOOKUP_URL` first (richest), then `UCFP_KEYS_FILE`, then `UCFP_TOKEN`. Setting `UCFP_TOKEN` alongside a webhook is harmless — the webhook wins. Self-hosters keep the one-line `UCFP_TOKEN` deploy; SaaS deploys layer the webhook in front of it.
+
+`router_with_state` uses axum's `FromRef` machinery so handlers continue to take `State<Arc<I>>` without knowing about the auth/rate/usage scaffold. Existing `router(index)` (no auth) is preserved for in-process tests and library consumers that do their own auth.

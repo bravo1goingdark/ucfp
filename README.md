@@ -22,17 +22,42 @@ Traditional hashes fail when content changes slightly. Semantic search requires 
 
 ## Quickstart
 
-**Prerequisites**: Rust 1.76+ (`rustup toolchain install stable`)
+**Prerequisites**: Rust 1.88+ (`rustup toolchain install stable`)
 
 ```bash
 # Build & test
-cargo test --all
+cargo test                    # default features
+cargo test --features full    # everything: every algorithm + multi-tenant
 
-# Run examples
-cargo run --example full_pipeline          # complete pipeline
-cargo run --example pipeline_metrics       # with observability
-cargo run --package perceptual --example fingerprint_demo
+# Run the HTTP server (single-token, self-host)
+UCFP_TOKEN=dev-secret \
+UCFP_DATA_DIR=./data \
+cargo run --bin ucfp
 ```
+
+### Server env-var matrix
+
+The `ucfp` binary picks one auth source, one rate limiter, and one usage sink at startup. It refuses to start unless at least one of the three auth-source vars is set.
+
+| Concern | Var | Effect |
+|---|---|---|
+| Auth | `UCFP_TOKEN` | `StaticSingleKey` — single shared bearer, `tenant_id = 0` (legacy compat) |
+| Auth | `UCFP_KEYS_FILE=/path/keys.toml` | `StaticMapKey` — multi-tenant from a TOML file |
+| Auth | `UCFP_KEY_LOOKUP_URL` | `WebhookKeyLookup` — POST `{key}` to a control plane (requires `multi-tenant`) |
+| Rate limit | `UCFP_RATELIMIT_URL` | `WebhookRateLimiter` (requires `multi-tenant`) |
+| Rate limit | unset | `InMemoryTokenBucket` (100 rps × 200 burst) |
+| Usage | `UCFP_USAGE_WEBHOOK_URL` | `WebhookUsageSink` — batched POSTs (requires `multi-tenant`) |
+| Usage | `UCFP_USAGE_LOG_PATH` | `LogUsageSink` — NDJSON file append |
+| Usage | neither | `NoopUsageSink` |
+| Other | `UCFP_BIND` | listen address (default `0.0.0.0:8080`) |
+| Other | `UCFP_DATA_DIR` | redb file directory (default `./data`) |
+| Other | `UCFP_BODY_LIMIT_MB` | request body cap (default 16 MiB) |
+
+See [`docs/ARCHITECTURE.md` §9](docs/ARCHITECTURE.md#9-multi-tenant-auth--quota) for the trait shapes (`ApiKeyLookup`, `TenantRateLimiter`, `UsageSink`), the `router_with_state` constructor, and the full request-lifecycle diagram.
+
+### Catalog schema migration: v1 → v2
+
+The embedded backend's metadata catalog moved from rkyv-archived rows (v1) to JSON-encoded rows (v2) to drop the rkyv dependency from the read path and unblock the new `GET /v1/records/{tid}/{rid}` describe endpoint. **Pre-existing redb databases written by v1 cannot be read directly by v2.** The migration path is to re-ingest: delete `data/ucfp.redb`, restart the server, replay your records through the modality ingest routes. There is no in-place migration tool — at v0.x scale the cost of re-fingerprinting is lower than maintaining a converter.
 
 ## Usage
 
