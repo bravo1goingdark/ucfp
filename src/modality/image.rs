@@ -12,14 +12,14 @@
 //! | ------------------------- | ----------------------- | ------------------ |
 //! | [`fingerprint`]           | MultiHash bundle (default) | `image`         |
 //! | [`fingerprint_with`]      | MultiHash + preprocess  | `image`            |
-//! | [`fingerprint_multi_with`] | MultiHash + multi-config | `image-perceptual` |
-//! | [`fingerprint_phash`]     | PHash only              | `image-perceptual` |
-//! | [`fingerprint_dhash`]     | DHash only              | `image-perceptual` |
-//! | [`fingerprint_ahash`]     | AHash only              | `image-perceptual` |
-//! | [`fingerprint_semantic`]  | CLIP-style ONNX embedding | `image-semantic` |
+//! | `fingerprint_multi_with`  | MultiHash + multi-config  | `image-perceptual` |
+//! | `fingerprint_phash`       | PHash only                | `image-perceptual` |
+//! | `fingerprint_dhash`       | DHash only                | `image-perceptual` |
+//! | `fingerprint_ahash`       | AHash only                | `image-perceptual` |
+//! | `fingerprint_semantic`    | CLIP-style ONNX embedding | `image-semantic`   |
 //!
 //! `MultiHashConfig` is deliberately threaded only through
-//! [`fingerprint_multi_with`] — the bytes of a multi-hash bundle do not
+//! `fingerprint_multi_with` — the bytes of a multi-hash bundle do not
 //! depend on the config (the config is interpreted at compare time), so
 //! the simple `fingerprint`/`fingerprint_with` path can ignore it.
 

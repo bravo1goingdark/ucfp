@@ -3,18 +3,18 @@
 //! This module wraps every algorithm exposed by `audiofp` into a uniform
 //! [`Record`] envelope so the rest of UCFP can ingest them through a
 //! single code path. Per-algorithm functions are gated behind the
-//! corresponding `audio-*` features in [`Cargo.toml`].
+//! corresponding `audio-*` features in `Cargo.toml`.
 //!
 //! # Algorithms
 //!
-//! | Function                 | Output                  | Feature gate        |
-//! | ------------------------ | ----------------------- | ------------------- |
-//! | [`fingerprint_wang`]     | Wang landmark hashes    | `audio` (default)   |
-//! | [`fingerprint_panako`]   | Panako triplet hashes   | `audio-panako`      |
-//! | [`fingerprint_haitsma`]  | Philips robust hash     | `audio-haitsma`     |
-//! | [`fingerprint_neural`]   | ONNX log-mel embeddings | `audio-neural`      |
-//! | [`detect_watermark`]     | AudioSeal-style detection | `audio-watermark` |
-//! | [`StreamingWangSession`] | Push/finalize streamer  | `audio-streaming`   |
+//! | Function                   | Output                    | Feature gate        |
+//! | -------------------------- | ------------------------- | ------------------- |
+//! | [`fingerprint_wang`]       | Wang landmark hashes      | `audio` (default)   |
+//! | `fingerprint_panako`       | Panako triplet hashes     | `audio-panako`      |
+//! | `fingerprint_haitsma`      | Philips robust hash       | `audio-haitsma`     |
+//! | `fingerprint_neural`       | ONNX log-mel embeddings   | `audio-neural`      |
+//! | `detect_watermark`         | AudioSeal-style detection | `audio-watermark`   |
+//! | `StreamingWangSession`     | Push/finalize streamer    | `audio-streaming`   |
 //!
 //! Watermark detection does **not** produce a [`Record`] — it returns a
 //! [`WatermarkReport`] because the result is descriptive ("is this audio
