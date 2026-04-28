@@ -11,7 +11,7 @@
 # (sidecar cron) to back up /data/ucfp.redb to R2 every N minutes.
 
 # ── Builder ────────────────────────────────────────────────────────────────
-FROM rust:1.85-bookworm AS builder
+FROM rust:latest AS builder
 
 WORKDIR /build
 

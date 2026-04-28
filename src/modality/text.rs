@@ -9,8 +9,8 @@
 //!
 //! | Function                       | Output                | Feature gate            |
 //! | ------------------------------ | --------------------- | ----------------------- |
-//! | [`fingerprint_minhash`]        | MinHash<H=128>        | `text` (default)        |
-//! | [`fingerprint_minhash_with`]   | MinHash<H>            | `text` (default)        |
+//! | [`fingerprint_minhash`]        | `MinHash<H=128>`      | `text` (default)        |
+//! | [`fingerprint_minhash_with`]   | `MinHash<H>`          | `text` (default)        |
 //! | [`fingerprint_simhash_tf`]     | SimHash64 + TF        | `text-simhash`          |
 //! | [`fingerprint_simhash_idf`]    | SimHash64 + TF·IDF    | `text-simhash`          |
 //! | [`fingerprint_lsh`]            | MinHash + (b,r) tag   | `text-lsh`              |
