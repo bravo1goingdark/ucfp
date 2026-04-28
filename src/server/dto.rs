@@ -113,6 +113,8 @@ pub(super) struct IngestResponse {
     pub algorithm: String,
     pub config_hash: u64,
     pub fingerprint_bytes: usize,
+    /// Hex-encoded fingerprint bytes for in-browser visualization.
+    pub fingerprint_hex: String,
     pub has_embedding: bool,
 }
 

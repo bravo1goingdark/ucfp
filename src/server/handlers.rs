@@ -181,6 +181,7 @@ fn ingest_response(rec: &Record) -> IngestResponse {
         algorithm: rec.algorithm.clone(),
         config_hash: rec.config_hash,
         fingerprint_bytes: rec.fingerprint.len(),
+        fingerprint_hex: rec.fingerprint.iter().map(|b| format!("{b:02x}")).collect(),
         has_embedding: rec.embedding.is_some(),
     }
 }
