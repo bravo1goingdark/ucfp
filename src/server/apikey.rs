@@ -8,7 +8,7 @@
 //! - [`StaticSingleKey`] — single-token compat path for self-hosters
 //!   (preserves the legacy `UCFP_TOKEN` semantics).
 //! - [`StaticMapKey`] — multi-tenant from a TOML file on disk.
-//! - [`WebhookKeyLookup`] — multi-tenant via an HTTP control plane
+//! - `WebhookKeyLookup` — multi-tenant via an HTTP control plane
 //!   (gated behind `multi-tenant`).
 //!
 //! Returning `Ok(None)` means *no such key*; the extractor turns that

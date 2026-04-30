@@ -8,7 +8,7 @@
 //!   running behind another rate-limit layer.
 //! - [`InMemoryTokenBucket`] — process-local leaky bucket; one instance
 //!   per tenant, refilled at a fixed rps.
-//! - [`WebhookRateLimiter`] — defers the decision to a control plane
+//! - `WebhookRateLimiter` — defers the decision to a control plane
 //!   (gated behind `multi-tenant`).
 //!
 //! The decision shape is rich enough to drive `Retry-After` headers and

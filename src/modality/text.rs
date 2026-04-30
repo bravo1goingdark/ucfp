@@ -3,23 +3,23 @@
 //! Wraps every algorithm exposed by `txtfp` (MinHash, SimHash, LSH,
 //! TLSH, semantic embeddings) into a uniform [`Record`]. Per-algorithm
 //! functions are gated behind the corresponding `text-*` features in
-//! [`Cargo.toml`].
+//! `Cargo.toml`.
 //!
 //! # Algorithms
 //!
-//! | Function                       | Output                | Feature gate            |
-//! | ------------------------------ | --------------------- | ----------------------- |
-//! | [`fingerprint_minhash`]        | `MinHash<H=128>`      | `text` (default)        |
-//! | [`fingerprint_minhash_with`]   | `MinHash<H>`          | `text` (default)        |
-//! | [`fingerprint_simhash_tf`]     | SimHash64 + TF        | `text-simhash`          |
-//! | [`fingerprint_simhash_idf`]    | SimHash64 + TF·IDF    | `text-simhash`          |
-//! | [`fingerprint_lsh`]            | MinHash + (b,r) tag   | `text-lsh`              |
-//! | [`fingerprint_tlsh`]           | TLSH 128/1            | `text-tlsh`             |
-//! | [`fingerprint_semantic_local`] | local ONNX embedding  | `text-semantic-local`   |
-//! | [`fingerprint_semantic_openai`] | OpenAI embedding     | `text-semantic-openai`  |
-//! | [`fingerprint_semantic_voyage`] | Voyage embedding     | `text-semantic-voyage`  |
-//! | [`fingerprint_semantic_cohere`] | Cohere embedding     | `text-semantic-cohere`  |
-//! | [`StreamingMinHashSession`]    | push/finalize streamer | `text-streaming`       |
+//! | Function                        | Output                 | Feature gate            |
+//! | ------------------------------- | ---------------------- | ----------------------- |
+//! | [`fingerprint_minhash`]         | `MinHash<H=128>`       | `text` (default)        |
+//! | [`fingerprint_minhash_with`]    | `MinHash<H>`           | `text` (default)        |
+//! | `fingerprint_simhash_tf`        | SimHash64 + TF         | `text-simhash`          |
+//! | `fingerprint_simhash_idf`       | SimHash64 + TF·IDF     | `text-simhash`          |
+//! | `fingerprint_lsh`               | MinHash + (b,r) tag    | `text-lsh`              |
+//! | `fingerprint_tlsh`              | TLSH 128/1             | `text-tlsh`             |
+//! | `fingerprint_semantic_local`    | local ONNX embedding   | `text-semantic-local`   |
+//! | `fingerprint_semantic_openai`   | OpenAI embedding       | `text-semantic-openai`  |
+//! | `fingerprint_semantic_voyage`   | Voyage embedding       | `text-semantic-voyage`  |
+//! | `fingerprint_semantic_cohere`   | Cohere embedding       | `text-semantic-cohere`  |
+//! | `StreamingMinHashSession`       | push/finalize streamer | `text-streaming`        |
 //!
 //! [`TextOpts`] carries the canonicalizer + tokenizer + shingle/slot
 //! parameters threaded through the per-algorithm functions. Most callers

@@ -5,7 +5,7 @@
 //!
 //! - [`NoopUsageSink`] — drops every event; for tests.
 //! - [`LogUsageSink`] — appends NDJSON to a local file; for self-hosters.
-//! - [`WebhookUsageSink`] — batches events and POSTs them to a control
+//! - `WebhookUsageSink` — batches events and POSTs them to a control
 //!   plane (gated behind `multi-tenant`).
 //!
 //! Sinks must never block the request path. The webhook sink owns a

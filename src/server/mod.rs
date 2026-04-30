@@ -5,7 +5,7 @@
 //! embedded backend today and a managed graduation backend later. The
 //! bin entry in `bin/ucfp.rs` instantiates with `Arc<EmbeddedBackend>`.
 //!
-//! All handlers funnel through [`error::ApiError`] for a consistent
+//! All handlers funnel through `error::ApiError` for a consistent
 //! error envelope; HTTP status codes map per [`crate::Error`] variant.
 //!
 //! ## Auth shape
