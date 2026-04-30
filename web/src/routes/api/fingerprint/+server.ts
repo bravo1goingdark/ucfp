@@ -251,6 +251,23 @@ export const POST: RequestHandler = async (event) => {
         })
       );
     }
+    if (wm.error !== undefined) {
+      // Upstream returned a non-success status (e.g. 404 because the
+      // `audio-watermark` feature isn't compiled in). Surface the real
+      // status + message instead of pretending we got a clean 200.
+      return new Response(
+        JSON.stringify({
+          watermark: true,
+          error: 'upstream',
+          status: wm.status,
+          message: wm.error.slice(0, 400)
+        }),
+        { status: wm.status, headers: {
+            'content-type': 'application/json',
+            'x-proxied-latency': String(Math.round(wm.latencyMs))
+        }}
+      );
+    }
     return json(
       { watermark: true, detected: wm.result.detected,
         confidence: wm.result.confidence, payload: wm.result.payload },

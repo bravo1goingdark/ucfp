@@ -22,27 +22,28 @@
 
   let { algorithm, bytes, diffAgainst }: Props = $props();
 
-  // Slice helpers shared across image variants.
-  // MultiHashFingerprint is `#[repr(C)]` with declaration-order fields
-  // `ahash, phash, dhash` (verified in imgfprint-0.4.1/src/core/fingerprint.rs:235),
-  // so byte offsets 0/168/336 map to AHash/PHash/DHash respectively.
-  function sliceImageFp(buf: Uint8Array, idx: number): Uint8Array {
-    const off = idx * 168;
+  // MultiHashFingerprint = 32 (bundle exact) + 168×3 (ahash, phash, dhash) = 536.
+  // Skip the leading 32 bytes (BLAKE3 of the source image — surfaced inside
+  // each ImageFingerprint already, no need to render twice) then read the
+  // three 168-byte slots in declaration order.
+  const MULTI_BUNDLE_SIZE = 536;
+  const MULTI_OFFSET_AHASH = 32;
+  const MULTI_OFFSET_PHASH = 32 + 168;
+  const MULTI_OFFSET_DHASH = 32 + 168 * 2;
+  function sliceImageFp(buf: Uint8Array, off: number): Uint8Array {
     return buf.subarray(off, off + 168);
   }
 
 </script>
 
-{#if algorithm === 'imgfprint-multihash-v1' && bytes.length === 504}
-  <!-- Layout (from Record::fingerprint via bytemuck::bytes_of(&MultiHashFingerprint)):
-       [ahash:168][phash:168][dhash:168] -->
+{#if algorithm === 'imgfprint-multihash-v1' && bytes.length === MULTI_BUNDLE_SIZE}
   <div class="av-multi">
-    <ImageHashView label="AHash" bytes={sliceImageFp(bytes, 0)}
-      diffAgainst={diffAgainst && diffAgainst.length === 504 ? sliceImageFp(diffAgainst, 0) : undefined} />
-    <ImageHashView label="PHash" bytes={sliceImageFp(bytes, 1)}
-      diffAgainst={diffAgainst && diffAgainst.length === 504 ? sliceImageFp(diffAgainst, 1) : undefined} />
-    <ImageHashView label="DHash" bytes={sliceImageFp(bytes, 2)}
-      diffAgainst={diffAgainst && diffAgainst.length === 504 ? sliceImageFp(diffAgainst, 2) : undefined} />
+    <ImageHashView label="AHash" bytes={sliceImageFp(bytes, MULTI_OFFSET_AHASH)}
+      diffAgainst={diffAgainst && diffAgainst.length === MULTI_BUNDLE_SIZE ? sliceImageFp(diffAgainst, MULTI_OFFSET_AHASH) : undefined} />
+    <ImageHashView label="PHash" bytes={sliceImageFp(bytes, MULTI_OFFSET_PHASH)}
+      diffAgainst={diffAgainst && diffAgainst.length === MULTI_BUNDLE_SIZE ? sliceImageFp(diffAgainst, MULTI_OFFSET_PHASH) : undefined} />
+    <ImageHashView label="DHash" bytes={sliceImageFp(bytes, MULTI_OFFSET_DHASH)}
+      diffAgainst={diffAgainst && diffAgainst.length === MULTI_BUNDLE_SIZE ? sliceImageFp(diffAgainst, MULTI_OFFSET_DHASH) : undefined} />
   </div>
 
 {:else if (algorithm === 'imgfprint-phash-v1' || algorithm === 'imgfprint-dhash-v1' || algorithm === 'imgfprint-ahash-v1') && bytes.length === 168}

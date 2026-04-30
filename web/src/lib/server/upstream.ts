@@ -143,7 +143,9 @@ function appendParams(qs: URLSearchParams, params?: AlgorithmParams): void {
   if (!params) return;
   for (const [k, v] of Object.entries(params)) {
     if (v == null || v === '') continue;
-    qs.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v));
+    // Rust serde deserialises `Option<bool>` from a query string as
+    // `true`/`false` only — `1`/`0` is rejected with "not `true` or `false`".
+    qs.set(k, typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
   }
 }
 
@@ -192,7 +194,10 @@ export async function ingestWatermark(
     modelId?: string;
     signal?: AbortSignal;
   }
-): Promise<{ status: number; result: WatermarkResult; latencyMs: number }> {
+): Promise<
+  | { status: number; result: WatermarkResult; latencyMs: number; error?: undefined }
+  | { status: number; error: string; latencyMs: number; result?: undefined }
+> {
   const qs = new URLSearchParams();
   qs.set('sample_rate', String(args.sampleRate ?? 8000));
   if (args.modelId) qs.set('model_id', args.modelId);
@@ -210,7 +215,7 @@ export async function ingestWatermark(
   const latencyMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
   const ct = res.headers.get('content-type') ?? '';
 
-  if (ct.includes('application/json')) {
+  if (res.ok && ct.includes('application/json')) {
     const raw = (await res.json()) as {
       detected?: boolean;
       confidence?: number;
@@ -225,9 +230,13 @@ export async function ingestWatermark(
       latencyMs
     };
   }
+  // Upstream returned an error (e.g. 404 because `audio-watermark` feature is
+  // off, or 501 with a clear "feature required" message). Surface the raw
+  // body so the caller can forward an honest error instead of a fake "no
+  // watermark detected" 200.
   return {
     status: res.status,
-    result: { detected: false, confidence: 0, payload: null },
+    error: await res.text().catch(() => ''),
     latencyMs
   };
 }

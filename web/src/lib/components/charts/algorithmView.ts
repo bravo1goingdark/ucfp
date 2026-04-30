@@ -4,7 +4,10 @@
 // "Algorithm structure" header.
 
 export function hasAlgorithmView(algorithm: string, byteLen: number): boolean {
-  if (algorithm === 'imgfprint-multihash-v1') return byteLen === 504;
+  // MultiHashFingerprint = 32 (bundle exact) + 168×3 (ahash, phash, dhash) = 536.
+  // Verified against the `assert!(size_of::<MultiHashFingerprint>() == 536)` in
+  // imgfprint-0.4.1/src/core/fingerprint.rs.
+  if (algorithm === 'imgfprint-multihash-v1') return byteLen === 536;
   if (
     algorithm === 'imgfprint-phash-v1' ||
     algorithm === 'imgfprint-dhash-v1' ||
