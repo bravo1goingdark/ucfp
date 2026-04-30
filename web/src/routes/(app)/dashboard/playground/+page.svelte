@@ -1,7 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import { fingerprintLocal, bytesEntropy, hammingDistance } from '$lib/utils/fingerprint';
   import FpFlow from '$components/FpFlow.svelte';
+  import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
+  import { buildResampledAudioForm, AUDIO_RATES_BY_ALG } from '$lib/utils/audioResample';
+  import EmbeddingBars from '$components/charts/EmbeddingBars.svelte';
+  import ByteHistogram from '$components/charts/ByteHistogram.svelte';
+  import BitDiffStrip from '$components/charts/BitDiffStrip.svelte';
+  import AlgorithmView from '$components/charts/AlgorithmView.svelte';
+  import { hasAlgorithmView } from '$components/charts/algorithmView';
+  import type { RecordHistoryEntry } from '$lib/types/api';
+
+  const history = createRecordHistory();
+
+  // Algorithms that produce a dense embedding vector (eligible for "Find similar").
+  const EMBEDDING_ALGS = new Set([
+    'semantic-openai','semantic-voyage','semantic-cohere','semantic-local',
+    'semantic','neural'
+  ]);
 
   // ── algorithm registry ────────────────────────────────────────────────────
   const ALGORITHMS: Record<string, string[]> = {
@@ -13,9 +30,7 @@
   const DEFAULT_ALG: Record<string, string> = {
     text: 'minhash', image: 'multi', audio: 'wang'
   };
-  const AUDIO_RATES: Record<string, number> = {
-    wang: 8000, panako: 8000, haitsma: 5000, neural: 16000, watermark: 16000
-  };
+  const AUDIO_RATES = AUDIO_RATES_BY_ALG;
   const ALG_LABELS: Record<string, string> = {
     'minhash':          'MinHash',
     'simhash-tf':       'SimHash TF',
@@ -100,9 +115,36 @@
   let modelId = $state('');
   let apiKey  = $state('');
 
+  // ── per-algorithm tunables (all optional; missing = upstream default) ────
+  // Text MinHash / SimHash / LSH / TLSH
+  let optK         = $state<number | null>(null);            // shingle width
+  let optH         = $state<number | null>(null);            // MinHash slots
+  let optTokenizer = $state<'word'|'grapheme'|'cjk-jp'|'cjk-ko'|''>('');
+  // Text preprocessing pass (HTML/Markdown/PDF) — short-circuits to dedicated endpoint.
+  let optPreprocess = $state<''|'html'|'markdown'|'pdf'>('');
+  // Audio Wang knobs
+  let optFanOut         = $state<number | null>(null);
+  let optPeaksPerSec    = $state<number | null>(null);
+  let optTargetZoneT    = $state<number | null>(null);
+  let optTargetZoneF    = $state<number | null>(null);
+  let optMinAnchorMagDb = $state<number | null>(null);
+  // Image preprocess
+  let optMaxDimension  = $state<number | null>(null);
+  let optMinDimension  = $state<number | null>(null);
+  let optMaxInputBytes = $state<number | null>(null);
+
+  // Last response embedding (when ?return_embedding=1 was sent and the
+  // algorithm produced one). Used by the "Find similar" handoff.
+  let lastEmbedding = $state<number[] | null>(null);
+  let lastRecordId  = $state<string | null>(null);
+  let lastTenantId  = $state<number>(0);
+
   // ── result A ──────────────────────────────────────────────────────────────
   let cells      = $state<{ color: string }[]>([]);
   let hexBytesA  = $state<Uint8Array | null>(null);
+  // Full fingerprint bytes (not truncated). Used by AlgorithmView for
+  // structure-aware visualisations that need the whole buffer.
+  let fullBytesA = $state<Uint8Array | null>(null);
   let algLabel   = $state('—');
   let cfgHash    = $state('—');
   let entropy    = $state('—');
@@ -129,6 +171,7 @@
   // result B
   let cellsB     = $state<{ color: string }[]>([]);
   let hexBytesB  = $state<Uint8Array | null>(null);
+  let fullBytesB = $state<Uint8Array | null>(null);
   let algLabelB  = $state('—');
   let entropyB   = $state('—');
   let fpBytesB   = $state('—');
@@ -196,33 +239,18 @@
     isWatermark   = false;
     cells = []; cellsB = [];
     hexBytesA = null; hexBytesB = null;
+    fullBytesA = null; fullBytesB = null;
   }
 
-  // ── audio resampling + FormData builder ──────────────────────────────────
+  // ── FormData builder (audio resampling delegates to shared helper) ───────
   async function buildFileForm(f: File, alg: string): Promise<FormData> {
-    const fd = new FormData();
     const isAudio = (f.type || '').toLowerCase().startsWith('audio/');
     if (isAudio) {
-      const targetRate = AUDIO_RATES[alg] ?? 8000;
-      const arrayBuf = await f.arrayBuffer();
-      const ACtx = (window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
-      const ac = new ACtx();
-      try {
-        const decoded = await ac.decodeAudioData(arrayBuf.slice(0));
-        const sampleCount = Math.ceil(decoded.duration * targetRate);
-        const offline = new OfflineAudioContext(1, sampleCount, targetRate);
-        const src = offline.createBufferSource();
-        src.buffer = decoded; src.connect(offline.destination); src.start(0);
-        const resampled = await offline.startRendering();
-        const ch = resampled.getChannelData(0);
-        const bytes = new Uint8Array(ch.length * 4);
-        const dv = new DataView(bytes.buffer);
-        for (let i = 0; i < ch.length; i++) dv.setFloat32(i * 4, ch[i], true);
-        fd.set('file', new File([bytes], 'audio.f32le', { type: 'audio/x-f32le' }));
-        fd.set('sample_rate', String(targetRate));
-      } finally { try { await ac.close(); } catch { /* */ } }
-    } else { fd.set('file', f); }
+      const built = await buildResampledAudioForm(f, alg);
+      return built.form;
+    }
+    const fd = new FormData();
+    fd.set('file', f);
     return fd;
   }
 
@@ -245,6 +273,8 @@
     kind: 'ok';
     cells: { color: string }[];
     hexBytes: Uint8Array | null;
+    /** Full bytes (uncapped) for algorithm-aware visualisations. */
+    fullBytes: Uint8Array | null;
     hexStr: string;
     algLabel: string;
     cfgHash: string;
@@ -288,6 +318,30 @@
     if (modelId.trim()) url += `&model_id=${encodeURIComponent(modelId.trim())}`;
     if (apiKey.trim())  url += `&api_key=${encodeURIComponent(apiKey.trim())}`;
 
+    // Per-algorithm tunables — only forward fields meaningful for the
+    // current modality so we don't push noise upstream.
+    function appendNum(name: string, v: number | null): void {
+      if (v != null && Number.isFinite(v)) url += `&${name}=${v}`;
+    }
+    if (modality === 'text') {
+      appendNum('k', optK); appendNum('h', optH);
+      if (optTokenizer) url += `&tokenizer=${optTokenizer}`;
+      if (optPreprocess) url += `&preprocess=${optPreprocess}`;
+    } else if (modality === 'audio' && algorithm === 'wang') {
+      appendNum('fan_out', optFanOut);
+      appendNum('peaks_per_sec', optPeaksPerSec);
+      appendNum('target_zone_t', optTargetZoneT);
+      appendNum('target_zone_f', optTargetZoneF);
+      appendNum('min_anchor_mag_db', optMinAnchorMagDb);
+    } else if (modality === 'image') {
+      appendNum('max_dimension', optMaxDimension);
+      appendNum('min_dimension', optMinDimension);
+      appendNum('max_input_bytes', optMaxInputBytes);
+    }
+    // Request the embedding back when the algorithm produces one — the
+    // search "Find similar" path needs it client-side.
+    if (EMBEDDING_ALGS.has(algorithm)) url += `&return_embedding=1`;
+
     const init: RequestInit = { method: 'POST', body };
     if (contentType) init.headers = { 'content-type': contentType };
 
@@ -304,6 +358,7 @@
         kind: 'ok',
         cells: bytesToCells(local.bytes),
         hexBytes: local.bytes,
+        fullBytes: local.bytes,
         hexStr: local.hex,
         algLabel: `${ALG_LABELS[algorithm] ?? algorithm} (local FNV-1a)`,
         cfgHash: '—',
@@ -323,6 +378,13 @@
 
     const data = await res.json() as Record<string, unknown>;
 
+    // Stash record_id + tenant_id + embedding from the *just-completed*
+    // call so the "Save to records" and "Find similar" buttons have
+    // something to use.
+    lastRecordId = data.record_id != null ? String(data.record_id) : null;
+    lastTenantId = typeof data.tenant_id === 'number' ? data.tenant_id : 0;
+    lastEmbedding = Array.isArray(data.embedding) ? (data.embedding as number[]) : null;
+
     if (data.watermark === true) {
       return {
         kind: 'watermark',
@@ -335,13 +397,16 @@
 
     // Use real fingerprint_hex from server; fall back to FNV-1a if absent
     let displayBytes: Uint8Array;
+    let fullBytes: Uint8Array;
     let displayHex: string;
     if (typeof data.fingerprint_hex === 'string' && data.fingerprint_hex.length > 0) {
       displayBytes = hexToBytes(data.fingerprint_hex);
+      fullBytes    = hexToBytes(data.fingerprint_hex, Number.MAX_SAFE_INTEGER);
       displayHex   = data.fingerprint_hex;
     } else {
       const local = fingerprintLocal(seedFallback + '|' + String(data.algorithm ?? algorithm));
       displayBytes = local.bytes;
+      fullBytes    = local.bytes;
       displayHex   = local.hex;
     }
 
@@ -349,6 +414,7 @@
       kind: 'ok',
       cells: bytesToCells(displayBytes),
       hexBytes: displayBytes,
+      fullBytes,
       hexStr: displayHex,
       algLabel: String(data.algorithm ?? algorithm),
       cfgHash: data.config_hash != null ? `0x${Number(data.config_hash).toString(16)}` : '—',
@@ -357,6 +423,41 @@
       latencyMs: `${elapsed} ms`,
       isLocal: false,
     };
+  }
+
+  // ── save-to-records / find-similar ────────────────────────────────────────
+  let saveToast = $state<string | null>(null);
+  function saveToRecords(): void {
+    if (!lastRecordId || !hasResult || isWatermark) return;
+    const labelSeed = modality === 'text'
+      ? textInput.trim().slice(0, 60) || 'untitled text'
+      : (file?.name ?? 'untitled file');
+    const entry: RecordHistoryEntry = {
+      tenantId: lastTenantId,
+      recordId: lastRecordId,
+      label: labelSeed,
+      modality,
+      algorithm,
+      hasEmbedding: lastEmbedding != null,
+      fingerprintHex: hexStr.slice(0, 64),
+      createdAt: Math.floor(Date.now() / 1000)
+    };
+    history.add(entry);
+    saveToast = 'Saved to records';
+    setTimeout(() => { saveToast = null; }, 1800);
+  }
+
+  function findSimilar(): void {
+    if (!lastEmbedding) return;
+    try {
+      sessionStorage.setItem('ucfp:search:handoff', JSON.stringify({
+        modality, algorithm, vector: lastEmbedding,
+        sourceLabel: modality === 'text'
+          ? textInput.trim().slice(0, 60)
+          : (file?.name ?? '')
+      }));
+    } catch { /* quota — proceed anyway */ }
+    void goto(`/dashboard/search?modality=${modality}&algorithm=${algorithm}`);
   }
 
   // ── compute A ─────────────────────────────────────────────────────────────
@@ -386,6 +487,7 @@
       isWatermark = false;
       cells      = result.cells;
       hexBytesA  = result.hexBytes;
+      fullBytesA = result.fullBytes;
       hexStr     = result.hexStr;
       algLabel   = result.algLabel;
       cfgHash    = result.cfgHash;
@@ -421,6 +523,7 @@
       }
       cellsB     = result.cells;
       hexBytesB  = result.hexBytes;
+      fullBytesB = result.fullBytes;
       hexStrB    = result.hexStr;
       algLabelB  = result.algLabel;
       fpBytesB   = result.fpBytes;
@@ -452,6 +555,7 @@
       if (ra.kind === 'error') errorMsg = ra.msg;
       if (ra.kind === 'ok') {
         isWatermark = false; cells = ra.cells; hexBytesA = ra.hexBytes;
+        fullBytesA = ra.fullBytes;
         hexStr = ra.hexStr; algLabel = ra.algLabel; cfgHash = ra.cfgHash;
         fpBytes = ra.fpBytes; entropy = ra.entropy; latencyMs = ra.latencyMs;
         isLocal = ra.isLocal; hasResult = true;
@@ -460,6 +564,7 @@
       if (rb.kind === 'error') errorMsgB = rb.msg;
       if (rb.kind === 'ok') {
         cellsB = rb.cells; hexBytesB = rb.hexBytes;
+        fullBytesB = rb.fullBytes;
         hexStrB = rb.hexStr; algLabelB = rb.algLabel;
         fpBytesB = rb.fpBytes; entropyB = rb.entropy; latencyMsB = rb.latencyMs;
         isLocalB = rb.isLocal; hasResultB = true;
@@ -629,6 +734,91 @@
           </details>
         {/if}
 
+        <!-- ── Algorithm tuning (per-modality knobs that map to upstream ── -->
+        <!-- ── DTO query params; missing values fall back to defaults).  ── -->
+        <details class="adv-opts">
+          <summary class="adv-summary">Algorithm tuning</summary>
+          <div class="adv-body">
+            {#if modality === 'text'}
+              <div class="adv-row">
+                <label class="adv-label">Shingle width (k)
+                  <input class="adv-input" type="number" min="1" max="16"
+                    bind:value={optK} placeholder="default 5" />
+                </label>
+                <label class="adv-label">MinHash slots (h)
+                  <select class="adv-input" bind:value={optH}>
+                    <option value={null}>default (128)</option>
+                    <option value={32}>32</option>
+                    <option value={64}>64</option>
+                    <option value={128}>128</option>
+                    <option value={256}>256</option>
+                    <option value={512}>512</option>
+                  </select>
+                </label>
+              </div>
+              <label class="adv-label">Tokenizer
+                <select class="adv-input" bind:value={optTokenizer}>
+                  <option value="">default (word)</option>
+                  <option value="word">word (UAX #29)</option>
+                  <option value="grapheme">grapheme cluster</option>
+                  <option value="cjk-jp">CJK Japanese (Lindera + IPADIC)</option>
+                  <option value="cjk-ko">CJK Korean (Lindera + ko-dic)</option>
+                </select>
+              </label>
+              <label class="adv-label">Preprocess pass
+                <select class="adv-input" bind:value={optPreprocess}>
+                  <option value="">none — fingerprint raw text</option>
+                  <option value="html">HTML → plain text → MinHash</option>
+                  <option value="markdown">Markdown → plain text → MinHash</option>
+                  <option value="pdf">PDF → text → MinHash (drop a .pdf above)</option>
+                </select>
+              </label>
+            {:else if modality === 'image'}
+              <div class="adv-row">
+                <label class="adv-label">Max dimension (px)
+                  <input class="adv-input" type="number" min="32" max="8192"
+                    bind:value={optMaxDimension} placeholder="upstream default" />
+                </label>
+                <label class="adv-label">Min dimension (px)
+                  <input class="adv-input" type="number" min="1"
+                    bind:value={optMinDimension} placeholder="upstream default" />
+                </label>
+              </div>
+              <label class="adv-label">Max input bytes
+                <input class="adv-input" type="number" min="1024"
+                  bind:value={optMaxInputBytes} placeholder="upstream default" />
+              </label>
+            {:else if modality === 'audio' && algorithm === 'wang'}
+              <div class="adv-row">
+                <label class="adv-label">Fan out
+                  <input class="adv-input" type="number" min="1" max="64"
+                    bind:value={optFanOut} placeholder="upstream default" />
+                </label>
+                <label class="adv-label">Peaks / sec
+                  <input class="adv-input" type="number" min="1" max="200"
+                    bind:value={optPeaksPerSec} placeholder="upstream default" />
+                </label>
+              </div>
+              <div class="adv-row">
+                <label class="adv-label">Target zone Δt
+                  <input class="adv-input" type="number" min="1"
+                    bind:value={optTargetZoneT} placeholder="upstream default" />
+                </label>
+                <label class="adv-label">Target zone Δf
+                  <input class="adv-input" type="number" min="1"
+                    bind:value={optTargetZoneF} placeholder="upstream default" />
+                </label>
+              </div>
+              <label class="adv-label">Min anchor magnitude (dB)
+                <input class="adv-input" type="number"
+                  bind:value={optMinAnchorMagDb} placeholder="upstream default" />
+              </label>
+            {:else}
+              <p class="adv-hint">No extra knobs for this algorithm — uses upstream defaults.</p>
+            {/if}
+          </div>
+        </details>
+
         {#if errorMsg}
           <p class="pg-error" role="alert">{errorMsg}</p>
         {/if}
@@ -676,6 +866,23 @@
               {/each}
             </div>
             <div class="hex-str" title={hexStr}>{hexStr.slice(0, 64)}{hexStr.length > 64 ? '…' : ''}</div>
+            {#if hexBytesA && hexBytesA.length > 0}
+              <div class="viz-section">
+                <ByteHistogram bytes={hexBytesA} height={42} />
+              </div>
+            {/if}
+            {#if fullBytesA && !isLocal && hasAlgorithmView(algLabel, fullBytesA.length)}
+              <div class="viz-section">
+                <div class="viz-label">Algorithm structure · {algLabel}</div>
+                <AlgorithmView algorithm={algLabel} bytes={fullBytesA} />
+              </div>
+            {/if}
+            {#if lastEmbedding}
+              <div class="viz-section">
+                <div class="viz-label">Embedding · dense vector</div>
+                <EmbeddingBars vector={lastEmbedding} maxBars={128} height={64} />
+              </div>
+            {/if}
           {:else}
             <div class="result-empty">
               <span class="empty-icon">⬡</span>
@@ -695,6 +902,16 @@
             <div class="metric-card"><span class="metric-k">FP size</span><span class="metric-v">{fpBytes}</span></div>
             <div class="metric-card"><span class="metric-k">Latency</span><span class="metric-v">{latencyMs}</span></div>
           </div>
+          {#if hasResult && !isWatermark && lastRecordId && !isLocal}
+            <div class="result-actions">
+              <button class="action-btn" onclick={saveToRecords}>+ Save to records</button>
+              <button class="action-btn"
+                disabled={!lastEmbedding}
+                title={lastEmbedding ? 'Find similar records via vector kNN' : 'Pick a semantic algorithm to enable similarity search'}
+                onclick={findSimilar}>↗ Find similar</button>
+              {#if saveToast}<span class="save-toast" role="status">{saveToast}</span>{/if}
+            </div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -893,6 +1110,22 @@
           {/if}
         </div>
       </div>
+
+      <!-- bit-level XOR strip across the pair (richer than the byte diff). -->
+      {#if hexBytesA && hexBytesB}
+        <div class="bit-diff-section">
+          <div class="pane-label">Bit-level diff (XOR · A ⊕ B, first {Math.min(hexBytesA.length, hexBytesB.length, 64)} bytes)</div>
+          <BitDiffStrip a={hexBytesA} b={hexBytesB} maxBytes={64} />
+        </div>
+      {/if}
+
+      <!-- Algorithm-aware structural diff (where the layout permits). -->
+      {#if fullBytesA && fullBytesB && !isLocal && !isLocalB && hasAlgorithmView(algLabel, fullBytesA.length) && fullBytesA.length === fullBytesB.length}
+        <div class="bit-diff-section">
+          <div class="pane-label">Structural diff · {algLabel}</div>
+          <AlgorithmView algorithm={algLabel} bytes={fullBytesA} diffAgainst={fullBytesB} />
+        </div>
+      {/if}
     {/if}
   {/if}
 
@@ -1031,6 +1264,25 @@
   .adv-label { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
   .adv-input { font-family: var(--mono); font-size: 0.72rem; padding: 5px 8px; border: 1px solid var(--ink); border-radius: 3px; background: var(--bg); color: var(--ink); width: 100%; box-sizing: border-box; }
   .adv-input:focus { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
+  .adv-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+  .adv-hint { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); margin: 0; }
+
+  .result-actions {
+    display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+  .action-btn {
+    font-family: var(--mono); font-size: 0.72rem;
+    padding: 0.35rem 0.7rem; border: 1px solid var(--ink);
+    background: transparent; color: var(--ink); border-radius: 3px;
+    cursor: pointer; transition: background 0.1s, opacity 0.1s;
+  }
+  .action-btn:not(:disabled):hover { background: var(--bg-2); }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .save-toast {
+    font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2);
+    padding: 0.25rem 0.5rem; background: var(--bg-2); border-radius: 3px;
+  }
 
   /* Error / warn */
   .pg-error { font-family: var(--mono); font-size: 0.75rem; color: #b03030; margin: 0; padding: 0.4rem 0.6rem; border: 1px solid currentColor; border-radius: 3px; background: color-mix(in srgb, #b03030 8%, transparent); }
@@ -1130,4 +1382,17 @@
 
   /* Pipeline section */
   .pipeline-section { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  /* Inline visualization sections (embedding / histogram / bit-diff). */
+  .viz-section { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.6rem; }
+  .viz-label {
+    font-family: var(--mono); font-size: 0.62rem;
+    text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2);
+  }
+  .bit-diff-section {
+    display: flex; flex-direction: column; gap: 0.4rem;
+    padding: 0.75rem; background: var(--bg-2);
+    border: 1px solid var(--ink); border-radius: 6px;
+    margin-top: 0.5rem;
+  }
 </style>

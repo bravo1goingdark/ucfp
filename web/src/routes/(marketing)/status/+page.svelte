@@ -49,6 +49,23 @@
   </div>
 </div>
 
+{#if data.info}
+  <div class="status-grid">
+    <div class="status-card">
+      <div class="k">Backend version</div>
+      <div class="v">{data.info.crate_version}</div>
+    </div>
+    <div class="status-card">
+      <div class="k">Format version</div>
+      <div class="v">{data.info.format_version}</div>
+    </div>
+    <div class="status-card" style="grid-column:span 2">
+      <div class="k">/v1/info</div>
+      <div class="v">live · refreshed each visit</div>
+    </div>
+  </div>
+{/if}
+
 <p class="footnote">
   Live check, not historical. Refresh the page for a fresh probe — the
   latency above is the edge-to-origin round-trip from this Cloudflare POP

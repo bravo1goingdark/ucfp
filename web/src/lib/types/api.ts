@@ -57,3 +57,57 @@ export interface DashboardSummary {
   keysActive: number;
   usage: UsageSummary;
 }
+
+// ── Records / search / info — mirrors src/server/dto.rs ────────────────
+
+/** Mirror of `FingerprintDescription` (dto.rs:363). Metadata only — no
+ *  fingerprint bytes or embedding. */
+export interface FingerprintDescription {
+  tenant_id: number;
+  record_id: number | string;
+  modality: Modality;
+  algorithm: string;
+  format_version: number;
+  config_hash: number | string;
+  fingerprint_bytes: number;
+  has_embedding: boolean;
+  embedding_dim: number | null;
+  model_id: string | null;
+  metadata_bytes: number;
+}
+
+/** One ranked hit from `POST /v1/query`. Score is cosine for vector hits. */
+export interface QueryHit {
+  tenant_id: number;
+  record_id: number | string;
+  score: number;
+  source: 'vector' | 'bm25' | 'filter' | 'reranker' | 'fused';
+}
+
+export interface SearchRequest {
+  modality: Modality;
+  k: number;
+  vector: number[];
+}
+
+export interface SearchResponse {
+  hits: QueryHit[];
+}
+
+/** Bookmark in localStorage for the Records page. */
+export interface RecordHistoryEntry {
+  tenantId: number;
+  recordId: string;        // u64 decimal string
+  label: string;
+  modality: Modality;
+  algorithm: string;
+  hasEmbedding: boolean;
+  fingerprintHex: string;  // truncated to first 64 hex chars
+  createdAt: number;       // unix seconds
+}
+
+/** Mirror of `InfoResponse` (dto.rs). */
+export interface InfoResponse {
+  format_version: number;
+  crate_version: string;
+}

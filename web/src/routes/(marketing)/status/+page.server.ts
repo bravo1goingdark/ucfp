@@ -1,4 +1,5 @@
 import type { PageServerLoad } from './$types';
+import type { InfoResponse } from '$lib/types/api';
 
 export const prerender = false;
 
@@ -13,30 +14,37 @@ export const load: PageServerLoad = async ({ platform, request }) => {
       reachable: false,
       latencyMs: null,
       colo: getColo(request),
-      checkedAt
+      checkedAt,
+      info: null as InfoResponse | null
     };
   }
 
+  const base = apiUrl.replace(/\/$/, '');
   const t0 = Date.now();
-  let reachable = false;
-  try {
-    const res = await fetch(`${apiUrl.replace(/\/$/, '')}/healthz`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000),
-      cache: 'no-store'
-    });
-    reachable = res.ok;
-  } catch {
-    reachable = false;
-  }
+
+  // Probe healthz + info in parallel — fold failures so the page always
+  // renders something useful even if the upstream is partially broken.
+  const [healthRes, infoRes] = await Promise.allSettled([
+    fetch(`${base}/healthz`, { method: 'GET', signal: AbortSignal.timeout(2000), cache: 'no-store' }),
+    fetch(`${base}/v1/info`, { method: 'GET', signal: AbortSignal.timeout(2000), cache: 'no-store' })
+  ]);
   const latencyMs = Date.now() - t0;
+
+  const reachable =
+    healthRes.status === 'fulfilled' && healthRes.value.ok;
+
+  let info: InfoResponse | null = null;
+  if (infoRes.status === 'fulfilled' && infoRes.value.ok) {
+    try { info = await infoRes.value.json() as InfoResponse; } catch { info = null; }
+  }
 
   return {
     configured: true,
     reachable,
     latencyMs,
     colo: getColo(request),
-    checkedAt
+    checkedAt,
+    info
   };
 };
 

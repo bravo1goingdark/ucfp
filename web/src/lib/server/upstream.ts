@@ -19,7 +19,71 @@ export interface IngestResponse {
   algorithm: string;
   config_hash: number | string;
   fingerprint_bytes: number;
+  fingerprint_hex: string;
   has_embedding: boolean;
+  /** Populated only when the request carries `?return_embedding=1` and the
+   *  algorithm produces a dense vector (semantic-* / neural / image-semantic). */
+  embedding?: number[];
+}
+
+/** Mirrors `FingerprintDescription` (dto.rs:363) — metadata only. */
+export interface FingerprintDescription {
+  tenant_id: number;
+  record_id: number | string;
+  modality: Modality;
+  algorithm: string;
+  format_version: number;
+  config_hash: number | string;
+  fingerprint_bytes: number;
+  has_embedding: boolean;
+  embedding_dim: number | null;
+  model_id: string | null;
+  metadata_bytes: number;
+}
+
+/** One ranked hit from `POST /v1/query`. */
+export interface QueryHit {
+  tenant_id: number;
+  record_id: number | string;
+  score: number;
+  source: 'vector' | 'bm25' | 'filter' | 'reranker' | 'fused';
+}
+
+export interface QueryResponse {
+  hits: QueryHit[];
+}
+
+/** Mirrors `InfoResponse` (dto.rs). */
+export interface InfoResponse {
+  format_version: number;
+  crate_version: string;
+}
+
+/** Mirrors `UpsertResponse` (dto.rs). */
+export interface UpsertResponse {
+  upserted: number;
+}
+
+/** Per-algorithm tunables forwarded to upstream as query params. Each
+ *  field is optional; missing fields fall back to upstream defaults. */
+export interface AlgorithmParams {
+  // text
+  k?: number;
+  h?: number;
+  tokenizer?: 'word' | 'grapheme' | 'cjk-jp' | 'cjk-ko';
+  preprocess?: 'html' | 'markdown' | 'pdf';
+  // audio Wang
+  fan_out?: number;
+  peaks_per_sec?: number;
+  target_zone_t?: number;
+  target_zone_f?: number;
+  min_anchor_mag_db?: number;
+  // image preprocess
+  max_dimension?: number;
+  max_input_bytes?: number;
+  min_dimension?: number;
+  /** When true, the upstream response includes the dense embedding. */
+  return_embedding?: boolean;
 }
 
 export interface UpstreamConfig {
@@ -41,6 +105,8 @@ export interface IngestArgs {
   modelId?: string;
   /** API key for cloud semantic providers (OpenAI / Voyage / Cohere). */
   apiKey?: string;
+  /** Optional per-algorithm tunables — appended as query params. */
+  params?: AlgorithmParams;
   /** Optional AbortSignal for caller-side cancellation. */
   signal?: AbortSignal;
 }
@@ -73,6 +139,14 @@ function buildHeaders(cfg: UpstreamConfig, contentType: string): HeadersInit {
   };
 }
 
+function appendParams(qs: URLSearchParams, params?: AlgorithmParams): void {
+  if (!params) return;
+  for (const [k, v] of Object.entries(params)) {
+    if (v == null || v === '') continue;
+    qs.set(k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v));
+  }
+}
+
 /** POST /v1/ingest/{modality}/{tenant}/{record}. */
 export async function ingest(cfg: UpstreamConfig, args: IngestArgs): Promise<IngestOutcome> {
   let path = `/v1/ingest/${args.modality}/${cfg.tenantId}/${args.recordId}`;
@@ -81,6 +155,7 @@ export async function ingest(cfg: UpstreamConfig, args: IngestArgs): Promise<Ing
   if (args.algorithm) qs.set('algorithm', args.algorithm);
   if (args.modelId)   qs.set('model_id',  args.modelId);
   if (args.apiKey)    qs.set('api_key',   args.apiKey);
+  appendParams(qs, args.params);
   const qstr = qs.toString();
   if (qstr) path += '?' + qstr;
 
@@ -155,4 +230,169 @@ export async function ingestWatermark(
     result: { detected: false, confidence: 0, payload: null },
     latencyMs
   };
+}
+
+// ── Records / search / info — wraps the rest of the upstream surface ──
+
+/** GET /v1/records/{tenant}/{record} — metadata only. */
+export async function describeRecord(
+  cfg: UpstreamConfig,
+  recordId: string,
+  signal?: AbortSignal
+): Promise<{ status: number; description: FingerprintDescription | null }> {
+  const url = joinUrl(cfg.apiUrl, `/v1/records/${cfg.tenantId}/${recordId}`);
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
+    signal
+  });
+  if (!res.ok) return { status: res.status, description: null };
+  return { status: res.status, description: (await res.json()) as FingerprintDescription };
+}
+
+/** DELETE /v1/records/{tenant}/{record}. */
+export async function deleteRecord(
+  cfg: UpstreamConfig,
+  recordId: string,
+  signal?: AbortSignal
+): Promise<{ status: number }> {
+  const url = joinUrl(cfg.apiUrl, `/v1/records/${cfg.tenantId}/${recordId}`);
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
+    signal
+  });
+  return { status: res.status };
+}
+
+/** POST /v1/records — bulk upsert raw `Record[]`. */
+export async function upsertRecords(
+  cfg: UpstreamConfig,
+  records: unknown[],
+  signal?: AbortSignal
+): Promise<{ status: number; body: UpsertResponse | string }> {
+  const url = joinUrl(cfg.apiUrl, '/v1/records');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: buildHeaders(cfg, 'application/json'),
+    body: JSON.stringify({ records }),
+    signal
+  });
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    return { status: res.status, body: (await res.json()) as UpsertResponse };
+  }
+  return { status: res.status, body: await res.text() };
+}
+
+/** POST /v1/query — vector kNN. */
+export async function query(
+  cfg: UpstreamConfig,
+  q: { modality: Modality; k: number; vector: number[] },
+  signal?: AbortSignal
+): Promise<{ status: number; body: QueryResponse | string; latencyMs: number }> {
+  const url = joinUrl(cfg.apiUrl, '/v1/query');
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: buildHeaders(cfg, 'application/json'),
+    body: JSON.stringify({ tenant_id: cfg.tenantId, modality: q.modality, k: q.k, vector: q.vector }),
+    signal
+  });
+  const latencyMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    return { status: res.status, body: (await res.json()) as QueryResponse, latencyMs };
+  }
+  return { status: res.status, body: await res.text(), latencyMs };
+}
+
+/** GET /v1/info — public, no auth. */
+export async function getInfo(
+  cfg: Pick<UpstreamConfig, 'apiUrl'>,
+  signal?: AbortSignal
+): Promise<{ status: number; info: InfoResponse | null }> {
+  const res = await fetch(joinUrl(cfg.apiUrl, '/v1/info'), { method: 'GET', signal });
+  if (!res.ok) return { status: res.status, info: null };
+  return { status: res.status, info: (await res.json()) as InfoResponse };
+}
+
+/** POST /v1/ingest/text/{tenant}/{record}/preprocess/{kind}. */
+export async function ingestTextPreprocess(
+  cfg: UpstreamConfig,
+  args: {
+    recordId: string;
+    kind: 'html' | 'markdown' | 'pdf';
+    body: BodyInit;
+    contentType: string;
+    signal?: AbortSignal;
+  }
+): Promise<IngestOutcome> {
+  const path = `/v1/ingest/text/${cfg.tenantId}/${args.recordId}/preprocess/${args.kind}`;
+  const url = joinUrl(cfg.apiUrl, path);
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: buildHeaders(cfg, args.contentType),
+    body: args.body,
+    signal: args.signal
+  });
+  const latencyMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    return { ok: res.ok, status: res.status, body: (await res.json()) as IngestResponse, latencyMs };
+  }
+  return { ok: res.ok, status: res.status, body: await res.text(), latencyMs };
+}
+
+/** POST /v1/ingest/text/{tenant}/{record}/stream — NDJSON. */
+export async function ingestTextStream(
+  cfg: UpstreamConfig,
+  args: { recordId: string; ndjson: BodyInit; params?: AlgorithmParams; signal?: AbortSignal }
+): Promise<IngestOutcome> {
+  let path = `/v1/ingest/text/${cfg.tenantId}/${args.recordId}/stream`;
+  const qs = new URLSearchParams();
+  appendParams(qs, args.params);
+  const qstr = qs.toString();
+  if (qstr) path += '?' + qstr;
+  const url = joinUrl(cfg.apiUrl, path);
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: buildHeaders(cfg, 'application/x-ndjson'),
+    body: args.ndjson,
+    signal: args.signal
+  });
+  const latencyMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    return { ok: res.ok, status: res.status, body: (await res.json()) as IngestResponse, latencyMs };
+  }
+  return { ok: res.ok, status: res.status, body: await res.text(), latencyMs };
+}
+
+/** POST /v1/ingest/audio/{tenant}/{record}/stream — multipart. */
+export async function ingestAudioStream(
+  cfg: UpstreamConfig,
+  args: { recordId: string; multipart: FormData; sampleRate: number; params?: AlgorithmParams; signal?: AbortSignal }
+): Promise<IngestOutcome> {
+  let path = `/v1/ingest/audio/${cfg.tenantId}/${args.recordId}/stream`;
+  const qs = new URLSearchParams();
+  qs.set('sample_rate', String(args.sampleRate));
+  appendParams(qs, args.params);
+  path += '?' + qs.toString();
+  const url = joinUrl(cfg.apiUrl, path);
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
+    body: args.multipart,
+    signal: args.signal
+  });
+  const latencyMs = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0;
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('application/json')) {
+    return { ok: res.ok, status: res.status, body: (await res.json()) as IngestResponse, latencyMs };
+  }
+  return { ok: res.ok, status: res.status, body: await res.text(), latencyMs };
 }

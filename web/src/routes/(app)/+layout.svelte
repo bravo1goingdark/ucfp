@@ -13,6 +13,9 @@
     { label: 'Keys', href: '/dashboard/keys' },
     { label: 'Usage', href: '/dashboard/usage' },
     { label: 'Playground', href: '/dashboard/playground' },
+    { label: 'Records', href: '/dashboard/records' },
+    { label: 'Search', href: '/dashboard/search' },
+    { label: 'Bulk', href: '/dashboard/bulk' },
     { label: 'Docs', href: '/docs' }
   ];
 
@@ -27,6 +30,15 @@
     }
     if (path.startsWith('/dashboard/playground')) {
       return [{ label: 'Dashboard', href: '/dashboard' }, { label: 'Playground' }];
+    }
+    if (path.startsWith('/dashboard/records')) {
+      return [{ label: 'Dashboard', href: '/dashboard' }, { label: 'Records' }];
+    }
+    if (path.startsWith('/dashboard/search')) {
+      return [{ label: 'Dashboard', href: '/dashboard' }, { label: 'Search' }];
+    }
+    if (path.startsWith('/dashboard/bulk')) {
+      return [{ label: 'Dashboard', href: '/dashboard' }, { label: 'Bulk upload' }];
     }
     return [{ label: 'Dashboard', href: '/dashboard' }];
   });

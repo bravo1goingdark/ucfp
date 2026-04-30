@@ -172,7 +172,7 @@ fn hit_source_str(s: HitSource) -> &'static str {
 // correct build without trial-and-error.
 
 #[cfg(any(feature = "audio", feature = "image", feature = "text"))]
-fn ingest_response(rec: &Record) -> IngestResponse {
+fn ingest_response(rec: &Record, return_embedding: bool) -> IngestResponse {
     IngestResponse {
         tenant_id: rec.tenant_id,
         record_id: rec.record_id,
@@ -183,6 +183,7 @@ fn ingest_response(rec: &Record) -> IngestResponse {
         fingerprint_bytes: rec.fingerprint.len(),
         fingerprint_hex: rec.fingerprint.iter().map(|b| format!("{b:02x}")).collect(),
         has_embedding: rec.embedding.is_some(),
+        embedding: if return_embedding { rec.embedding.clone() } else { None },
     }
 }
 
@@ -197,17 +198,13 @@ pub(super) async fn ingest_image<I: IndexBackend>(
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    let pre = build_image_preprocess(&params);
     let rec = match params.algorithm {
-        ImageAlgorithm::Multi => crate::modality::image::fingerprint(&body, tenant_id, record_id)?,
+        ImageAlgorithm::Multi => crate::modality::image::fingerprint_with(&body, tenant_id, record_id, &pre)?,
         ImageAlgorithm::Phash => {
             #[cfg(feature = "image-perceptual")]
             {
-                crate::modality::image::fingerprint_phash(
-                    &body,
-                    &imgfprint::PreprocessConfig::default(),
-                    tenant_id,
-                    record_id,
-                )?
+                crate::modality::image::fingerprint_phash(&body, &pre, tenant_id, record_id)?
             }
             #[cfg(not(feature = "image-perceptual"))]
             return Err(Error::Unsupported(
@@ -218,12 +215,7 @@ pub(super) async fn ingest_image<I: IndexBackend>(
         ImageAlgorithm::Dhash => {
             #[cfg(feature = "image-perceptual")]
             {
-                crate::modality::image::fingerprint_dhash(
-                    &body,
-                    &imgfprint::PreprocessConfig::default(),
-                    tenant_id,
-                    record_id,
-                )?
+                crate::modality::image::fingerprint_dhash(&body, &pre, tenant_id, record_id)?
             }
             #[cfg(not(feature = "image-perceptual"))]
             return Err(Error::Unsupported(
@@ -234,12 +226,7 @@ pub(super) async fn ingest_image<I: IndexBackend>(
         ImageAlgorithm::Ahash => {
             #[cfg(feature = "image-perceptual")]
             {
-                crate::modality::image::fingerprint_ahash(
-                    &body,
-                    &imgfprint::PreprocessConfig::default(),
-                    tenant_id,
-                    record_id,
-                )?
+                crate::modality::image::fingerprint_ahash(&body, &pre, tenant_id, record_id)?
             }
             #[cfg(not(feature = "image-perceptual"))]
             return Err(Error::Unsupported(
@@ -255,7 +242,18 @@ pub(super) async fn ingest_image<I: IndexBackend>(
         }
     };
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
+}
+
+/// Build an `imgfprint::PreprocessConfig` from optional query overrides.
+/// Missing fields fall back to the SDK defaults.
+#[cfg(feature = "image")]
+fn build_image_preprocess(params: &ImageParams) -> imgfprint::PreprocessConfig {
+    let mut p = imgfprint::PreprocessConfig::default();
+    if let Some(v) = params.max_input_bytes { p.max_input_bytes = v; }
+    if let Some(v) = params.max_dimension   { p.max_dimension   = v; }
+    if let Some(v) = params.min_dimension   { p.min_dimension   = v; }
+    p
 }
 
 /// `POST /v1/ingest/image/{tid}/{rid}/semantic` — CLIP-style ONNX vector.
@@ -272,15 +270,16 @@ pub(super) async fn ingest_image_semantic<I: IndexBackend>(
         .model_id
         .as_deref()
         .ok_or_else(|| Error::Modality("image semantic requires `model_id`".into()))?;
+    let pre = build_image_preprocess(&params);
     let rec = crate::modality::image::fingerprint_semantic(
         &body,
-        &imgfprint::PreprocessConfig::default(),
+        &pre,
         model,
         tenant_id,
         record_id,
     )?;
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
 }
 
 // ── Text ingest ────────────────────────────────────────────────────────
@@ -420,7 +419,7 @@ pub(super) async fn ingest_text<I: IndexBackend>(
             }
         };
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
 }
 
 #[cfg(feature = "text")]
@@ -481,7 +480,7 @@ pub(super) async fn ingest_text_stream<I: IndexBackend>(
         .pop()
         .ok_or_else(|| Error::Modality("streaming session produced no record".into()))?;
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
 }
 
 /// `POST /v1/ingest/text/{tid}/{rid}/preprocess/{kind}` — preprocess
@@ -554,7 +553,7 @@ pub(super) async fn ingest_text_preprocess<I: IndexBackend>(
         { crate::modality::text::DEFAULT_H },
     >(text.as_ref(), &opts, tenant_id, record_id)?;
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, false))))
 }
 
 // ── Audio ingest ───────────────────────────────────────────────────────
@@ -584,12 +583,37 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
         .collect();
 
     let rec = match params.algorithm {
-        AudioAlgorithm::Wang => crate::modality::audio::fingerprint_wang(
-            &samples,
-            params.sample_rate,
-            tenant_id,
-            record_id,
-        )?,
+        AudioAlgorithm::Wang => {
+            // If any tunable is set, build a WangConfig with the override
+            // and call the configurable variant; otherwise use the default.
+            let has_tune = params.fan_out.is_some()
+                || params.target_zone_t.is_some()
+                || params.target_zone_f.is_some()
+                || params.peaks_per_sec.is_some()
+                || params.min_anchor_mag_db.is_some();
+            if has_tune {
+                let mut cfg = audiofp::classical::WangConfig::default();
+                if let Some(v) = params.fan_out          { cfg.fan_out = v; }
+                if let Some(v) = params.target_zone_t    { cfg.target_zone_t = v; }
+                if let Some(v) = params.target_zone_f    { cfg.target_zone_f = v; }
+                if let Some(v) = params.peaks_per_sec    { cfg.peaks_per_sec = v; }
+                if let Some(v) = params.min_anchor_mag_db { cfg.min_anchor_mag_db = v; }
+                crate::modality::audio::fingerprint_wang_with(
+                    &samples,
+                    params.sample_rate,
+                    &cfg,
+                    tenant_id,
+                    record_id,
+                )?
+            } else {
+                crate::modality::audio::fingerprint_wang(
+                    &samples,
+                    params.sample_rate,
+                    tenant_id,
+                    record_id,
+                )?
+            }
+        }
         AudioAlgorithm::Panako => {
             #[cfg(feature = "audio-panako")]
             {
@@ -644,7 +668,7 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
         }
     };
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
 }
 
 /// `POST /v1/ingest/audio/{tid}/{rid}/watermark` — runs the AudioSeal
@@ -724,5 +748,5 @@ pub(super) async fn ingest_audio_stream<I: IndexBackend>(
         .pop()
         .ok_or_else(|| Error::Modality("streaming session produced no record".into()))?;
     index.upsert(std::slice::from_ref(&rec)).await?;
-    Ok((StatusCode::CREATED, Json(ingest_response(&rec))))
+    Ok((StatusCode::CREATED, Json(ingest_response(&rec, params.return_embedding.unwrap_or(false)))))
 }

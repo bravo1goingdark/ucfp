@@ -23,7 +23,14 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { ulidU64 } from '$lib/server/ulid';
-import { ingest, ingestWatermark, type Modality, type IngestResponse } from '$lib/server/upstream';
+import {
+  ingest,
+  ingestWatermark,
+  ingestTextPreprocess,
+  type Modality,
+  type IngestResponse,
+  type AlgorithmParams
+} from '$lib/server/upstream';
 import { verifyTurnstile } from '$lib/server/turnstile';
 import { authenticateApiKey, extractApiKey } from '$lib/server/apikeyAuth';
 import { checkDemoLimit } from '$lib/server/ratelimit';
@@ -163,11 +170,64 @@ export const POST: RequestHandler = async (event) => {
   // ── modality + body ──────────────────────────────────────────────────
   const parsed = await parseRequest(request);
   const recordId = ulidU64();
-  const algorithmParam = event.url.searchParams.get('algorithm') ?? undefined;
-  const modelId = event.url.searchParams.get('model_id') ?? undefined;
-  const apiKey  = event.url.searchParams.get('api_key')  ?? undefined;
+  const sp = event.url.searchParams;
+  const algorithmParam = sp.get('algorithm') ?? undefined;
+  const modelId = sp.get('model_id') ?? undefined;
+  const apiKey  = sp.get('api_key')  ?? undefined;
+
+  // Forward every per-algorithm tunable upstream understands. Missing
+  // params fall through to upstream defaults (see src/server/dto.rs).
+  const algoParams: AlgorithmParams = {};
+  const numKeys = ['k','h','fan_out','peaks_per_sec','target_zone_t','target_zone_f','min_anchor_mag_db','max_dimension','max_input_bytes','min_dimension'] as const;
+  for (const k of numKeys) {
+    const v = sp.get(k);
+    if (v != null && v !== '') {
+      const n = Number(v);
+      if (Number.isFinite(n)) (algoParams as Record<string, unknown>)[k] = n;
+    }
+  }
+  const tokenizer = sp.get('tokenizer');
+  if (tokenizer === 'word' || tokenizer === 'grapheme' || tokenizer === 'cjk-jp' || tokenizer === 'cjk-ko') {
+    algoParams.tokenizer = tokenizer;
+  }
+  if (sp.get('return_embedding') === '1') algoParams.return_embedding = true;
 
   const upstreamCfg = { apiUrl: env.UCFP_API_URL, apiToken: env.UCFP_API_TOKEN, tenantId };
+
+  // ── preprocess short-circuit (text only) ─────────────────────────────
+  // ?preprocess=html|markdown|pdf hits the dedicated upstream endpoint.
+  const preprocessKind = sp.get('preprocess');
+  if (preprocessKind === 'html' || preprocessKind === 'markdown' || preprocessKind === 'pdf') {
+    if (parsed.modality !== 'text' && preprocessKind !== 'pdf') {
+      error(400, `preprocess=${preprocessKind} only valid for text bodies`);
+    }
+    let outcome;
+    try {
+      outcome = await ingestTextPreprocess(upstreamCfg, {
+        recordId,
+        kind: preprocessKind,
+        body: parsed.body,
+        contentType: preprocessKind === 'pdf' ? 'application/pdf' : parsed.contentType
+      });
+    } catch (e) {
+      error(502, `upstream unreachable: ${(e as Error).message}`);
+    }
+    if (userId) {
+      platform?.context?.waitUntil?.(
+        recordUsage({ db: env.DB, analytics: env.ANALYTICS }, {
+          userId, apiKeyId: keyId, modality: 'text', algorithm: `preprocess-${preprocessKind}`,
+          bytesIn: parsed.bytesIn, status: outcome.status, latencyMs: Math.round(outcome.latencyMs)
+        })
+      );
+    }
+    return new Response(
+      typeof outcome.body === 'string' ? outcome.body : JSON.stringify(outcome.body),
+      { status: outcome.status, headers: {
+        'content-type': 'application/json',
+        'x-proxied-latency': String(Math.round(outcome.latencyMs))
+      }}
+    );
+  }
 
   // ── watermark special path ────────────────────────────────────────────
   if (algorithmParam === 'watermark' && parsed.modality === 'audio') {
@@ -213,7 +273,8 @@ export const POST: RequestHandler = async (event) => {
       sampleRate: parsed.sampleRate,
       algorithm: algorithmParam,
       modelId,
-      apiKey
+      apiKey,
+      params: algoParams
     });
   } catch (e) {
     error(502, `upstream unreachable: ${(e as Error).message}`);

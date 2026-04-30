@@ -116,6 +116,11 @@ pub(super) struct IngestResponse {
     /// Hex-encoded fingerprint bytes for in-browser visualization.
     pub fingerprint_hex: String,
     pub has_embedding: bool,
+    /// Dense embedding vector, returned only when the request carries
+    /// `?return_embedding=1` and the algorithm produces one. Used by the
+    /// web search UI to feed `/v1/query` without a follow-up describe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding: Option<Vec<f32>>,
 }
 
 // ── Algorithm enums ────────────────────────────────────────────────────
@@ -236,6 +241,26 @@ pub(super) struct AudioParams {
     /// On-disk path to the ONNX model file; required for `neural`.
     #[serde(default)]
     pub model_id: Option<String>,
+    /// When set, include the dense embedding vector in the response (only
+    /// populated for algorithms that produce one, e.g. `neural`).
+    #[serde(default)]
+    pub return_embedding: Option<bool>,
+    // ── Wang-only tunables (mapped to `audiofp::classical::WangConfig`) ──
+    /// `F`: target peaks paired with each anchor.
+    #[serde(default)]
+    pub fan_out: Option<u16>,
+    /// Maximum `Δt` (frames) between anchor and target.
+    #[serde(default)]
+    pub target_zone_t: Option<u16>,
+    /// Maximum `|Δf|` (FFT bins) between anchor and target.
+    #[serde(default)]
+    pub target_zone_f: Option<u16>,
+    /// Per-second cap on peak count.
+    #[serde(default)]
+    pub peaks_per_sec: Option<u16>,
+    /// Magnitude floor (dB) below which peaks are ignored.
+    #[serde(default)]
+    pub min_anchor_mag_db: Option<f32>,
 }
 
 /// Query parameters for `POST /v1/ingest/image/...`. Body is raw image
@@ -251,6 +276,19 @@ pub(super) struct ImageParams {
     /// On-disk path to the ONNX model file; required for `semantic`.
     #[serde(default)]
     pub model_id: Option<String>,
+    /// When set, include the dense embedding vector in the response (only
+    /// populated for `semantic`).
+    #[serde(default)]
+    pub return_embedding: Option<bool>,
+    /// Override `imgfprint::PreprocessConfig::max_input_bytes` (decode guard).
+    #[serde(default)]
+    pub max_input_bytes: Option<usize>,
+    /// Override `imgfprint::PreprocessConfig::max_dimension` (decode guard).
+    #[serde(default)]
+    pub max_dimension: Option<u32>,
+    /// Override `imgfprint::PreprocessConfig::min_dimension` (decode guard).
+    #[serde(default)]
+    pub min_dimension: Option<u32>,
 }
 
 /// Query parameters for `POST /v1/ingest/text/...`. Body is raw UTF-8
@@ -284,6 +322,10 @@ pub(super) struct TextParams {
     /// / Cohere). Self-hosters can also set the corresponding env var.
     #[serde(default)]
     pub api_key: Option<String>,
+    /// When set, include the dense embedding vector in the response (only
+    /// populated for the `semantic-*` arms).
+    #[serde(default)]
+    pub return_embedding: Option<bool>,
 }
 
 // ── Nested config DTOs ────────────────────────────────────────────────
