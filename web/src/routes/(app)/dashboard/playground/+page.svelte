@@ -139,6 +139,13 @@
   let lastRecordId  = $state<string | null>(null);
   let lastTenantId  = $state<number>(0);
 
+  // Controlled open state for the three <details> panels — sidesteps the
+  // sporadic Chromium issue where a flex/grid summary swallows the click
+  // before the native toggle fires.
+  let advancedOpen = $state(false);
+  let tuningOpen   = $state(false);
+  let advancedOpenB = $state(false);
+
   // ── result A ──────────────────────────────────────────────────────────────
   let cells      = $state<{ color: string }[]>([]);
   let hexBytesA  = $state<Uint8Array | null>(null);
@@ -709,8 +716,9 @@
         {/if}
 
         {#if needsAdvanced}
-          <details class="adv-opts">
-            <summary class="adv-summary">
+          <details class="adv-opts" bind:open={advancedOpen}>
+            <summary class="adv-summary"
+              onclick={(e) => { e.preventDefault(); advancedOpen = !advancedOpen; }}>
               <span class="adv-summary-inner">Advanced options</span>
               {#if (NEEDS_MODEL.has(algorithm) && !modelId.trim()) || (NEEDS_API_KEY.has(algorithm) && !apiKey.trim())}
                 <span class="adv-required">required ↓</span>
@@ -736,8 +744,11 @@
 
         <!-- ── Algorithm tuning (per-modality knobs that map to upstream ── -->
         <!-- ── DTO query params; missing values fall back to defaults).  ── -->
-        <details class="adv-opts">
-          <summary class="adv-summary"><span class="adv-summary-inner">Algorithm tuning</span></summary>
+        <details class="adv-opts" bind:open={tuningOpen}>
+          <summary class="adv-summary"
+            onclick={(e) => { e.preventDefault(); tuningOpen = !tuningOpen; }}>
+            <span class="adv-summary-inner">Algorithm tuning</span>
+          </summary>
           <div class="adv-body">
             {#if modality === 'text'}
               <div class="adv-row">
@@ -1005,8 +1016,11 @@
       {/if}
 
       {#if needsAdvanced}
-        <details class="adv-opts">
-          <summary class="adv-summary"><span class="adv-summary-inner">Advanced options</span></summary>
+        <details class="adv-opts" bind:open={advancedOpenB}>
+          <summary class="adv-summary"
+            onclick={(e) => { e.preventDefault(); advancedOpenB = !advancedOpenB; }}>
+            <span class="adv-summary-inner">Advanced options</span>
+          </summary>
           <div class="adv-body">
             {#if NEEDS_MODEL.has(algorithm)}
               <label class="adv-label">Model path / ID
@@ -1248,28 +1262,27 @@
     border-left: 3px solid var(--accent-ink);
   }
 
-  /* Advanced options */
+  /* Advanced options. Open state is controlled by Svelte (`bind:open`)
+     with an explicit onclick that preventDefaults the native toggle —
+     this guarantees the panel responds across browsers regardless of
+     summary display quirks. */
   .adv-opts { border: 1px solid var(--ink); border-radius: 4px; overflow: hidden; }
-  /* IMPORTANT: keep <summary> at its default `display: list-item`. Setting
-     `display: flex` on <summary> intermittently breaks the click-to-toggle
-     in Chromium because the browser routes the click to the (now flex)
-     formatting context instead of the summary itself. Style an inner span
-     for the flex layout instead. */
   .adv-summary {
     font-family: var(--mono); font-size: 0.72rem; cursor: pointer;
     padding: 0.4rem 0.65rem; color: var(--ink-2);
     list-style: none;
+    display: flex; align-items: center; gap: 0.5rem;
   }
   .adv-summary::-webkit-details-marker { display: none; }
   .adv-summary::marker { content: ''; }
   .adv-summary-inner {
     display: inline-flex; align-items: center; gap: 0.5rem;
-    /* Pseudo-elements on the inner span don't intercept clicks on the
-       summary itself, even when pointer-events would otherwise apply. */
-    pointer-events: none;
   }
   .adv-summary-inner::before { content: '▶'; font-size: 0.55rem; transition: transform 0.15s; display: inline-block; }
-  details[open] .adv-summary-inner::before { transform: rotate(90deg); }
+  /* Use :global() so Svelte's CSS scoper doesn't strip the `details[open]`
+     prefix — without it the chevron would render rotated regardless of
+     state because the scoper can't see the dynamic open attribute. */
+  :global(details[open]) .adv-summary-inner::before { transform: rotate(90deg); }
   .adv-required { font-size: 0.65rem; color: #b03030; background: color-mix(in srgb, #b03030 10%, transparent); padding: 1px 5px; border-radius: 3px; }
   .adv-body { padding: 0.6rem 0.65rem; display: flex; flex-direction: column; gap: 0.5rem; background: var(--bg-2); }
   .adv-label { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
