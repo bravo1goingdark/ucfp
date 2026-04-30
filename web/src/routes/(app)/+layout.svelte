@@ -10,13 +10,13 @@
 
   const navItems: NavItem[] = [
     { label: 'Dashboard', href: '/dashboard' },
-    { label: 'Keys', href: '/dashboard/keys' },
-    { label: 'Usage', href: '/dashboard/usage' },
-    { label: 'Playground', href: '/dashboard/playground' },
-    { label: 'Records', href: '/dashboard/records' },
-    { label: 'Search', href: '/dashboard/search' },
-    { label: 'Bulk', href: '/dashboard/bulk' },
-    { label: 'Docs', href: '/docs' }
+    { section: 'Workspace', label: 'Playground', href: '/dashboard/playground' },
+    { section: 'Workspace', label: 'Bulk',       href: '/dashboard/bulk' },
+    { section: 'Workspace', label: 'Records',    href: '/dashboard/records' },
+    { section: 'Workspace', label: 'Search',     href: '/dashboard/search' },
+    { section: 'Account',   label: 'Keys',       href: '/dashboard/keys' },
+    { section: 'Account',   label: 'Usage',      href: '/dashboard/usage' },
+    { section: 'Help',      label: 'Docs',       href: '/docs' }
   ];
 
   const crumbs = $derived.by<Crumb[]>(() => {

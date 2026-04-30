@@ -3,9 +3,13 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
+  import { pushToast } from '$lib/stores/toasts.svelte';
+  import EmptyState from '$components/EmptyState.svelte';
   import type { FingerprintDescription, Modality, RecordHistoryEntry } from '$lib/types/api';
 
   const history = createRecordHistory();
+  // recordId currently in "confirm delete" state (replaces window.confirm).
+  let pendingDeleteId = $state<string | null>(null);
 
   let modalityFilter = $state<'all'|Modality>('all');
   let labelQuery     = $state('');
@@ -42,18 +46,19 @@
     }
   }
 
-  async function deleteRecord(entry: RecordHistoryEntry) {
-    if (!confirm(`Delete record ${entry.recordId}? This cannot be undone.`)) return;
+  async function confirmDelete(entry: RecordHistoryEntry) {
+    pendingDeleteId = null;
     try {
       const res = await fetch(`/api/records/${encodeURIComponent(entry.recordId)}`, { method: 'DELETE' });
       if (res.ok || res.status === 204 || res.status === 404) {
         history.remove(entry.recordId);
         if (viewing && String(viewing.record_id) === entry.recordId) viewing = null;
+        pushToast({ kind: 'success', message: `Deleted record ${entry.recordId.slice(-8)}` });
       } else {
-        alert(`Delete failed: ${res.status}`);
+        pushToast({ kind: 'error', message: `Delete failed (${res.status})` });
       }
     } catch (e) {
-      alert(`Delete failed: ${(e as Error).message}`);
+      pushToast({ kind: 'error', message: `Delete failed: ${(e as Error).message}` });
     }
   }
 
@@ -75,6 +80,20 @@
 
   function formatTime(unix: number): string {
     return new Date(unix * 1000).toISOString().replace('T', ' ').slice(0, 16);
+  }
+
+  // Pull `count` byte values from the hex string and turn each into a
+  // background colour (hue from byte). Mirrors the playground's hex-grid.
+  function hexTiles(hex: string, count: number): string[] {
+    const out: string[] = [];
+    const max = Math.min(count, Math.floor(hex.length / 2));
+    for (let i = 0; i < max; i++) {
+      const b = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      const lightness = 0.45 + (b & 0x3F) / 0x3F * 0.35;
+      out.push(`oklch(${lightness.toFixed(3)} 0.16 ${Math.round((b / 255) * 360)}deg)`);
+    }
+    while (out.length < count) out.push('var(--bg-2)');
+    return out;
   }
 
   // Auto-trigger lookup when arriving with `?lookup=<u64>` (search hits +
@@ -127,31 +146,54 @@
 
   <!-- ── list ────────────────────────────────────────────────────────── -->
   {#if filtered.length === 0}
-    <div class="rec-empty">
-      <span class="empty-icon">⬡</span>
-      <p>No saved records yet.</p>
-      <p class="hint">Visit the <a href="/dashboard/playground">Playground</a> and click "Save to records" after a fingerprint.</p>
-    </div>
+    {#if labelQuery.trim() || modalityFilter !== 'all'}
+      <EmptyState heading="No matches" description="Try clearing the modality filter or label search." />
+    {:else}
+      <EmptyState heading="No saved records yet"
+        description="Open the Playground, run a fingerprint, then click 'Save to records' — the bookmark will appear here.">
+        {#snippet cta()}
+          <a href="/dashboard/playground" class="btn primary-btn">Open Playground</a>
+        {/snippet}
+      </EmptyState>
+    {/if}
   {:else}
     <ul class="rec-list">
       {#each filtered as e (e.recordId)}
-        <li class="rec-item">
+        {@const tiles = hexTiles(e.fingerprintHex, 32)}
+        {@const pending = pendingDeleteId === e.recordId}
+        <li class="rec-item" class:pending>
           <div class="rec-item-head">
             <span class="rec-mod {e.modality}">{e.modality}</span>
             <span class="rec-alg">{e.algorithm}</span>
             <span class="rec-time">{formatTime(e.createdAt)}</span>
           </div>
-          <div class="rec-label">{e.label || '(no label)'}</div>
-          <div class="rec-meta">
-            <span class="rec-id mono" title={e.recordId}>id: {e.recordId.slice(-12)}</span>
-            <span class="rec-hex mono" title={e.fingerprintHex}>{e.fingerprintHex.slice(0, 24)}…</span>
-            {#if e.hasEmbedding}<span class="rec-pill">embedding</span>{/if}
+          <div class="rec-body">
+            <!-- Mini hex thumbnail — 4 rows × 8 cols, derived from fingerprintHex bytes. -->
+            <div class="rec-thumb" aria-hidden="true">
+              {#each tiles as t}
+                <span class="rec-tile" style="background:{t}"></span>
+              {/each}
+            </div>
+            <div class="rec-text">
+              <div class="rec-label">{e.label || '(no label)'}</div>
+              <div class="rec-meta">
+                <span class="rec-id mono" title={e.recordId}>id: {e.recordId.slice(-12)}</span>
+                <span class="rec-hex mono" title={e.fingerprintHex}>{e.fingerprintHex.slice(0, 24)}…</span>
+                {#if e.hasEmbedding}<span class="rec-pill">embedding</span>{/if}
+              </div>
+            </div>
           </div>
           <div class="rec-actions">
-            <button class="action-btn" onclick={() => viewRecord(e.recordId)}>View</button>
-            <button class="action-btn" onclick={() => deleteRecord(e)}>Delete</button>
-            {#if e.hasEmbedding}
-              <button class="action-btn" onclick={() => findSimilarFromEntry(e)}>Find similar</button>
+            {#if pending}
+              <span class="confirm-msg">Delete this record?</span>
+              <button class="action-btn danger" onclick={() => confirmDelete(e)}>Yes, delete</button>
+              <button class="action-btn" onclick={() => { pendingDeleteId = null; }}>Cancel</button>
+            {:else}
+              <button class="action-btn" onclick={() => viewRecord(e.recordId)}>View</button>
+              <button class="action-btn" onclick={() => { pendingDeleteId = e.recordId; }}>Delete</button>
+              {#if e.hasEmbedding}
+                <button class="action-btn" onclick={() => findSimilarFromEntry(e)}>Find similar</button>
+              {/if}
             {/if}
           </div>
         </li>
@@ -213,13 +255,6 @@
   }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-  .rec-empty {
-    display: flex; flex-direction: column; align-items: center;
-    gap: 0.4rem; padding: 2.5rem 1rem;
-    border: 1px dashed var(--ink); border-radius: 6px;
-    background: var(--bg-2); color: var(--ink-2);
-  }
-  .empty-icon { font-size: 1.8rem; opacity: 0.4; }
   .hint { font-size: 0.78rem; margin: 0; }
 
   .rec-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
@@ -238,13 +273,40 @@
   .rec-label { font-size: 0.85rem; color: var(--ink); }
   .rec-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.65rem; color: var(--ink-2); }
   .rec-pill { padding: 1px 5px; background: var(--bg); border: 1px solid var(--ink); border-radius: 3px; }
-  .rec-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .rec-body { display: flex; gap: 0.7rem; align-items: center; }
+  .rec-thumb {
+    flex-shrink: 0;
+    display: grid; grid-template-columns: repeat(8, 8px); grid-auto-rows: 8px; gap: 1px;
+    padding: 3px; background: var(--ink); border-radius: 3px;
+  }
+  .rec-tile { display: block; width: 8px; height: 8px; border-radius: 1px; }
+  .rec-text { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; flex: 1; }
+
+  .rec-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+  .confirm-msg {
+    font-family: var(--mono); font-size: 0.72rem; color: var(--ink-2);
+    margin-right: 0.25rem;
+  }
   .action-btn {
     font-family: var(--mono); font-size: 0.7rem;
     padding: 0.3rem 0.6rem; border: 1px solid var(--ink);
     background: transparent; color: var(--ink); border-radius: 3px; cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
   }
   .action-btn:hover { background: var(--bg); }
+  .action-btn.danger {
+    background: oklch(0.55 0.18 30); color: var(--bg); border-color: oklch(0.55 0.18 30);
+  }
+  .action-btn.danger:hover { background: oklch(0.45 0.18 30); }
+  .rec-item.pending { border-color: oklch(0.55 0.18 30); }
+
+  .primary-btn {
+    background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
+    padding: 0.5rem 1rem; border-radius: 3px;
+    font-family: var(--mono); font-size: 0.78rem;
+    text-decoration: none; display: inline-block;
+  }
+  .primary-btn:hover { opacity: 0.85; }
 
   .rec-error { font-family: var(--mono); font-size: 0.75rem; color: #b03030; margin: 0; padding: 0.4rem 0.6rem; border: 1px solid currentColor; border-radius: 3px; background: color-mix(in srgb, #b03030 8%, transparent); }
 

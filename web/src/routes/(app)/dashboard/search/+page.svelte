@@ -1,8 +1,31 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import type { Modality, QueryHit } from '$lib/types/api';
+  import type { Modality, QueryHit, RecordHistoryEntry } from '$lib/types/api';
   import { buildResampledAudioForm } from '$lib/utils/audioResample';
+  import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
+
+  const history = createRecordHistory();
+  // Lookup table from record_id → saved bookmark, so hits with a known
+  // record can show their label + hex thumbnail instead of just a u64.
+  const historyById = $derived.by(() => {
+    const m = new Map<string, RecordHistoryEntry>();
+    for (const e of history.entries) m.set(e.recordId, e);
+    return m;
+  });
+
+  // Same byte→colour map as the records page so the thumbnails match.
+  function hexTiles(hex: string, count: number): string[] {
+    const out: string[] = [];
+    const max = Math.min(count, Math.floor(hex.length / 2));
+    for (let i = 0; i < max; i++) {
+      const b = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      const lightness = 0.45 + (b & 0x3F) / 0x3F * 0.35;
+      out.push(`oklch(${lightness.toFixed(3)} 0.16 ${Math.round((b / 255) * 360)}deg)`);
+    }
+    while (out.length < count) out.push('var(--bg-2)');
+    return out;
+  }
 
   // Algorithms that produce a dense embedding (must match playground).
   const SEMANTIC_ALGS: Record<Modality, string[]> = {
@@ -308,9 +331,30 @@
     <ol class="hits">
       {#each hits as h, i}
         {@const norm = (h.score - tail) / span}
-        <li class="hit">
+        {@const known = historyById.get(String(h.record_id))}
+        <li class="hit" class:known>
           <span class="hit-rank mono">#{i+1}</span>
-          <a class="hit-id mono" href={`/dashboard/records?lookup=${h.record_id}`}>{h.record_id}</a>
+          {#if known}
+            <div class="hit-thumb" aria-hidden="true">
+              {#each hexTiles(known.fingerprintHex, 16) as t}
+                <span class="hit-tile" style="background:{t}"></span>
+              {/each}
+            </div>
+          {:else}
+            <span class="hit-thumb-placeholder" aria-hidden="true">⬡</span>
+          {/if}
+          <div class="hit-meta">
+            {#if known}
+              <a class="hit-label" href={`/dashboard/records?lookup=${h.record_id}`}>{known.label || '(no label)'}</a>
+              <span class="hit-id-sub mono">
+                <span class="hit-mod {known.modality}">{known.modality}</span>
+                {known.algorithm} · id {String(h.record_id).slice(-10)}
+              </span>
+            {:else}
+              <a class="hit-label mono" href={`/dashboard/records?lookup=${h.record_id}`}>{h.record_id}</a>
+              <span class="hit-id-sub mono">unsaved · {h.source}</span>
+            {/if}
+          </div>
           <span class="hit-source mono">{h.source}</span>
           <span class="hit-score mono">{h.score.toFixed(4)}</span>
           <div class="hit-bar"><div class="hit-bar-fill"
@@ -399,14 +443,32 @@
   .hits { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
   .hit {
     display: grid;
-    grid-template-columns: 36px 1fr 70px 80px;
-    gap: 0.5rem; align-items: center;
-    padding: 0.4rem 0.7rem;
+    grid-template-columns: 32px 38px 1fr 70px 80px;
+    gap: 0.6rem; align-items: center;
+    padding: 0.45rem 0.75rem;
     background: var(--bg-2); border: 1px solid var(--ink); border-radius: 4px;
   }
+  .hit.known { border-left-width: 3px; border-left-color: var(--accent-ink, oklch(0.55 0.18 240)); }
   .hit-rank { font-size: 0.7rem; color: var(--ink-2); }
-  .hit-id { color: var(--ink); text-decoration: none; font-size: 0.78rem; word-break: break-all; }
-  .hit-id:hover { text-decoration: underline; }
+  .hit-thumb {
+    display: grid; grid-template-columns: repeat(8, 4px); grid-auto-rows: 4px; gap: 1px;
+    padding: 2px; background: var(--ink); border-radius: 3px; flex-shrink: 0;
+  }
+  .hit-tile { width: 4px; height: 4px; border-radius: 1px; display: block; }
+  .hit-thumb-placeholder {
+    display: flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px;
+    background: var(--bg); border: 1px dashed var(--ink); border-radius: 3px;
+    color: var(--ink-2); font-size: 1.1rem; opacity: 0.4;
+  }
+  .hit-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .hit-label { color: var(--ink); text-decoration: none; font-size: 0.85rem; word-break: break-all; }
+  .hit-label:hover { text-decoration: underline; }
+  .hit-id-sub { font-size: 0.62rem; color: var(--ink-2); display: flex; gap: 0.4rem; align-items: center; }
+  .hit-mod { padding: 1px 5px; border-radius: 2px; background: var(--ink); color: var(--bg); font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .hit-mod.text  { background: oklch(0.55 0.15 240); }
+  .hit-mod.image { background: oklch(0.55 0.15 290); }
+  .hit-mod.audio { background: oklch(0.55 0.15 145); }
   .hit-source { font-size: 0.6rem; padding: 1px 5px; background: var(--bg); border: 1px solid var(--ink); border-radius: 3px; color: var(--ink-2); text-align: center; }
   .hit-score { font-size: 0.78rem; color: var(--ink); font-weight: 600; text-align: right; }
   .hit-bar {
