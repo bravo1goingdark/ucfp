@@ -4,6 +4,7 @@
   import Sidebar, { type NavItem } from '$components/Sidebar.svelte';
   import Breadcrumb, { type Crumb } from '$components/Breadcrumb.svelte';
   import Toast from '$components/Toast.svelte';
+  import Seo from '$lib/components/Seo.svelte';
   import { pushToast } from '$lib/stores/toasts.svelte';
 
   let { data, children } = $props();
@@ -70,6 +71,15 @@
     }
   }
 </script>
+
+<!-- Every dashboard route is auth-walled and tenant-private — keep
+     crawlers out by default. Individual pages may still set their own
+     <title> via <svelte:head> for the browser tab. -->
+<Seo
+  title="Dashboard"
+  description="UCFP workspace — playground, records, search, keys, and usage."
+  noindex
+/>
 
 <div class="dashboard-shell" class:nav-open={navOpen}>
   <header class="dash-top">

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import Seo from '$lib/components/Seo.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -33,9 +34,12 @@
   }
 </script>
 
-<svelte:head>
-  <title>Create account — UCFP</title>
-</svelte:head>
+<Seo
+  title="Create account"
+  description="Create a free UCFP account — 50,000 fingerprints per day, no credit card required."
+  canonical="/signup"
+  noindex
+/>
 
 <h1>Create account</h1>
 <p class="lede-sm">Free tier — 50,000 fingerprints / day, no credit card.</p>

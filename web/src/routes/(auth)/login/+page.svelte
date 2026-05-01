@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
+  import Seo from '$lib/components/Seo.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -32,9 +33,12 @@
   }
 </script>
 
-<svelte:head>
-  <title>Sign in — UCFP</title>
-</svelte:head>
+<Seo
+  title="Sign in"
+  description="Sign in to your UCFP workspace to use the playground, manage API keys, and view usage."
+  canonical="/login"
+  noindex
+/>
 
 <h1>Sign in</h1>
 <p class="lede-sm">Welcome back. Use your email and password to continue.</p>

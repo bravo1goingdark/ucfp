@@ -15,14 +15,14 @@
   import FinalCTA from '$components/FinalCTA.svelte';
   import Footer from '$components/Footer.svelte';
   import Seo from '$lib/components/Seo.svelte';
-  import { organizationJsonLd } from '$lib/seo';
+  import { organizationJsonLd, softwareApplicationJsonLd, websiteJsonLd } from '$lib/seo';
 </script>
 
 <Seo
-  title="UCFP — Universal Content Fingerprinting"
+  title="Universal Content Fingerprinting"
   description="Universal Content Fingerprinting — turn text, images, and audio into compact, comparable digests. Production-grade SDKs for Node, Python, and Rust."
   canonical="/"
-  jsonLd={organizationJsonLd()}
+  jsonLd={[organizationJsonLd(), websiteJsonLd(), softwareApplicationJsonLd()]}
 />
 
 <Nav />
