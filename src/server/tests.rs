@@ -990,3 +990,89 @@ async fn cross_tenant_read_is_forbidden() {
     let body: serde_json::Value = read_json(cross).await;
     assert_eq!(body["error"], "forbidden");
 }
+
+#[cfg(feature = "inspect")]
+#[tokio::test]
+async fn input_cache_roundtrip_then_text_ingest_via_input_id() {
+    let (app, _dir) = fixture().await;
+
+    // Cache a payload for tenant 9.
+    let put = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/inputs?tenant_id=9&modality=text")
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::from("the quick brown fox jumps over the lazy dog"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::OK);
+    let put_body: serde_json::Value = read_json(put).await;
+    let input_id = put_body["input_id"].as_u64().expect("input_id");
+    assert_eq!(put_body["tenant_id"], 9);
+    assert_eq!(put_body["size_bytes"], 43);
+
+    // Ingest using input_id — empty body, all data comes from cache.
+    let ing = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/ingest/text/9/77?input_id={input_id}"))
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ing.status(), StatusCode::CREATED);
+    let body: serde_json::Value = read_json(ing).await;
+    assert_eq!(body["tenant_id"], 9);
+    assert_eq!(body["record_id"], 77);
+    assert_eq!(body["algorithm"], "minhash-h128");
+
+    // DELETE removes the entry; second delete is 404.
+    let del = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/inputs/9/{input_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del.status(), StatusCode::NO_CONTENT);
+    let del2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/v1/inputs/9/{input_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del2.status(), StatusCode::NOT_FOUND);
+
+    // Ingest using a non-existent input_id is a 4xx.
+    let bad = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/text/9/78?input_id=999999999")
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(bad.status().is_client_error());
+}
+

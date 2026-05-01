@@ -1,0 +1,19 @@
+# Committed CPU baseline for cloud / Docker builds.
+#
+# We use microarchitecture *levels*, not `target-cpu=native`, because the
+# Docker build host's CPU may not match the runtime host's CPU class —
+# `native` produces a binary that segfaults on boot in that case.
+#
+# x86-64-v3  = AVX2 + BMI2 + FMA + ... (Intel Haswell 2013+, AMD Excavator 2015+).
+#              Covers all current Cloudflare/AWS/GCP general-purpose tiers.
+# neoverse-n1 = ARM Cortex-A76-class baseline (AWS Graviton2, Ampere Altra,
+#              GCP Tau T2A). Safe across mainstream ARM cloud SKUs.
+#
+# Local benchmarking opt-in (NOT in this committed config; see CONTRIBUTING.md):
+#   RUSTFLAGS="-C target-cpu=native" cargo bench
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=x86-64-v3"]
+
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=neoverse-n1"]

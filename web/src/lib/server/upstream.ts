@@ -72,18 +72,39 @@ export interface AlgorithmParams {
   h?: number;
   tokenizer?: 'word' | 'grapheme' | 'cjk-jp' | 'cjk-ko';
   preprocess?: 'html' | 'markdown' | 'pdf';
+  // text canonicalizer overrides
+  canon_normalization?: 'nfc' | 'nfkc' | 'none';
+  canon_case_fold?: boolean;
+  canon_strip_bidi?: boolean;
+  canon_strip_format?: boolean;
+  canon_apply_confusable?: boolean;
   // audio Wang
   fan_out?: number;
   peaks_per_sec?: number;
   target_zone_t?: number;
   target_zone_f?: number;
   min_anchor_mag_db?: number;
+  // audio Panako
+  panako_fan_out?: number;
+  panako_target_zone_t?: number;
+  panako_target_zone_f?: number;
+  panako_peaks_per_sec?: number;
+  panako_min_anchor_mag_db?: number;
+  // audio Haitsma
+  haitsma_fmin?: number;
+  haitsma_fmax?: number;
+  // audio Neural / Watermark
+  neural_fmax?: number;
+  watermark_threshold?: number;
   // image preprocess
   max_dimension?: number;
   max_input_bytes?: number;
   min_dimension?: number;
   /** When true, the upstream response includes the dense embedding. */
   return_embedding?: boolean;
+  /** Live-tune handle from a prior `POST /v1/inputs`. When set, upstream
+   *  uses the cached bytes instead of the request body. */
+  input_id?: number;
 }
 
 export interface UpstreamConfig {

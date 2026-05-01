@@ -28,11 +28,14 @@
 
 #![cfg(feature = "server")]
 
+mod algorithms_manifest;
 mod apikey;
 mod dto;
 mod error;
 mod extractors;
 mod handlers;
+#[cfg(feature = "inspect")]
+mod inputs_cache;
 mod ratelimit;
 mod usage;
 
@@ -79,6 +82,7 @@ where
     Router::new()
         .route("/healthz", get(handlers::healthz::<I>))
         .route("/v1/info", get(handlers::info))
+        .route("/v1/algorithms", get(handlers::algorithms))
         .with_state(index)
 }
 
@@ -160,6 +164,14 @@ where
         "/v1/ingest/audio/{tenant_id}/{record_id}/stream",
         post(handlers::ingest_audio_stream::<I>),
     );
+
+    #[cfg(feature = "inspect")]
+    let r = r
+        .route("/v1/inputs", post(handlers::put_input))
+        .route(
+            "/v1/inputs/{tenant_id}/{input_id}",
+            axum::routing::delete(handlers::delete_input),
+        );
 
     r
 }

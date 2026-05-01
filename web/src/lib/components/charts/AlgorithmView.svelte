@@ -10,6 +10,8 @@
   import BitGrid8x8 from './BitGrid8x8.svelte';
   import ImageHashView from './ImageHashView.svelte';
   import LandmarkScatter from './LandmarkScatter.svelte';
+  import SimHashBitWheel from './SimHashBitWheel.svelte';
+  import MinHashSlotHeatmap from './MinHashSlotHeatmap.svelte';
 
   type Props = {
     /** Upstream algorithm tag, e.g. "imgfprint-multihash-v1". */
@@ -53,10 +55,21 @@
 
 {:else if (algorithm === 'simhash-b64-tf' || algorithm === 'simhash-b64-idf') && bytes.length === 8}
   <div class="av-simhash">
+    <SimHashBitWheel hashBytes={bytes}
+      diffAgainst={diffAgainst && diffAgainst.length === 8 ? diffAgainst : undefined}
+      label="SimHash · 64 bits"
+      size={180} />
     <BitGrid8x8 hashBytes={bytes}
       diffAgainst={diffAgainst && diffAgainst.length === 8 ? diffAgainst : undefined}
-      label="SimHash · 64 bits" size={120} />
+      label="bit grid"
+      size={110} />
   </div>
+
+{:else if algorithm === 'minhash-h128' && bytes.length === 1024}
+  <MinHashSlotHeatmap bytes={bytes}
+    diffAgainst={diffAgainst && diffAgainst.length === 1024 ? diffAgainst : undefined}
+    label="MinHash · 128 slots × u64"
+    width={384} height={56} />
 
 {:else if algorithm === 'audiofp-wang-v1' && bytes.length > 0 && bytes.length % 8 === 0}
   <LandmarkScatter bytes={bytes} algo="wang" framesPerSec={62.5} height={140} />
@@ -67,5 +80,11 @@
 
 <style>
   .av-multi { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem; }
-  .av-simhash { display: flex; justify-content: flex-start; }
+  .av-simhash {
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-end;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
 </style>

@@ -224,6 +224,15 @@ pub fn fingerprint_haitsma_with(
 // Neural ONNX log-mel embedder — feature `audio-neural`.
 // ─────────────────────────────────────────────────────────────────────────
 
+/// Optional per-call overrides for [`fingerprint_neural_with`].
+#[cfg(feature = "audio-neural")]
+#[derive(Clone, Debug, Default)]
+pub struct NeuralOpts {
+    /// Override the upper edge of the mel filterbank in Hz. `None`
+    /// keeps the SDK default (`sample_rate / 2`).
+    pub fmax: Option<f32>,
+}
+
 /// Compute log-mel ONNX embeddings using a model loaded from
 /// `model_path`.
 ///
@@ -240,12 +249,33 @@ pub fn fingerprint_neural(
     tenant_id: u32,
     record_id: u64,
 ) -> Result<Record> {
+    fingerprint_neural_with(
+        samples,
+        sample_rate,
+        model_path,
+        &NeuralOpts::default(),
+        tenant_id,
+        record_id,
+    )
+}
+
+/// Configurable variant of [`fingerprint_neural`]. Honors
+/// [`NeuralOpts::fmax`] when supplied; falls back to `sample_rate / 2`.
+#[cfg(feature = "audio-neural")]
+pub fn fingerprint_neural_with(
+    samples: &[f32],
+    sample_rate: u32,
+    model_path: &str,
+    opts: &NeuralOpts,
+    tenant_id: u32,
+    record_id: u64,
+) -> Result<Record> {
     use audiofp::neural::{NeuralEmbedder, NeuralEmbedderConfig};
     use audiofp::{AudioBuffer, Fingerprinter, SampleRate};
 
     let mut cfg = NeuralEmbedderConfig::new(model_path.to_string());
     cfg.sample_rate = sample_rate;
-    cfg.fmax = sample_rate as f32 / 2.0;
+    cfg.fmax = opts.fmax.unwrap_or(sample_rate as f32 / 2.0);
 
     let rate = SampleRate::new(sample_rate)
         .ok_or_else(|| Error::Modality(format!("invalid sample rate {sample_rate}")))?;
@@ -307,6 +337,14 @@ pub struct WatermarkReport {
     pub confidence: f32,
 }
 
+/// Optional per-call overrides for [`detect_watermark_with`].
+#[cfg(feature = "audio-watermark")]
+#[derive(Clone, Debug, Default)]
+pub struct WatermarkOpts {
+    /// Override the detection threshold in `[0, 1]`. SDK default is 0.5.
+    pub threshold: Option<f32>,
+}
+
 /// Run the AudioSeal-compatible watermark detector loaded from
 /// `model_path` over the given samples.
 #[cfg(feature = "audio-watermark")]
@@ -315,11 +353,26 @@ pub fn detect_watermark(
     sample_rate: u32,
     model_path: &str,
 ) -> Result<WatermarkReport> {
+    detect_watermark_with(samples, sample_rate, model_path, &WatermarkOpts::default())
+}
+
+/// Configurable variant of [`detect_watermark`]. Honors
+/// [`WatermarkOpts::threshold`] when supplied.
+#[cfg(feature = "audio-watermark")]
+pub fn detect_watermark_with(
+    samples: &[f32],
+    sample_rate: u32,
+    model_path: &str,
+    opts: &WatermarkOpts,
+) -> Result<WatermarkReport> {
     use audiofp::watermark::{WatermarkConfig, WatermarkDetector};
     use audiofp::{AudioBuffer, SampleRate};
 
     let mut cfg = WatermarkConfig::new(model_path.to_string());
     cfg.sample_rate = sample_rate;
+    if let Some(t) = opts.threshold {
+        cfg.threshold = t;
+    }
 
     let rate = SampleRate::new(sample_rate)
         .ok_or_else(|| Error::Modality(format!("invalid sample rate {sample_rate}")))?;

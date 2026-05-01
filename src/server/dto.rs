@@ -261,6 +261,50 @@ pub(super) struct AudioParams {
     /// Magnitude floor (dB) below which peaks are ignored.
     #[serde(default)]
     pub min_anchor_mag_db: Option<f32>,
+
+    // ── Panako-only tunables (mapped to `audiofp::classical::PanakoConfig`) ──
+    /// Triplets per anchor.
+    #[serde(default)]
+    pub panako_fan_out: Option<u16>,
+    /// Max `Δt` (frames) between anchor and target.
+    #[serde(default)]
+    pub panako_target_zone_t: Option<u16>,
+    /// Max `|Δf|` (FFT bins) between anchor and target.
+    #[serde(default)]
+    pub panako_target_zone_f: Option<u16>,
+    /// Per-second cap on peak count.
+    #[serde(default)]
+    pub panako_peaks_per_sec: Option<u16>,
+    /// Magnitude floor (dB) below which peaks are ignored.
+    #[serde(default)]
+    pub panako_min_anchor_mag_db: Option<f32>,
+
+    // ── Haitsma-only tunables (mapped to `audiofp::classical::HaitsmaConfig`) ──
+    /// Lower band edge in Hz.
+    #[serde(default)]
+    pub haitsma_fmin: Option<f32>,
+    /// Upper band edge in Hz.
+    #[serde(default)]
+    pub haitsma_fmax: Option<f32>,
+
+    // ── Neural-only tunables (mapped to `audiofp::neural::NeuralEmbedderConfig`) ──
+    /// Override the Nyquist clamp for the log-mel filterbank. Defaults
+    /// to `sample_rate / 2`.
+    #[serde(default)]
+    pub neural_fmax: Option<f32>,
+
+    // ── Watermark-only tunables (mapped to `audiofp::watermark::WatermarkConfig`) ──
+    /// Detection threshold in `[0, 1]`. SDK default is 0.5.
+    #[serde(default)]
+    pub watermark_threshold: Option<f32>,
+
+    /// Live-tune handle (feature `inspect`). When supplied, the
+    /// fingerprint is computed from the cached bytes for this id
+    /// instead of the request body — `sample_rate` is taken from the
+    /// cached entry too.
+    #[cfg(feature = "inspect")]
+    #[serde(default)]
+    pub input_id: Option<u64>,
 }
 
 /// Query parameters for `POST /v1/ingest/image/...`. Body is raw image
@@ -289,6 +333,11 @@ pub(super) struct ImageParams {
     /// Override `imgfprint::PreprocessConfig::min_dimension` (decode guard).
     #[serde(default)]
     pub min_dimension: Option<u32>,
+
+    /// Live-tune handle (feature `inspect`).
+    #[cfg(feature = "inspect")]
+    #[serde(default)]
+    pub input_id: Option<u64>,
 }
 
 /// Query parameters for `POST /v1/ingest/text/...`. Body is raw UTF-8
@@ -326,6 +375,30 @@ pub(super) struct TextParams {
     /// populated for the `semantic-*` arms).
     #[serde(default)]
     pub return_embedding: Option<bool>,
+
+    // ── Canonicalizer overrides (mapped to `txtfp::CanonicalizerBuilder`) ──
+    /// Unicode normalization form. One of `nfc`, `nfkc`, `nfd`, `nfkd`,
+    /// or `none`. SDK default is `nfkc`.
+    #[serde(default)]
+    pub canon_normalization: Option<String>,
+    /// Apply Unicode case folding. SDK default is true.
+    #[serde(default)]
+    pub canon_case_fold: Option<bool>,
+    /// Strip Bidi-control characters. SDK default is true.
+    #[serde(default)]
+    pub canon_strip_bidi: Option<bool>,
+    /// Strip Cf format characters. SDK default is true.
+    #[serde(default)]
+    pub canon_strip_format: Option<bool>,
+    /// Apply UTS #39 confusable skeleton (requires `text-security`
+    /// feature). SDK default is false.
+    #[serde(default)]
+    pub canon_apply_confusable: Option<bool>,
+
+    /// Live-tune handle (feature `inspect`).
+    #[cfg(feature = "inspect")]
+    #[serde(default)]
+    pub input_id: Option<u64>,
 }
 
 // ── Nested config DTOs ────────────────────────────────────────────────
@@ -443,6 +516,27 @@ impl From<crate::core::FingerprintMeta> for FingerprintDescription {
             metadata_bytes: m.metadata_bytes,
         }
     }
+}
+
+// ── Session-cached input store (feature `inspect`) ─────────────────────
+
+/// Response body for `POST /v1/inputs`. The returned `input_id` lets
+/// the playground re-fingerprint the same payload without re-uploading
+/// — slider-driven live-tune posts only the new opts plus this id.
+#[cfg(feature = "inspect")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InputsPutResponse {
+    /// Tenant the entry was scoped to (server-derived from auth ctx).
+    pub tenant_id: u32,
+    /// Process-local handle. Only meaningful within the lifetime of
+    /// the server process that issued it.
+    pub input_id: u64,
+    /// Modality the entry was inferred to belong to.
+    pub modality: Modality,
+    /// Number of bytes stored.
+    pub size_bytes: usize,
+    /// Time-to-live in seconds (entries past this are evicted lazily).
+    pub ttl_secs: u64,
 }
 
 // ── Watermark detection response ───────────────────────────────────────

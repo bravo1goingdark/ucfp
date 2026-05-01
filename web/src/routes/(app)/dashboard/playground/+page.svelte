@@ -10,6 +10,7 @@
   import BitDiffStrip from '$components/charts/BitDiffStrip.svelte';
   import AlgorithmView from '$components/charts/AlgorithmView.svelte';
   import { hasAlgorithmView } from '$components/charts/algorithmView';
+  import TuningForm from '$lib/components/playground/TuningForm.svelte';
   import type { RecordHistoryEntry } from '$lib/types/api';
 
   const history = createRecordHistory();
@@ -132,6 +133,40 @@
   let optMaxDimension  = $state<number | null>(null);
   let optMinDimension  = $state<number | null>(null);
   let optMaxInputBytes = $state<number | null>(null);
+
+  // Extra knobs sourced from the GET /v1/algorithms manifest. The
+  // primary controls above remain hardcoded for back-compat; everything
+  // *else* (canonicalizer flags, Panako/Haitsma/Neural/Watermark
+  // configs) flows through this map and is splatted onto the request
+  // URL below. Adding a knob upstream now only requires updating the
+  // manifest in src/server/algorithms_manifest.rs — no UI edit needed.
+  let extraOpts = $state<Record<string, unknown>>({});
+
+  // ── live-tune (text + image) ─────────────────────────────────────────────
+  // After the first successful compute we upload the current input to
+  // /api/inputs and remember the returned input_id. Subsequent slider
+  // movements fire a debounced re-fingerprint that quotes input_id —
+  // the bytes never traverse the wire again. Audio live-tune is
+  // deferred (it would need the same resampling as the upload path).
+  let cachedInputIdA = $state<number | null>(null);
+  let liveTuneEnabled = $state(true);              // user toggle
+  let liveTuneAbortA: AbortController | null = null;
+  let liveTuneTimer:  ReturnType<typeof setTimeout> | null = null;
+  let liveTuneInflight = $state(false);            // for the spinner badge
+  // Snapshot of "every opt that affects the upstream URL" at the last
+  // successful compute. The live-tune $effect compares the current
+  // opts-key against this and skips when they match — prevents an
+  // immediate duplicate retune right after a manual Run click.
+  let lastComputedOptsKey = $state<string>('');
+  function optsKey(): string {
+    return JSON.stringify({
+      algorithm, modality, modelId, apiKey,
+      extraOpts,
+      optK, optH, optTokenizer, optPreprocess,
+      optFanOut, optPeaksPerSec, optTargetZoneT, optTargetZoneF, optMinAnchorMagDb,
+      optMaxDimension, optMinDimension, optMaxInputBytes,
+    });
+  }
 
   // Last response embedding (when ?return_embedding=1 was sent and the
   // algorithm produced one). Used by the "Find similar" handoff.
@@ -269,6 +304,22 @@
     return b;
   }
 
+  // Copy-to-clipboard with a brief on-screen confirmation. Shared
+  // across every hex-string render in the playground.
+  let copyToast = $state<string | null>(null);
+  let copyToastTimer: ReturnType<typeof setTimeout> | null = null;
+  async function copyHex(value: string, what = 'fingerprint hex'): Promise<void> {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      copyToast = `${what} copied (${value.length} chars)`;
+    } catch (e) {
+      copyToast = `Copy failed: ${(e as Error).message}`;
+    }
+    if (copyToastTimer != null) clearTimeout(copyToastTimer);
+    copyToastTimer = setTimeout(() => { copyToast = null; }, 1600);
+  }
+
   function bytesToCells(bytes: Uint8Array): { color: string }[] {
     return Array.from(bytes).map(b => ({
       color: `oklch(0.55 0.15 ${Math.round((b / 255) * 360)}deg)`
@@ -344,6 +395,14 @@
       appendNum('max_dimension', optMaxDimension);
       appendNum('min_dimension', optMinDimension);
       appendNum('max_input_bytes', optMaxInputBytes);
+    }
+    // Manifest-driven extras (Panako/Haitsma/Neural/Watermark configs,
+    // text canonicalizer flags). The /api/fingerprint proxy validates
+    // each key against its allowlist before forwarding upstream, so we
+    // can splat freely here.
+    for (const [k, v] of Object.entries(extraOpts)) {
+      if (v == null || v === '') continue;
+      url += `&${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`;
     }
     // Request the embedding back when the algorithm produces one — the
     // search "Find similar" path needs it client-side.
@@ -503,12 +562,173 @@
       latencyMs  = result.latencyMs;
       isLocal    = result.isLocal;
       hasResult  = true;
+      // Record opts snapshot so the live-tune effect doesn't fire an
+      // immediate redundant retune right after this manual compute.
+      lastComputedOptsKey = optsKey();
     } catch (e) {
       errorMsg = `Network error: ${(e as Error).message}`;
     } finally {
       running = false;
     }
   }
+
+  // ── live-tune helpers ─────────────────────────────────────────────────────
+  // Build the URL for a fingerprint request driven by a cached input_id.
+  // Mirrors the URL-build path inside `runFingerprint` but inserts
+  // `&input_id=N` and skips the body — bytes are fetched from the
+  // process-local cache upstream.
+  function buildLiveTuneUrl(inputId: number): string {
+    let url = `/api/fingerprint?algorithm=${encodeURIComponent(algorithm)}&input_id=${inputId}`;
+    if (modelId.trim()) url += `&model_id=${encodeURIComponent(modelId.trim())}`;
+    if (apiKey.trim())  url += `&api_key=${encodeURIComponent(apiKey.trim())}`;
+    function appendNum(name: string, v: number | null): void {
+      if (v != null && Number.isFinite(v)) url += `&${name}=${v}`;
+    }
+    if (modality === 'text') {
+      appendNum('k', optK); appendNum('h', optH);
+      if (optTokenizer) url += `&tokenizer=${optTokenizer}`;
+      if (optPreprocess) url += `&preprocess=${optPreprocess}`;
+    } else if (modality === 'image') {
+      appendNum('max_dimension', optMaxDimension);
+      appendNum('min_dimension', optMinDimension);
+      appendNum('max_input_bytes', optMaxInputBytes);
+    }
+    for (const [k, v] of Object.entries(extraOpts)) {
+      if (v == null || v === '') continue;
+      url += `&${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`;
+    }
+    if (EMBEDDING_ALGS.has(algorithm)) url += `&return_embedding=1`;
+    return url;
+  }
+
+  // Cache the current input. Text + image only — audio defers to the
+  // existing resampling path. Failures surface as `errorMsg` and
+  // disable live-tune (rather than looping silently on every slider tick).
+  async function ensureCachedInputIdA(): Promise<number | null> {
+    if (cachedInputIdA != null) return cachedInputIdA;
+    if (modality === 'audio') return null;
+    let body: BodyInit;
+    let contentType: string;
+    if (modality === 'text') {
+      if (!textInput) return null;
+      body = textInput;
+      contentType = 'text/plain; charset=utf-8';
+    } else {
+      // image
+      if (!file) return null;
+      body = await file.arrayBuffer();
+      contentType = 'application/octet-stream';
+    }
+    const sp = new URLSearchParams({ modality });
+    let res: Response;
+    try {
+      res = await fetch(`/api/inputs?${sp.toString()}`, {
+        method: 'POST',
+        headers: { 'content-type': contentType },
+        body,
+      });
+    } catch (e) {
+      errorMsg = `Live-tune disabled — couldn't reach the input cache: ${(e as Error).message}`;
+      liveTuneEnabled = false;
+      return null;
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => String(res.status));
+      errorMsg = `Live-tune disabled — input cache returned ${res.status}: ${detail.slice(0, 200)}`;
+      liveTuneEnabled = false;
+      return null;
+    }
+    let parsed: unknown;
+    try { parsed = await res.json(); } catch (e) {
+      errorMsg = `Live-tune disabled — input cache replied with invalid JSON: ${(e as Error).message}`;
+      liveTuneEnabled = false;
+      return null;
+    }
+    const id = (parsed as { input_id?: unknown }).input_id;
+    if (typeof id !== 'number' || !Number.isFinite(id)) {
+      errorMsg = 'Live-tune disabled — input cache reply missing `input_id`.';
+      liveTuneEnabled = false;
+      return null;
+    }
+    cachedInputIdA = id;
+    return id;
+  }
+
+  // Apply the bytes returned by a live-tune fetch to the result panel.
+  async function applyLiveTuneResponse(res: Response, t0: number) {
+    const elapsed = Math.round(performance.now() - t0);
+    if (!res.ok) return;
+    const data = await res.json() as Record<string, unknown>;
+    if (!data.fingerprint_hex || typeof data.fingerprint_hex !== 'string') return;
+    const hex = data.fingerprint_hex;
+    const fullBytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < fullBytes.length; i++) fullBytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    const trimBytes = fullBytes.subarray(0, Math.min(fullBytes.length, 128));
+    fullBytesA = fullBytes;
+    hexBytesA  = trimBytes;
+    hexStr     = hex;
+    fpBytes    = `${data.fingerprint_bytes ?? fullBytes.length} bytes`;
+    entropy    = `${bytesEntropy(trimBytes).toFixed(2)} bits`;
+    latencyMs  = `${elapsed} ms`;
+    cells      = bytesToCells(trimBytes);
+    cfgHash    = data.config_hash != null ? `0x${(data.config_hash as number).toString(16)}` : cfgHash;
+    if (typeof data.algorithm === 'string') {
+      algLabel = `${ALG_LABELS[data.algorithm as string] ?? data.algorithm} · live-tune`;
+    }
+    if (Array.isArray(data.embedding)) lastEmbedding = data.embedding as number[];
+  }
+
+  async function retuneA(): Promise<void> {
+    if (modality === 'audio') return;             // not supported
+    if (running) return;                           // primary compute in flight
+    const id = await ensureCachedInputIdA();
+    if (id == null) return;
+    if (liveTuneAbortA) liveTuneAbortA.abort();
+    liveTuneAbortA = new AbortController();
+    liveTuneInflight = true;
+    const t0 = performance.now();
+    try {
+      const res = await fetch(buildLiveTuneUrl(id), {
+        method: 'POST',
+        body: '',
+        signal: liveTuneAbortA.signal,
+      });
+      await applyLiveTuneResponse(res, t0);
+    } catch (e) {
+      // Aborts are expected when newer ticks supersede; ignore.
+      if ((e as { name?: string }).name !== 'AbortError') {
+        errorMsg = `Live-tune error: ${(e as Error).message}`;
+      }
+    } finally {
+      liveTuneInflight = false;
+    }
+  }
+
+  // Invalidate cached input_id whenever the underlying bytes change.
+  $effect(() => { void textInput; cachedInputIdA = null; });
+  $effect(() => { void file;      cachedInputIdA = null; });
+  $effect(() => { void modality;  cachedInputIdA = null; });
+
+  // Watch `extraOpts` (and all primary tunables that affect the
+  // request) and trigger a debounced re-fingerprint via input_id.
+  // Only fires after the first manual compute has populated `hasResult`,
+  // and only when live-tune is enabled.
+  //
+  // Critical: skip when the opts haven't actually changed since the
+  // last compute / retune. Without this guard, every manual Run flips
+  // `hasResult` false→true and re-runs this effect, triggering an
+  // immediate redundant retune with the same opts.
+  $effect(() => {
+    if (!hasResult || !liveTuneEnabled) return;
+    if (modality === 'audio') return;
+    const k = optsKey();
+    if (k === lastComputedOptsKey) return;
+    if (liveTuneTimer != null) clearTimeout(liveTuneTimer);
+    liveTuneTimer = setTimeout(() => {
+      lastComputedOptsKey = k;          // commit before fetch — debounce fold
+      void retuneA();
+    }, 200);
+  });
 
   // ── compute B ─────────────────────────────────────────────────────────────
   async function computeB() {
@@ -824,9 +1044,22 @@
                 <input class="adv-input" type="number"
                   bind:value={optMinAnchorMagDb} placeholder="upstream default" />
               </label>
-            {:else}
-              <p class="adv-hint">No extra knobs for this algorithm — uses upstream defaults.</p>
             {/if}
+            <!-- Manifest-driven knobs (canonicalizer flags, Panako/Haitsma/
+                 Neural/Watermark configs). The component fetches
+                 /api/algorithms once and renders one input per Tunable
+                 the upstream binary advertises that the primary controls
+                 above don't already cover. -->
+            <div class="manifest-extras">
+              <TuningForm {modality} {algorithm} bind:opts={extraOpts} />
+              {#if hasResult && modality !== 'audio'}
+                <label class="live-toggle" title="Re-fingerprint as soon as a knob changes (debounced 200ms). Uses the cached input — no re-upload.">
+                  <input type="checkbox" bind:checked={liveTuneEnabled} />
+                  <span>Live-tune</span>
+                  {#if liveTuneInflight}<span class="live-dot" aria-label="recomputing"></span>{/if}
+                </label>
+              {/if}
+            </div>
           </div>
         </details>
 
@@ -876,7 +1109,11 @@
                 <div class="hex-cell" style="background:{cell.color}"></div>
               {/each}
             </div>
-            <div class="hex-str" title={hexStr}>{hexStr.slice(0, 64)}{hexStr.length > 64 ? '…' : ''}</div>
+            <button type="button" class="hex-str copyable"
+              title="Click to copy full hex ({hexStr.length} chars)"
+              onclick={() => copyHex(hexStr)}>
+              {hexStr.slice(0, 64)}{hexStr.length > 64 ? '…' : ''}
+            </button>
             {#if hexBytesA && hexBytesA.length > 0}
               <div class="viz-section">
                 <ByteHistogram bytes={hexBytesA} height={42} />
@@ -1067,7 +1304,11 @@
                   style="background:{cell.color}"></div>
               {/each}
             </div>
-            <div class="hex-str" title={hexStr}>{hexStr.slice(0, 48)}{hexStr.length > 48 ? '…' : ''}</div>
+            <button type="button" class="hex-str copyable"
+              title="Click to copy full hex ({hexStr.length} chars)"
+              onclick={() => copyHex(hexStr, 'A hex')}>
+              {hexStr.slice(0, 48)}{hexStr.length > 48 ? '…' : ''}
+            </button>
             {#if isLocal}
               <p class="local-notice-sm">LOCAL FNV-1a fallback</p>
             {/if}
@@ -1110,7 +1351,11 @@
                   style="background:{cell.color}"></div>
               {/each}
             </div>
-            <div class="hex-str" title={hexStrB}>{hexStrB.slice(0, 48)}{hexStrB.length > 48 ? '…' : ''}</div>
+            <button type="button" class="hex-str copyable"
+              title="Click to copy full hex ({hexStrB.length} chars)"
+              onclick={() => copyHex(hexStrB, 'B hex')}>
+              {hexStrB.slice(0, 48)}{hexStrB.length > 48 ? '…' : ''}
+            </button>
             {#if isLocalB}
               <p class="local-notice-sm">LOCAL FNV-1a fallback</p>
             {/if}
@@ -1149,6 +1394,10 @@
       <div class="pane-label">How {ALG_LABELS[algorithm] ?? algorithm} works — hover any step</div>
       <FpFlow {modality} {algorithm} />
     </div>
+  {/if}
+
+  {#if copyToast}
+    <div class="copy-toast" role="status" aria-live="polite">{copyToast}</div>
   {/if}
 </div>
 
@@ -1289,7 +1538,71 @@
   .adv-input { font-family: var(--mono); font-size: 0.72rem; padding: 5px 8px; border: 1px solid var(--ink); border-radius: 3px; background: var(--bg); color: var(--ink); width: 100%; box-sizing: border-box; }
   .adv-input:focus { outline: 2px solid var(--accent-ink); outline-offset: 1px; }
   .adv-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .adv-hint { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); margin: 0; }
+  .manifest-extras {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px dashed var(--border, rgba(255,255,255,0.06));
+  }
+  .live-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--ink-2, #888);
+    cursor: pointer;
+  }
+  .live-toggle input { margin: 0; cursor: pointer; }
+  .live-dot {
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: oklch(0.7 0.18 150);
+    box-shadow: 0 0 0 0 oklch(0.7 0.18 150);
+    animation: live-pulse 1.2s infinite ease-out;
+  }
+  @keyframes live-pulse {
+    0%   { box-shadow: 0 0 0 0    oklch(0.7 0.18 150 / 0.55); }
+    70%  { box-shadow: 0 0 0 6px  oklch(0.7 0.18 150 / 0); }
+    100% { box-shadow: 0 0 0 0    oklch(0.7 0.18 150 / 0); }
+  }
+  /* Hex-string copy affordance — click to copy the full fingerprint hex. */
+  .hex-str.copyable {
+    appearance: none;
+    border: 1px dashed transparent;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 0.05rem 0.25rem;
+    border-radius: 0.25rem;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .hex-str.copyable:hover  { background: var(--bg-2, rgba(255,255,255,0.04)); }
+  .hex-str.copyable:focus  { outline: 2px solid var(--accent, #6ad); outline-offset: 1px; }
+  .hex-str.copyable:active { background: var(--bg-3, rgba(255,255,255,0.08)); }
+  /* Floating toast surfaced after a successful (or failed) copy. */
+  .copy-toast {
+    position: fixed;
+    bottom: 1.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: oklch(0.18 0.02 240 / 0.94);
+    color: oklch(0.95 0.02 240);
+    padding: 0.5rem 0.85rem;
+    border-radius: 0.5rem;
+    font-family: var(--mono, monospace);
+    font-size: 0.78rem;
+    box-shadow: 0 6px 20px oklch(0 0 0 / 0.25);
+    z-index: 9999;
+    pointer-events: none;
+    animation: toast-in 160ms ease-out;
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translate(-50%, 6px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
 
   .result-actions {
     display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;

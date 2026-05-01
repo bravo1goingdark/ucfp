@@ -125,6 +125,23 @@ If your change only touches a subset of crates, you can run individual commands 
   when you change hot paths and paste results into the PR if they inform the review.
 - If you add a new feature flag, add tests for both enabled and disabled states so CI validates both.
 
+### CPU baseline / `target-cpu=native`
+
+The committed `.cargo/config.toml` pins the codegen baseline to portable
+microarchitecture levels: `x86-64-v3` on x86_64 and `neoverse-n1` on aarch64.
+This is what every cloud / Docker build uses, and it's deliberately conservative
+because the build host may not match the runtime host's CPU class — `native`
+binaries can `SIGILL` on boot when that mismatch happens.
+
+For local benchmarking on your own hardware, opt in to native codegen via
+the environment, **not** by editing `.cargo/config.toml`:
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench end_to_end
+```
+
+Never commit `target-cpu=native` to the repo or set it in the `Dockerfile`.
+
 ### Testing Checklist
 
 Before submitting a PR:

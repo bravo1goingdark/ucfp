@@ -16,6 +16,8 @@ export function hasAlgorithmView(algorithm: string, byteLen: number): boolean {
     return byteLen === 168;
   }
   if (algorithm === 'simhash-b64-tf' || algorithm === 'simhash-b64-idf') return byteLen === 8;
+  // MinHash<128>: 128 u64 slots × 8 bytes = 1024 bytes (txtfp::MinHashSig is repr(C) Pod).
+  if (algorithm === 'minhash-h128')      return byteLen === 1024;
   if (algorithm === 'audiofp-wang-v1')   return byteLen > 0 && byteLen % 8 === 0;
   if (algorithm === 'audiofp-panako-v1') return byteLen > 0 && byteLen % 16 === 0;
   return false;

@@ -178,7 +178,21 @@ export const POST: RequestHandler = async (event) => {
   // Forward every per-algorithm tunable upstream understands. Missing
   // params fall through to upstream defaults (see src/server/dto.rs).
   const algoParams: AlgorithmParams = {};
-  const numKeys = ['k','h','fan_out','peaks_per_sec','target_zone_t','target_zone_f','min_anchor_mag_db','max_dimension','max_input_bytes','min_dimension'] as const;
+  const numKeys = [
+    // common + Wang
+    'k','h','fan_out','peaks_per_sec','target_zone_t','target_zone_f','min_anchor_mag_db',
+    // image preprocess
+    'max_dimension','max_input_bytes','min_dimension',
+    // Panako
+    'panako_fan_out','panako_target_zone_t','panako_target_zone_f',
+    'panako_peaks_per_sec','panako_min_anchor_mag_db',
+    // Haitsma
+    'haitsma_fmin','haitsma_fmax',
+    // Neural / Watermark
+    'neural_fmax','watermark_threshold',
+    // Live-tune handle
+    'input_id',
+  ] as const;
   for (const k of numKeys) {
     const v = sp.get(k);
     if (v != null && v !== '') {
@@ -189,6 +203,17 @@ export const POST: RequestHandler = async (event) => {
   const tokenizer = sp.get('tokenizer');
   if (tokenizer === 'word' || tokenizer === 'grapheme' || tokenizer === 'cjk-jp' || tokenizer === 'cjk-ko') {
     algoParams.tokenizer = tokenizer;
+  }
+  // Text canonicalizer knobs.
+  const normalization = sp.get('canon_normalization');
+  if (normalization === 'nfc' || normalization === 'nfkc' || normalization === 'none') {
+    algoParams.canon_normalization = normalization;
+  }
+  for (const k of ['canon_case_fold','canon_strip_bidi','canon_strip_format','canon_apply_confusable'] as const) {
+    const v = sp.get(k);
+    if (v === 'true' || v === 'false') {
+      (algoParams as Record<string, unknown>)[k] = v === 'true';
+    }
   }
   if (sp.get('return_embedding') === '1') algoParams.return_embedding = true;
 

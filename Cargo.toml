@@ -22,10 +22,12 @@ embedded = [
 ]
 
 # HTTP server binary. Disable for library-only consumers.
+# `mimalloc` is process-wide and only needed in the binary; pulling it
+# under `server` keeps lib-only consumers from linking it.
 server = [
     "dep:axum", "dep:tokio", "dep:tower", "dep:tower-http",
     "dep:tracing-subscriber", "dep:metrics", "dep:metrics-exporter-prometheus",
-    "dep:subtle",
+    "dep:subtle", "dep:mimalloc",
 ]
 
 # Per-modality SDKs. Each pulls only its own crate; off-by-default for slim builds.
@@ -68,6 +70,11 @@ multi-tenant = ["dep:reqwest"]
 # self-hosters who only want single-shot ingest can keep it off.
 multipart    = ["server", "axum/multipart"]
 
+# Playground introspection: pipeline-stage `inspect` endpoint and the
+# session-cached `/v1/inputs` LRU that powers live-tune. Self-hosters
+# that don't ship the playground UI can leave this off and pay nothing.
+inspect      = ["server"]
+
 # Existing graduations (kept).
 qdrant = ["dep:qdrant-client"]
 rerank = ["dep:ort"]
@@ -76,7 +83,7 @@ rerank = ["dep:ort"]
 # Container build use. Excludes truly heavy `qdrant` and `rerank` which are
 # alternative backends, not additive features.
 full = [
-    "embedded", "server", "multi-tenant", "multipart",
+    "embedded", "server", "multi-tenant", "multipart", "inspect",
     "audio-wang", "audio-panako", "audio-haitsma", "audio-streaming",
     "audio-neural", "audio-watermark",
     "image-perceptual", "image-semantic",
@@ -117,6 +124,10 @@ tracing-subscriber          = { version = "0.3.22", features = ["json", "env-fil
 metrics                     = { version = "0.24", optional = true }
 metrics-exporter-prometheus = { version = "0.18", default-features = false, optional = true }
 subtle                      = { version = "2.6", optional = true }
+# Process-wide allocator for the binary. Wired in `src/bin/ucfp.rs` so
+# all crate code (including the three modality SDKs) inherits the
+# throughput win without any per-call change.
+mimalloc                    = { version = "0.1.50", default-features = false, optional = true }
 
 # ── Optional graduations ────────────────────────────────────────────────
 qdrant-client = { version = "1", optional = true }

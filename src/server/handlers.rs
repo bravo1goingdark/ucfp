@@ -83,6 +83,14 @@ pub(super) async fn info() -> Json<InfoResponse> {
     })
 }
 
+/// `GET /v1/algorithms` — machine-readable schema of every algorithm
+/// the server can run. The frontend renders the playground tuning form
+/// generically from this manifest.
+pub(super) async fn algorithms()
+-> Json<crate::server::algorithms_manifest::AlgorithmsResponse> {
+    Json(crate::server::algorithms_manifest::build())
+}
+
 // ── POST /v1/records ───────────────────────────────────────────────────
 
 pub(super) async fn upsert<I: IndexBackend>(
@@ -202,6 +210,15 @@ pub(super) async fn ingest_image<I: IndexBackend>(
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    #[cfg(feature = "inspect")]
+    let body = if let Some(input_id) = params.input_id {
+        crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?
+            .bytes
+    } else {
+        body
+    };
     let pre = build_image_preprocess(&params);
     let rec = match params.algorithm {
         ImageAlgorithm::Multi => {
@@ -284,6 +301,15 @@ pub(super) async fn ingest_image_semantic<I: IndexBackend>(
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    #[cfg(feature = "inspect")]
+    let body = if let Some(input_id) = params.input_id {
+        crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?
+            .bytes
+    } else {
+        body
+    };
     let model = params
         .model_id
         .as_deref()
@@ -312,9 +338,18 @@ pub(super) async fn ingest_text<I: IndexBackend>(
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    #[cfg(feature = "inspect")]
+    let body = if let Some(input_id) = params.input_id {
+        crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?
+            .bytes
+    } else {
+        body
+    };
     let text = std::str::from_utf8(&body)
         .map_err(|e| Error::Modality(format!("body is not valid UTF-8: {e}")))?;
-    let opts = build_text_opts(&params);
+    let opts = build_text_opts(&params)?;
     let rec =
         match params.algorithm {
             TextAlgorithm::Minhash => crate::modality::text::fingerprint_minhash_with::<
@@ -448,7 +483,7 @@ pub(super) async fn ingest_text<I: IndexBackend>(
 }
 
 #[cfg(feature = "text")]
-fn build_text_opts(params: &TextParams) -> crate::modality::text::TextOpts {
+fn build_text_opts(params: &TextParams) -> Result<crate::modality::text::TextOpts, ApiError> {
     use super::dto::{PreprocessKind as DtoPre, TokenizerKind as DtoTok};
     use crate::modality::text::{TextOpts, TokenizerKind as ModTok};
     let mut opts = TextOpts::default();
@@ -473,7 +508,47 @@ fn build_text_opts(params: &TextParams) -> crate::modality::text::TextOpts {
             DtoPre::Pdf => crate::modality::text::PreprocessKind::Pdf,
         });
     }
-    opts
+    // Canonicalizer overrides — build a fresh CanonicalizerBuilder when
+    // any `canon_*` knob is set; leave the SDK default in place otherwise.
+    let canon_touched = params.canon_normalization.is_some()
+        || params.canon_case_fold.is_some()
+        || params.canon_strip_bidi.is_some()
+        || params.canon_strip_format.is_some()
+        || params.canon_apply_confusable.is_some();
+    if canon_touched {
+        let mut b = txtfp::CanonicalizerBuilder::default();
+        if let Some(n) = params.canon_normalization.as_deref() {
+            b.normalization = match n.to_ascii_lowercase().as_str() {
+                "nfc" => txtfp::Normalization::Nfc,
+                "nfkc" => txtfp::Normalization::Nfkc,
+                "none" => txtfp::Normalization::None,
+                other => {
+                    return Err(Error::Modality(format!(
+                        "canon_normalization must be one of nfc|nfkc|none, got `{other}`"
+                    ))
+                    .into());
+                }
+            };
+        }
+        if let Some(cf) = params.canon_case_fold {
+            b.case_fold = if cf {
+                txtfp::CaseFold::Simple
+            } else {
+                txtfp::CaseFold::None
+            };
+        }
+        if let Some(v) = params.canon_strip_bidi {
+            b.strip_bidi = v;
+        }
+        if let Some(v) = params.canon_strip_format {
+            b.strip_format = v;
+        }
+        if let Some(v) = params.canon_apply_confusable {
+            b.apply_confusable = v;
+        }
+        opts.canonicalizer = b.build();
+    }
+    Ok(opts)
 }
 
 /// `POST /v1/ingest/text/{tid}/{rid}/stream` — NDJSON push streaming.
@@ -486,7 +561,7 @@ pub(super) async fn ingest_text_stream<I: IndexBackend>(
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
-    let opts = build_text_opts(&params);
+    let opts = build_text_opts(&params)?;
     let mut session =
         crate::modality::text::StreamingMinHashSession::new(&opts, tenant_id, record_id);
     // NDJSON shape: each line is a JSON string carrying a UTF-8 chunk.
@@ -594,10 +669,29 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
     State(index): State<Arc<I>>,
     ctx: Option<Extension<ApiKeyContext>>,
     Path((tenant_id, record_id)): Path<(u32, u64)>,
-    Qs(params): Qs<AudioParams>,
+    Qs(mut params): Qs<AudioParams>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    // Live-tune (feature `inspect`): when `?input_id=…` is supplied,
+    // pull bytes — and the original sample_rate — from the cache
+    // instead of reading the request body.
+    #[cfg(feature = "inspect")]
+    let body = if let Some(input_id) = params.input_id {
+        let entry = crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| {
+                Error::Modality(format!("input_id {input_id} not found or expired"))
+            })?;
+        if let Some(sr) = entry.sample_rate {
+            if params.sample_rate == 0 {
+                params.sample_rate = sr;
+            }
+        }
+        entry.bytes
+    } else {
+        body
+    };
     if !body.len().is_multiple_of(4) {
         return Err(Error::Modality(format!(
             "audio body must be a multiple of 4 bytes (raw f32 LE samples), got {}",
@@ -658,12 +752,43 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
         AudioAlgorithm::Panako => {
             #[cfg(feature = "audio-panako")]
             {
-                crate::modality::audio::fingerprint_panako(
-                    &samples,
-                    params.sample_rate,
-                    tenant_id,
-                    record_id,
-                )?
+                let has_tune = params.panako_fan_out.is_some()
+                    || params.panako_target_zone_t.is_some()
+                    || params.panako_target_zone_f.is_some()
+                    || params.panako_peaks_per_sec.is_some()
+                    || params.panako_min_anchor_mag_db.is_some();
+                if has_tune {
+                    let mut cfg = audiofp::classical::PanakoConfig::default();
+                    if let Some(v) = params.panako_fan_out {
+                        cfg.fan_out = v;
+                    }
+                    if let Some(v) = params.panako_target_zone_t {
+                        cfg.target_zone_t = v;
+                    }
+                    if let Some(v) = params.panako_target_zone_f {
+                        cfg.target_zone_f = v;
+                    }
+                    if let Some(v) = params.panako_peaks_per_sec {
+                        cfg.peaks_per_sec = v;
+                    }
+                    if let Some(v) = params.panako_min_anchor_mag_db {
+                        cfg.min_anchor_mag_db = v;
+                    }
+                    crate::modality::audio::fingerprint_panako_with(
+                        &samples,
+                        params.sample_rate,
+                        &cfg,
+                        tenant_id,
+                        record_id,
+                    )?
+                } else {
+                    crate::modality::audio::fingerprint_panako(
+                        &samples,
+                        params.sample_rate,
+                        tenant_id,
+                        record_id,
+                    )?
+                }
             }
             #[cfg(not(feature = "audio-panako"))]
             return Err(Error::Unsupported("panako requires feature `audio-panako`".into()).into());
@@ -671,12 +796,30 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
         AudioAlgorithm::Haitsma => {
             #[cfg(feature = "audio-haitsma")]
             {
-                crate::modality::audio::fingerprint_haitsma(
-                    &samples,
-                    params.sample_rate,
-                    tenant_id,
-                    record_id,
-                )?
+                let has_tune = params.haitsma_fmin.is_some() || params.haitsma_fmax.is_some();
+                if has_tune {
+                    let mut cfg = audiofp::classical::HaitsmaConfig::default();
+                    if let Some(v) = params.haitsma_fmin {
+                        cfg.fmin = v;
+                    }
+                    if let Some(v) = params.haitsma_fmax {
+                        cfg.fmax = v;
+                    }
+                    crate::modality::audio::fingerprint_haitsma_with(
+                        &samples,
+                        params.sample_rate,
+                        &cfg,
+                        tenant_id,
+                        record_id,
+                    )?
+                } else {
+                    crate::modality::audio::fingerprint_haitsma(
+                        &samples,
+                        params.sample_rate,
+                        tenant_id,
+                        record_id,
+                    )?
+                }
             }
             #[cfg(not(feature = "audio-haitsma"))]
             return Err(
@@ -690,13 +833,27 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
                     .model_id
                     .as_deref()
                     .ok_or_else(|| Error::Modality("neural requires `model_id`".into()))?;
-                crate::modality::audio::fingerprint_neural(
-                    &samples,
-                    params.sample_rate,
-                    model,
-                    tenant_id,
-                    record_id,
-                )?
+                if params.neural_fmax.is_some() {
+                    let opts = crate::modality::audio::NeuralOpts {
+                        fmax: params.neural_fmax,
+                    };
+                    crate::modality::audio::fingerprint_neural_with(
+                        &samples,
+                        params.sample_rate,
+                        model,
+                        &opts,
+                        tenant_id,
+                        record_id,
+                    )?
+                } else {
+                    crate::modality::audio::fingerprint_neural(
+                        &samples,
+                        params.sample_rate,
+                        model,
+                        tenant_id,
+                        record_id,
+                    )?
+                }
             }
             #[cfg(not(feature = "audio-neural"))]
             return Err(Error::Unsupported("neural requires feature `audio-neural`".into()).into());
@@ -744,7 +901,19 @@ pub(super) async fn ingest_audio_watermark<I: IndexBackend>(
         .model_id
         .as_deref()
         .ok_or_else(|| Error::Modality("watermark requires `model_id`".into()))?;
-    let report = crate::modality::audio::detect_watermark(&samples, params.sample_rate, model)?;
+    let report = if params.watermark_threshold.is_some() {
+        let opts = crate::modality::audio::WatermarkOpts {
+            threshold: params.watermark_threshold,
+        };
+        crate::modality::audio::detect_watermark_with(
+            &samples,
+            params.sample_rate,
+            model,
+            &opts,
+        )?
+    } else {
+        crate::modality::audio::detect_watermark(&samples, params.sample_rate, model)?
+    };
     Ok((StatusCode::OK, Json(WatermarkReportDto::from(report))))
 }
 
@@ -803,3 +972,78 @@ pub(super) async fn ingest_audio_stream<I: IndexBackend>(
         )),
     ))
 }
+
+// ── Session-cached input store (feature `inspect`) ─────────────────────
+
+#[cfg(feature = "inspect")]
+#[derive(serde::Deserialize, Default)]
+pub(super) struct InputsPutQuery {
+    /// Tenant the entry will be scoped to. Authenticated tenants are
+    /// validated by `tenant_guard`; the service-bearer path may quote
+    /// any tenant.
+    pub tenant_id: u32,
+    /// Modality the entry belongs to (`text`/`image`/`audio`).
+    pub modality: String,
+    /// Sample rate (Hz) for audio uploads; ignored for other modalities.
+    #[serde(default)]
+    pub sample_rate: Option<u32>,
+}
+
+/// `POST /v1/inputs?tenant_id=…&modality=…` — cache raw bytes and
+/// return an `input_id` the playground can quote on later ingest calls
+/// to avoid re-uploading the payload on every slider tick.
+///
+/// Path is parameterless to keep the route shape distinct from
+/// `DELETE /v1/inputs/{tenant_id}/{input_id}` — axum's matchit refuses
+/// to register two routes whose path patterns share segment counts.
+#[cfg(feature = "inspect")]
+pub(super) async fn put_input(
+    ctx: Option<Extension<ApiKeyContext>>,
+    Qs(q): Qs<InputsPutQuery>,
+    body: Bytes,
+) -> Result<Json<crate::server::dto::InputsPutResponse>, ApiError> {
+    tenant_guard(ctx, q.tenant_id)?;
+    if body.is_empty() {
+        return Err(Error::Modality("inputs body must not be empty".into()).into());
+    }
+    let m = match q.modality.as_str() {
+        "text" => crate::core::Modality::Text,
+        "image" => crate::core::Modality::Image,
+        "audio" => crate::core::Modality::Audio,
+        other => {
+            return Err(Error::Modality(format!(
+                "unknown modality `{other}` (want text|image|audio)"
+            ))
+            .into());
+        }
+    };
+    let cache = crate::server::inputs_cache::cache();
+    let content_type = match m {
+        crate::core::Modality::Text => "text/plain; charset=utf-8".to_string(),
+        _ => "application/octet-stream".to_string(),
+    };
+    let (input_id, size) = cache.put_bytes(q.tenant_id, m, body, content_type, q.sample_rate);
+    Ok(Json(crate::server::dto::InputsPutResponse {
+        tenant_id: q.tenant_id,
+        input_id,
+        modality: m,
+        size_bytes: size,
+        ttl_secs: 600,
+    }))
+}
+
+/// `DELETE /v1/inputs/{tenant_id}/{input_id}` — explicit eviction.
+#[cfg(feature = "inspect")]
+pub(super) async fn delete_input(
+    ctx: Option<Extension<ApiKeyContext>>,
+    Path((tenant_id, input_id)): Path<(u32, u64)>,
+) -> Result<StatusCode, ApiError> {
+    tenant_guard(ctx, tenant_id)?;
+    let removed = crate::server::inputs_cache::cache().remove(tenant_id, input_id);
+    Ok(if removed {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::NOT_FOUND
+    })
+}
+
