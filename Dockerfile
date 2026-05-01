@@ -15,16 +15,22 @@ FROM rust:latest AS builder
 
 WORKDIR /build
 
-# Cache deps separately from source.
+# Cache deps separately from source. Stub every file the manifest
+# references so `cargo fetch` can parse Cargo.toml without bailing —
+# `[[bench]] name = "end_to_end"` expects benches/end_to_end.rs,
+# `[[bin]]   name = "ucfp"`       expects src/bin/ucfp.rs, and the
+# library entry-point expects src/lib.rs.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir -p src/bin && \
+RUN mkdir -p src/bin benches && \
     echo 'fn main() {}' > src/bin/ucfp.rs && \
-    echo '' > src/lib.rs && \
+    echo ''             > src/lib.rs && \
+    echo 'fn main() {}' > benches/end_to_end.rs && \
     cargo fetch --locked
 
 # Now bring in real source.
-COPY src ./src
-COPY docs ./docs
+COPY src     ./src
+COPY benches ./benches
+COPY docs    ./docs
 
 # Build with the production feature umbrella.
 RUN cargo build --release --features full --bin ucfp
