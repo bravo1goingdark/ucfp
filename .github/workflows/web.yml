@@ -37,10 +37,10 @@ jobs:
     needs: check-and-build
     # Gate on `vars.*` only — GitHub forbids `secrets.*` in job-level
     # `if:`, and a missing CF token would otherwise hard-fail the
-    # wrangler-action step. Operator opts into deploys by setting
-    # `vars.CLOUDFLARE_ACCOUNT_ID` (the account id isn't secret) and
-    # `secrets.CLOUDFLARE_API_TOKEN` (the actual token).
-    if: github.ref == 'refs/heads/main' && vars.CLOUDFLARE_ACCOUNT_ID != ''
+    # wrangler-action step. Aligned with container.yml: operator opts
+    # into deploys by setting `vars.CF_ACCOUNT_ID` (the account id
+    # isn't secret) and `secrets.CF_API_TOKEN` (the actual token).
+    if: github.ref == 'refs/heads/main' && vars.CF_ACCOUNT_ID != ''
     permissions:
       contents: read
       deployments: write
@@ -58,8 +58,8 @@ jobs:
       - run: pnpm build
       - uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ vars.CF_ACCOUNT_ID }}
           workingDirectory: web
           command: pages deploy .svelte-kit/cloudflare --project-name=ucfp
 
@@ -80,7 +80,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ vars.CF_ACCOUNT_ID }}
           workingDirectory: web
           command: d1 migrations apply ucfp_web --remote
