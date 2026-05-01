@@ -35,28 +35,42 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: check-and-build
-    # Gate on `vars.*` only — GitHub forbids `secrets.*` in job-level
-    # `if:`, and a missing CF token would otherwise hard-fail the
-    # wrangler-action step. Aligned with container.yml: operator opts
-    # into deploys by setting `vars.CF_ACCOUNT_ID` (the account id
-    # isn't secret) and `secrets.CF_API_TOKEN` (the actual token).
+    # Job-level gate: `vars.*` only (GitHub forbids `secrets.*` in `if:`).
+    # The actual token-presence check happens at the step level via
+    # env-passthrough — same pattern container.yml uses.
     if: github.ref == 'refs/heads/main' && vars.CF_ACCOUNT_ID != ''
     permissions:
       contents: read
       deployments: write
+    env:
+      # Lift the secret into env so subsequent `if: env.* != ''` checks
+      # can read it. With the secret unset, `env.CF_API_TOKEN` is empty
+      # and every step below it short-circuits.
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
     steps:
+      - name: Skip when CF_API_TOKEN secret is unset
+        if: ${{ env.CF_API_TOKEN == '' }}
+        run: |
+          echo "::warning::CF_API_TOKEN secret not set — skipping Cloudflare Pages deploy."
+          echo "Set it with:  gh secret set CF_API_TOKEN --body '<cf_api_token>'"
       - uses: actions/checkout@v4
+        if: ${{ env.CF_API_TOKEN != '' }}
       - uses: pnpm/action-setup@v4
+        if: ${{ env.CF_API_TOKEN != '' }}
         with:
           version: 10
       - uses: actions/setup-node@v4
+        if: ${{ env.CF_API_TOKEN != '' }}
         with:
           node-version: 20
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - uses: cloudflare/wrangler-action@v3
+      - if: ${{ env.CF_API_TOKEN != '' }}
+        run: pnpm install --frozen-lockfile
+      - if: ${{ env.CF_API_TOKEN != '' }}
+        run: pnpm build
+      - if: ${{ env.CF_API_TOKEN != '' }}
+        uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ vars.CF_ACCOUNT_ID }}
@@ -66,8 +80,15 @@ jobs:
   migrate:
     name: apply D1 migrations (manual)
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && vars.CF_ACCOUNT_ID != ''
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
     steps:
+      - name: Fail fast when CF_API_TOKEN secret is unset
+        if: ${{ env.CF_API_TOKEN == '' }}
+        run: |
+          echo "::error::CF_API_TOKEN secret not set — required for D1 migrations."
+          exit 1
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
