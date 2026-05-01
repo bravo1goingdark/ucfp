@@ -1,7 +1,5 @@
 // POST /api/pipeline/inspect — proxy to upstream pipeline-stage
-// inspector. Modality is taken from `?modality=` (only `text` is wired
-// upstream today; image/audio return 501 until D3.1's stage extractors
-// land for those modalities).
+// inspector for text / image / audio. Modality is taken from `?modality=`.
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
@@ -32,10 +30,10 @@ export const POST: RequestHandler = async (event) => {
 
   const sp = event.url.searchParams;
   const modality = sp.get('modality') ?? 'text';
-  if (modality !== 'text' && modality !== 'image') {
+  if (modality !== 'text' && modality !== 'image' && modality !== 'audio') {
     return json(
-      { error: `pipeline inspect for ${modality} is not implemented yet (text/image only).` },
-      { status: 501 }
+      { error: `unknown modality '${modality}' (want text|image|audio).` },
+      { status: 400 }
     );
   }
 
@@ -48,7 +46,11 @@ export const POST: RequestHandler = async (event) => {
     'input_id',
   ];
   const IMAGE_KEYS = ['max_input_bytes','max_dimension','min_dimension','input_id'];
-  const allowedKeys = modality === 'text' ? TEXT_KEYS : IMAGE_KEYS;
+  const AUDIO_KEYS = ['sample_rate','input_id'];
+  const allowedKeys =
+    modality === 'text'  ? TEXT_KEYS  :
+    modality === 'image' ? IMAGE_KEYS :
+                           AUDIO_KEYS;
 
   const upstreamQuery = new URLSearchParams();
   for (const k of allowedKeys) {
@@ -56,9 +58,10 @@ export const POST: RequestHandler = async (event) => {
     if (v != null && v !== '') upstreamQuery.set(k, v);
   }
 
-  const upstreamPath = modality === 'text'
-    ? `/v1/pipeline/inspect/text/${tenantId}`
-    : `/v1/pipeline/inspect/image/${tenantId}`;
+  const upstreamPath =
+    modality === 'text'  ? `/v1/pipeline/inspect/text/${tenantId}`  :
+    modality === 'image' ? `/v1/pipeline/inspect/image/${tenantId}` :
+                           `/v1/pipeline/inspect/audio/${tenantId}`;
   const upstream =
     `${env.UCFP_API_URL.replace(/\/$/, '')}${upstreamPath}` +
     (upstreamQuery.toString() ? `?${upstreamQuery.toString()}` : '');

@@ -1132,8 +1132,9 @@
                 <EmbeddingBars vector={lastEmbedding} maxBars={128} height={64} />
               </div>
             {/if}
-            <!-- Pipeline inspector — text + image. Audio still returns
-                 a 501 placeholder (proxy + UI both handle gracefully). -->
+            <!-- Pipeline inspector — text, image, and audio all wired.
+                 Audio decodes the dropped file through the existing
+                 WebAudio resampler when the user clicks Inspect. -->
             <div class="viz-section">
               <PipelineInspector
                 {modality}

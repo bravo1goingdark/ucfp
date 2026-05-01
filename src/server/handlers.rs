@@ -1137,3 +1137,53 @@ pub(super) async fn inspect_image<I: IndexBackend>(
     let result = crate::modality::image::inspect_image(&body, &pre)?;
     Ok(Json(result))
 }
+
+/// `POST /v1/pipeline/inspect/audio/{tenant_id}` — audio-pipeline
+/// stage extractor: amplitude envelope → log-magnitude spectrogram →
+/// picked peaks → final Wang fingerprint hex.
+#[cfg(all(feature = "inspect", feature = "audio"))]
+pub(super) async fn inspect_audio<I: IndexBackend>(
+    State(_index): State<Arc<I>>,
+    ctx: Option<Extension<ApiKeyContext>>,
+    Path(tenant_id): Path<u32>,
+    Qs(q): Qs<crate::server::dto::InspectAudioQuery>,
+    body: Bytes,
+) -> Result<Json<crate::modality::audio::InspectAudioResult>, ApiError> {
+    tenant_guard(ctx, tenant_id)?;
+
+    // Resolve body + sample_rate from the cache when input_id is set.
+    let (body, sample_rate) = if let Some(input_id) = q.input_id {
+        let entry = crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?;
+        let sr = entry.sample_rate.unwrap_or(q.sample_rate);
+        if sr == 0 {
+            return Err(Error::Modality(
+                "audio inspect requires sample_rate (cache entry has none and no override given)"
+                    .into(),
+            )
+            .into());
+        }
+        (entry.bytes, sr)
+    } else {
+        if q.sample_rate == 0 {
+            return Err(Error::Modality("audio inspect requires sample_rate".into()).into());
+        }
+        (body, q.sample_rate)
+    };
+
+    if !body.len().is_multiple_of(4) {
+        return Err(Error::Modality(format!(
+            "audio body must be a multiple of 4 bytes (raw f32 LE samples), got {}",
+            body.len()
+        ))
+        .into());
+    }
+    let samples: Vec<f32> = body
+        .chunks_exact(4)
+        .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+        .collect();
+
+    let result = crate::modality::audio::inspect_audio(&samples, sample_rate)?;
+    Ok(Json(result))
+}

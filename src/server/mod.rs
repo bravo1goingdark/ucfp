@@ -183,6 +183,12 @@ where
         post(handlers::inspect_image::<I>),
     );
 
+    #[cfg(all(feature = "inspect", feature = "audio"))]
+    let r = r.route(
+        "/v1/pipeline/inspect/audio/{tenant_id}",
+        post(handlers::inspect_audio::<I>),
+    );
+
     r
 }
 

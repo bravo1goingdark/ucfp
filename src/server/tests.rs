@@ -1206,3 +1206,62 @@ async fn pipeline_inspect_image_returns_each_stage() {
     assert_eq!(body["fingerprint_bytes"], 536);
     assert_eq!(body["fingerprint_hex"].as_str().unwrap().len(), 1072);
 }
+
+#[cfg(all(feature = "inspect", feature = "audio"))]
+#[tokio::test]
+async fn pipeline_inspect_audio_returns_each_stage() {
+    let (app, _dir) = fixture().await;
+
+    // 1 second of 440 Hz sine at 8 kHz mono — Wang's canonical rate.
+    let sr: u32 = 8_000;
+    let n = sr as usize;
+    let mut samples = vec![0f32; n];
+    for (i, s) in samples.iter_mut().enumerate() {
+        let t = i as f32 / sr as f32;
+        *s = (2.0 * std::f32::consts::PI * 440.0 * t).sin() * 0.5;
+    }
+    let mut bytes: Vec<u8> = Vec::with_capacity(samples.len() * 4);
+    for s in &samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/v1/pipeline/inspect/audio/0?sample_rate={sr}"))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(bytes))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = read_json(resp).await;
+
+    assert_eq!(body["algorithm"], "audiofp-wang-v1");
+    assert_eq!(body["sample_rate"], sr);
+    let dur = body["duration_secs"].as_f64().unwrap();
+    assert!((dur - 1.0).abs() < 0.01, "duration ~ 1.0 s, got {dur}");
+    let env = body["envelope"].as_array().unwrap();
+    assert_eq!(env.len(), 256);
+    // Spectrogram PNG starts with the standard PNG header b64-encoded.
+    let spec = body["spectrogram_png_b64"].as_str().unwrap();
+    assert!(
+        spec.starts_with("iVBORw0KGgo"),
+        "spectrogram missing PNG header: {}",
+        &spec[..16]
+    );
+    assert!(body["spec_width"].as_u64().unwrap() > 0);
+    assert!(body["spec_height"].as_u64().unwrap() > 0);
+    // 440 Hz is loud — peak picker MUST find at least one peak.
+    assert!(body["total_peaks"].as_u64().unwrap() > 0);
+    let peaks = body["peaks"].as_array().unwrap();
+    assert!(!peaks.is_empty());
+    // Final fingerprint hex is non-empty even if Wang produces 0 hashes
+    // (synthetic sine doesn't guarantee landmark pairs); just check the
+    // shape is consistent.
+    assert!(body["fingerprint_bytes"].as_u64().is_some());
+    assert!(body["fingerprint_hex"].as_str().is_some());
+}

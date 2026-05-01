@@ -473,3 +473,243 @@ impl StreamingWangSession {
         }]
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pipeline inspect — surfaces the intermediate audio-pipeline stages so
+// the playgrounds PipelineInspector UI can render each step.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One stage payload for the audio pipeline inspector.
+#[cfg(feature = "inspect")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct InspectAudioResult {
+    /// Stable algorithm identifier (always Wang for now).
+    pub algorithm: &'static str,
+    /// Sample rate the pipeline ran at (Hz).
+    pub sample_rate: u32,
+    /// Total duration of the input in seconds.
+    pub duration_secs: f32,
+    /// Downsampled amplitude envelope: 256 buckets of max-abs sample
+    /// magnitude per bucket. Renders as a tiny waveform strip.
+    pub envelope: Vec<f32>,
+    /// Log-magnitude spectrogram as a base64 PNG (grayscale, low end =
+    /// dark, high end = bright). Width = downsampled time frames,
+    /// height = downsampled frequency bins. The UI scales this with
+    /// `image-rendering: pixelated`.
+    pub spectrogram_png_b64: String,
+    /// Width of the spectrogram PNG in pixels (= number of time frames).
+    pub spec_width: u32,
+    /// Height of the spectrogram PNG in pixels (= number of freq bins).
+    pub spec_height: u32,
+    /// First N peaks the picker emitted, as `(t_ms, freq_hz, db)`
+    /// triples. Capped to keep payloads small.
+    pub peaks: Vec<InspectAudioPeak>,
+    /// Total number of peaks the picker emitted.
+    pub total_peaks: usize,
+    /// Final Wang fingerprint as hex.
+    pub fingerprint_hex: String,
+    /// Length of the underlying fingerprint in bytes.
+    pub fingerprint_bytes: usize,
+}
+
+/// One peak surfaced by the audio inspector — picked landmarks from
+/// the STFT magnitude grid. Coordinates are in real units (ms / Hz).
+#[cfg(feature = "inspect")]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct InspectAudioPeak {
+    /// Peak position in milliseconds from the start of the input.
+    pub t_ms: f32,
+    /// Peak frequency in Hz.
+    pub freq_hz: f32,
+    /// Peak magnitude in dB (relative to peak-magnitude floor).
+    pub db: f32,
+}
+
+/// Run the audio pipeline and surface every intermediate stage. Always
+/// uses the Wang landmark fingerprinter for now (Panako/Haitsma can be
+/// added when their UIs land).
+///
+/// `samples` must be mono f32 PCM at `sample_rate` Hz. The function
+/// downsamples internally for visualisation; the final fingerprint
+/// goes through the regular `fingerprint_wang` path so config_hash and
+/// hex round-trip a normal ingest.
+#[cfg(feature = "inspect")]
+pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioResult> {
+    use audiofp::dsp::peaks::{PeakPicker, PeakPickerConfig};
+    use audiofp::dsp::stft::{ShortTimeFFT, StftConfig};
+    use audiofp::dsp::windows::WindowKind;
+    use base64::Engine;
+
+    if samples.is_empty() {
+        return Err(Error::Modality("audio inspect: empty sample buffer".into()));
+    }
+    let duration_secs = samples.len() as f32 / sample_rate as f32;
+
+    // Stage 1 — amplitude envelope (256 buckets).
+    let envelope = downsample_envelope(samples, 256);
+
+    // Stage 2 — STFT magnitudes. n_fft=1024 / hop=256 gives ~31.25 ms /
+    // 8 ms cadence at 8 kHz; downsample the 513-bin x N-frame grid to
+    // a UI-friendly target.
+    let n_fft = 1024usize;
+    let hop = 256usize;
+    let mut stft = ShortTimeFFT::new(StftConfig {
+        n_fft,
+        hop,
+        window: WindowKind::Hann,
+        center: true,
+    });
+    let (mag_flat, n_frames, n_bins) = stft.magnitude_flat(samples);
+
+    let target_w = 256u32; // time frames
+    let target_h = 96u32; //  freq bins
+    let (spec_grid, spec_w, spec_h) =
+        downsample_spec(&mag_flat, n_frames, n_bins, target_w, target_h);
+    let spec_png = encode_spec_png_b64(&spec_grid, spec_w, spec_h)?;
+
+    // Stage 3 — pick peaks on the *full-resolution* magnitude grid so
+    // the (t_ms, freq_hz) coordinates match what Wang sees, then cap
+    // the list for transport.
+    let frames_per_sec = sample_rate as f32 / hop as f32;
+    let mut picker = PeakPicker::new(PeakPickerConfig::default());
+    let raw_peaks = picker.pick(&mag_flat, n_frames, n_bins, frames_per_sec);
+    let total_peaks = raw_peaks.len();
+
+    let max_mag = mag_flat.iter().copied().fold(0.0f32, f32::max).max(1e-9);
+    let bin_hz = sample_rate as f32 / n_fft as f32;
+    let frame_ms = 1000.0 * hop as f32 / sample_rate as f32;
+
+    const MAX_PEAKS_RETURNED: usize = 256;
+    let peaks: Vec<InspectAudioPeak> = raw_peaks
+        .iter()
+        .take(MAX_PEAKS_RETURNED)
+        .map(|p| InspectAudioPeak {
+            t_ms: p.t_frame as f32 * frame_ms,
+            freq_hz: p.f_bin as f32 * bin_hz,
+            db: 20.0 * (p.mag.max(1e-9) / max_mag).log10(),
+        })
+        .collect();
+
+    // Stage 4 — final Wang fingerprint via the regular pipeline. Soft
+    // fail so short clips that don't satisfy Wang's `min_samples` still
+    // get the envelope / spectrogram / peaks panes; the fingerprint
+    // stage just shows empty bytes.
+    let (fingerprint_hex, fingerprint_bytes) = match fingerprint_wang(samples, sample_rate, 0, 0) {
+        Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len()),
+        Err(_) => (String::new(), 0),
+    };
+
+    let _ = base64::engine::general_purpose::STANDARD.encode(b""); // touch the trait import
+    Ok(InspectAudioResult {
+        algorithm: ALGORITHM_WANG,
+        sample_rate,
+        duration_secs,
+        envelope,
+        spectrogram_png_b64: spec_png,
+        spec_width: spec_w,
+        spec_height: spec_h,
+        peaks,
+        total_peaks,
+        fingerprint_hex,
+        fingerprint_bytes,
+    })
+}
+
+/// Downsample a sample buffer to `buckets` cells of max-abs magnitude.
+/// Used for the amplitude envelope strip in the inspector UI.
+#[cfg(feature = "inspect")]
+fn downsample_envelope(samples: &[f32], buckets: usize) -> Vec<f32> {
+    let buckets = buckets.max(1);
+    if samples.len() <= buckets {
+        return samples.iter().map(|s| s.abs()).collect();
+    }
+    let step = samples.len() as f64 / buckets as f64;
+    (0..buckets)
+        .map(|i| {
+            let lo = (i as f64 * step).floor() as usize;
+            let hi = (((i + 1) as f64) * step).ceil() as usize;
+            let hi = hi.min(samples.len());
+            samples[lo..hi]
+                .iter()
+                .copied()
+                .fold(0.0f32, |acc, s| acc.max(s.abs()))
+        })
+        .collect()
+}
+
+/// Downsample a (frames × bins) magnitude grid to (target_w × target_h)
+/// via simple max-pooling. Avoids pulling fast_image_resize for what is
+/// already a visualisation aid.
+#[cfg(feature = "inspect")]
+fn downsample_spec(
+    mag_flat: &[f32],
+    n_frames: usize,
+    n_bins: usize,
+    target_w: u32,
+    target_h: u32,
+) -> (Vec<f32>, u32, u32) {
+    let w = target_w.min(n_frames as u32).max(1);
+    let h = target_h.min(n_bins as u32).max(1);
+    let mut out = vec![0.0f32; (w * h) as usize];
+    let xs = n_frames as f64 / w as f64;
+    let ys = n_bins as f64 / h as f64;
+    for x in 0..w {
+        let f0 = (x as f64 * xs).floor() as usize;
+        let f1 = (((x + 1) as f64) * xs).ceil() as usize;
+        let f1 = f1.min(n_frames);
+        for y in 0..h {
+            let b0 = (y as f64 * ys).floor() as usize;
+            let b1 = (((y + 1) as f64) * ys).ceil() as usize;
+            let b1 = b1.min(n_bins);
+            let mut peak = 0.0f32;
+            for f in f0..f1 {
+                let row = &mag_flat[f * n_bins + b0..f * n_bins + b1];
+                for v in row.iter().copied() {
+                    if v > peak {
+                        peak = v;
+                    }
+                }
+            }
+            // Flip y so low frequencies sit at the bottom of the image.
+            let y_img = h - 1 - y;
+            out[(y_img * w + x) as usize] = peak;
+        }
+    }
+    (out, w, h)
+}
+
+/// Encode a magnitude grid as a grayscale base64 PNG. Magnitudes are
+/// log-scaled (dB) and clamped to a fixed dynamic range so faint noise
+/// doesn't wash out loud peaks.
+#[cfg(feature = "inspect")]
+fn encode_spec_png_b64(grid: &[f32], w: u32, h: u32) -> Result<String> {
+    use base64::Engine;
+    use image::{GrayImage, ImageFormat, Luma};
+
+    let max_mag = grid.iter().copied().fold(0.0f32, f32::max).max(1e-9);
+    let mut img = GrayImage::new(w, h);
+    const DB_FLOOR: f32 = -60.0;
+    for (i, &m) in grid.iter().enumerate() {
+        let db = 20.0 * (m.max(1e-9) / max_mag).log10();
+        let norm = ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0);
+        let v = (norm * 255.0) as u8;
+        let x = (i as u32) % w;
+        let y = (i as u32) / w;
+        img.put_pixel(x, y, Luma([v]));
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
+        .map_err(|e| Error::Modality(format!("spectrogram png encode: {e}")))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+}
+
+#[cfg(feature = "inspect")]
+fn hex_lower_audio(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}

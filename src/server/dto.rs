@@ -592,6 +592,23 @@ pub(super) struct InspectImageQuery {
     pub input_id: Option<u64>,
 }
 
+/// Query parameters for `POST /v1/pipeline/inspect/audio/{tenant_id}`.
+/// Only `sample_rate` is mandatory; everything else falls through to the
+/// SDK defaults the regular ingest path uses.
+#[cfg(all(feature = "inspect", feature = "audio"))]
+#[derive(Deserialize, Default)]
+pub(super) struct InspectAudioQuery {
+    /// Sampling rate in Hz of the inbound f32 PCM stream. Reused from
+    /// the cached entry when `input_id` is set and the cached
+    /// `sample_rate` is non-None.
+    #[serde(default)]
+    pub sample_rate: u32,
+    /// Live-tune handle. When supplied, inspect runs against the cached
+    /// bytes for this id instead of the request body.
+    #[serde(default)]
+    pub input_id: Option<u64>,
+}
+
 // ── Watermark detection response ───────────────────────────────────────
 
 /// Response body for `POST /v1/ingest/audio/{tid}/{rid}/watermark`.

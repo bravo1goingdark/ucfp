@@ -2,26 +2,37 @@
   PipelineInspector — surfaces every intermediate stage of the
   fingerprinting pipeline so users can see what each step produced.
 
-  Text: raw → canonicalized → tokens → shingles → final hash.
+  Text:  raw → canonicalized → tokens → shingles → final hash.
   Image: original → 32×32 grayscale → 8×8 grayscale + AHash mean → final hex.
-  Audio: not implemented yet — proxy returns 501.
+  Audio: amplitude envelope → log-magnitude spectrogram → picked peaks
+         → final Wang fingerprint hex.
 
   Triggered explicitly via the "Inspect pipeline" button — never on
   every keystroke or slider tick. Caches the last result client-side.
 -->
 <script lang="ts">
+  import { decodeResampleAudio } from '$lib/utils/audioResample';
+
   type Props = {
     modality: 'text' | 'image' | 'audio';
     /** UTF-8 text body (text modality). */
     text: string;
     /** File handle (image / audio modality). */
     file?: File | null;
+    /** Raw f32 LE samples (audio modality, when uploaded via WebAudio). */
+    audioBytes?: Uint8Array | null;
+    /** Audio sample rate (audio modality, required). */
+    audioSampleRate?: number | null;
     /** Cached input id for live-tune; sent instead of a body when present. */
     inputId?: number | null;
     /** Live tunables forwarded as query params (subset relevant to inspect). */
     opts?: Record<string, unknown>;
   };
-  let { modality, text, file = null, inputId = null, opts = {} }: Props = $props();
+  let {
+    modality, text, file = null,
+    audioBytes = null, audioSampleRate = null,
+    inputId = null, opts = {},
+  }: Props = $props();
 
   type TextStages = {
     kind: 'text';
@@ -49,7 +60,22 @@
     fingerprint_bytes: number;
     config_hash: number;
   };
-  type Stages = TextStages | ImageStages;
+  type AudioPeak = { t_ms: number; freq_hz: number; db: number };
+  type AudioStages = {
+    kind: 'audio';
+    algorithm: string;
+    sample_rate: number;
+    duration_secs: number;
+    envelope: number[];
+    spectrogram_png_b64: string;
+    spec_width: number;
+    spec_height: number;
+    peaks: AudioPeak[];
+    total_peaks: number;
+    fingerprint_hex: string;
+    fingerprint_bytes: number;
+  };
+  type Stages = TextStages | ImageStages | AudioStages;
 
   let result = $state<Stages | null>(null);
   let loading = $state(false);
@@ -62,15 +88,16 @@
     'canon_strip_format','canon_apply_confusable',
   ];
   const IMAGE_OPT_KEYS = ['max_input_bytes','max_dimension','min_dimension'];
+  const AUDIO_OPT_KEYS = ['sample_rate'];
 
   async function run(): Promise<void> {
     if (loading) return;
-    if (modality === 'audio') {
-      errMsg = `Pipeline inspect for audio isn't implemented yet — text and image only.`;
-      return;
-    }
     if (modality === 'image' && !file && inputId == null) {
       errMsg = `Drop an image file first, then click Inspect.`;
+      return;
+    }
+    if (modality === 'audio' && !file && audioBytes == null && inputId == null) {
+      errMsg = `Drop an audio file first, then click Inspect.`;
       return;
     }
     errMsg = null;
@@ -78,20 +105,56 @@
     try {
       const sp = new URLSearchParams({ modality });
       if (inputId != null) sp.set('input_id', String(inputId));
-      const optKeys = modality === 'text' ? TEXT_OPT_KEYS : IMAGE_OPT_KEYS;
+      const optKeys =
+        modality === 'text'  ? TEXT_OPT_KEYS  :
+        modality === 'image' ? IMAGE_OPT_KEYS :
+                               AUDIO_OPT_KEYS;
       for (const k of optKeys) {
         const v = opts[k];
         if (v == null || v === '') continue;
         sp.set(k, String(v));
       }
+
       let body: BodyInit;
       let contentType: string;
       if (modality === 'text') {
         body = inputId != null ? '' : text;
         contentType = 'text/plain; charset=utf-8';
-      } else {
+      } else if (modality === 'image') {
         body = inputId != null ? new ArrayBuffer(0) : await file!.arrayBuffer();
         contentType = 'application/octet-stream';
+      } else {
+        // Audio: prefer caller-supplied bytes; fall back to decoding the
+        // file ourselves through the same WebAudio path the regular
+        // upload uses.
+        contentType = 'application/octet-stream';
+        if (inputId != null) {
+          body = new ArrayBuffer(0);
+          if (audioSampleRate) sp.set('sample_rate', String(audioSampleRate));
+        } else {
+          // Use caller-supplied bytes if present, otherwise decode the
+          // file ourselves through the same WebAudio path the regular
+          // upload uses. Wang is the inspect target → 8 kHz canonical
+          // rate so picked peaks match `inspect_audio`'s view.
+          let samplesLE: Uint8Array;
+          let sr: number;
+          if (audioBytes != null && audioSampleRate) {
+            samplesLE = audioBytes;
+            sr = audioSampleRate;
+          } else {
+            const dec = await decodeResampleAudio(file!, 'wang');
+            samplesLE = dec.samplesLE;
+            sr = dec.sampleRate;
+          }
+          // Copy through ArrayBuffer for the same TS-strict reason as
+          // audioResample.ts — Uint8Array<ArrayBufferLike> doesn't
+          // satisfy the modern BodyInit shape.
+          body = samplesLE.buffer.slice(
+            samplesLE.byteOffset,
+            samplesLE.byteOffset + samplesLE.byteLength,
+          ) as ArrayBuffer;
+          sp.set('sample_rate', String(sr));
+        }
       }
       const res = await fetch(`/api/pipeline/inspect?${sp.toString()}`, {
         method: 'POST',
@@ -111,6 +174,9 @@
       } else if ('original_png_b64' in parsed) {
         result = { kind: 'image', ...(parsed as Omit<ImageStages, 'kind'>) };
         openStage ??= 'gray8';
+      } else if ('spectrogram_png_b64' in parsed) {
+        result = { kind: 'audio', ...(parsed as Omit<AudioStages, 'kind'>) };
+        openStage ??= 'spectrogram';
       }
     } catch (e) {
       errMsg = `Inspect error: ${(e as Error).message}`;
@@ -225,6 +291,92 @@
       {/if}
     </section>
 
+  {:else if result && result.kind === 'audio'}
+    {@const env = result.envelope}
+    {@const envMax = Math.max(0.001, ...env)}
+    {@const envPolyline = env.map((v, i) => `${i},${(50 - (v / envMax) * 48).toFixed(2)}`).join(' ')}
+
+    <section class="stage" class:open={openStage === 'envelope'}>
+      <button type="button" class="stage-head" onclick={() => toggle('envelope')}>
+        <span class="step-num">1</span>
+        <span class="stage-label">Waveform envelope</span>
+        <span class="stage-meta">{result.duration_secs.toFixed(2)} s · {result.sample_rate.toLocaleString()} Hz</span>
+      </button>
+      {#if openStage === 'envelope'}
+        <div class="stage-body">
+          <svg viewBox="0 0 {env.length} 50" preserveAspectRatio="none" class="env-svg" role="img" aria-label="amplitude envelope">
+            <polyline points={envPolyline} class="env-line" />
+            <line x1="0" y1="50" x2={env.length} y2="50" class="env-axis" />
+          </svg>
+          <p class="caption">Max-abs sample magnitude per bucket — a quick read on overall loudness shape.</p>
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'spectrogram'}>
+      <button type="button" class="stage-head" onclick={() => toggle('spectrogram')}>
+        <span class="step-num">2</span>
+        <span class="stage-label">Log-magnitude spectrogram</span>
+        <span class="stage-meta">{result.spec_width} frames × {result.spec_height} bins</span>
+      </button>
+      {#if openStage === 'spectrogram'}
+        <div class="stage-body img-stage">
+          <img class="spec-img" src="data:image/png;base64,{result.spectrogram_png_b64}" alt="log-magnitude spectrogram" />
+          <p class="caption">STFT magnitudes in dB (-60 floor → 0 max). Brighter = louder; vertical axis is frequency, low frequencies at the bottom.</p>
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'peaks'}>
+      <button type="button" class="stage-head" onclick={() => toggle('peaks')}>
+        <span class="step-num">3</span>
+        <span class="stage-label">Picked peaks</span>
+        <span class="stage-meta">
+          {result.peaks.length} of {result.total_peaks}
+          {result.peaks.length < result.total_peaks ? '(truncated)' : ''}
+        </span>
+      </button>
+      {#if openStage === 'peaks'}
+        <div class="stage-body">
+          {#if result.peaks.length === 0}
+            <p class="caption">No peaks above the magnitude floor — input may be silent or below the noise threshold.</p>
+          {:else}
+            {@const tMax = Math.max(1, ...result.peaks.map(p => p.t_ms))}
+            {@const fMax = Math.max(1, ...result.peaks.map(p => p.freq_hz))}
+            <svg viewBox="0 0 {result.spec_width} {result.spec_height}" preserveAspectRatio="none" class="peaks-svg" role="img" aria-label="picked peaks">
+              {#each result.peaks as p, i (i)}
+                <circle
+                  cx={(p.t_ms / tMax) * result.spec_width}
+                  cy={result.spec_height - (p.freq_hz / fMax) * result.spec_height}
+                  r="1.2"
+                  class="peak-dot" />
+              {/each}
+            </svg>
+            <p class="caption">Each dot is a (time, frequency) landmark Wang pairs into hashes. The first 256 are shown.</p>
+          {/if}
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'fingerprint'}>
+      <button type="button" class="stage-head" onclick={() => toggle('fingerprint')}>
+        <span class="step-num">4</span>
+        <span class="stage-label">Fingerprint</span>
+        <span class="stage-meta">
+          {result.algorithm} · {result.fingerprint_bytes} bytes
+        </span>
+      </button>
+      {#if openStage === 'fingerprint'}
+        <div class="stage-body">
+          {#if result.fingerprint_bytes === 0}
+            <p class="caption">Wang produced no hashes — typical when the clip is below ~2 s or has no spectral peaks.</p>
+          {:else}
+            <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
+          {/if}
+        </div>
+      {/if}
+    </section>
+
   {:else if result && result.kind === 'text'}
     {@const spans = diffSpans(result.raw, result.canonicalized)}
     {@const changedCount = spans.filter(s => s.changed).reduce((a, s) => a + s.text.length, 0)}
@@ -309,7 +461,8 @@
         Click <strong>Inspect pipeline</strong> to see each stage —
         original → 32×32 grayscale → 8×8 grayscale (AHash input) → final hash.
       {:else}
-        <em>Pipeline inspect for audio isn't implemented yet.</em>
+        Click <strong>Inspect pipeline</strong> to see each stage —
+        waveform envelope → log-magnitude spectrogram → picked peaks → final hash.
       {/if}
     </p>
   {/if}
@@ -440,5 +593,45 @@
     opacity: 0.7;
     line-height: 1.4;
     max-width: 480px;
+  }
+  /* Audio-stage rendering. */
+  .env-svg {
+    width: 100%;
+    height: 50px;
+    background: var(--bg, rgba(0,0,0,0.25));
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+  }
+  .env-line {
+    fill: none;
+    stroke: oklch(0.7 0.15 150);
+    stroke-width: 0.6;
+    vector-effect: non-scaling-stroke;
+  }
+  .env-axis {
+    stroke: var(--ink-2, rgba(255,255,255,0.15));
+    stroke-width: 0.4;
+    vector-effect: non-scaling-stroke;
+  }
+  .spec-img {
+    image-rendering: pixelated;
+    width: 100%;
+    max-width: 512px;
+    height: 192px;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    background: var(--bg, #000);
+  }
+  .peaks-svg {
+    width: 100%;
+    max-width: 512px;
+    height: 192px;
+    background: var(--bg, rgba(0,0,0,0.4));
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+  }
+  .peak-dot {
+    fill: oklch(0.8 0.18 90);
+    opacity: 0.85;
   }
 </style>
