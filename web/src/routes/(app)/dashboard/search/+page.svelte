@@ -378,7 +378,9 @@
   .srch-handoff { margin: 0; padding: 0.4rem 0.6rem; background: color-mix(in oklch, var(--accent-ink) 12%, var(--bg)); border-left: 3px solid var(--accent-ink); font-family: var(--mono); font-size: 0.78rem; color: var(--ink); }
 
   .srch-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1; min-width: 160px; }
+  /* See records/+page.svelte for rationale — flex-basis instead of
+     min-width so the control shrinks below 160 px on phones. */
+  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 160px; min-width: 0; }
   .ctrl input, .ctrl select, .ctrl textarea {
     font-family: var(--mono); font-size: 0.78rem;
     padding: 5px 8px; border: 1px solid var(--ink);

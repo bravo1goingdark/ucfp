@@ -23,6 +23,21 @@
 *::after { box-sizing: border-box; }
 
 html, body { margin: 0; padding: 0; }
+/* Defensive global guard against rogue horizontal overflow on phones.
+   `overflow-x: clip` (modern) acts like `hidden` for layout purposes
+   but still allows `position: sticky` on descendants to work; older
+   browsers fall back to the second declaration. */
+html, body { overflow-x: clip; }
+@supports not (overflow-x: clip) { html, body { overflow-x: hidden; } }
+/* Long hex / token strings shouldn't punch the viewport wider than
+   the screen — make every monospaced run wrap if its parent can't
+   give it room. Targets the explicit utility classes we use; bare
+   `pre`/`code` keeps default behavior so docs code samples stay
+   horizontally scrollable when intentional. */
+.mono, .hex-str, .fp-hex { overflow-wrap: anywhere; word-break: break-word; }
+/* Visualisation thumbnails (image inspector + spectrogram) shouldn't
+   ever exceed their column width on a phone. */
+img, svg { max-width: 100%; height: auto; }
 
 body {
   background: var(--bg);

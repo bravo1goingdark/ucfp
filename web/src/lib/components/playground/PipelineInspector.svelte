@@ -585,8 +585,10 @@
     border-radius: 0.3rem;
     border: 1px solid var(--border, rgba(255,255,255,0.1));
   }
-  .img-32 { width: 192px; height: 192px; }
-  .img-8  { width: 192px; height: 192px; }
+  /* `aspect-ratio` keeps the pixel-stage image square at any width;
+     `width: min(192px, 100%)` lets it shrink below 192 px on phones
+     instead of forcing the inspector card past the viewport. */
+  .img-32, .img-8 { width: min(192px, 100%); aspect-ratio: 1 / 1; height: auto; }
   .caption {
     margin: 0;
     font-size: 0.74rem;

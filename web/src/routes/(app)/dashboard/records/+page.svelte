@@ -240,8 +240,11 @@
     padding: 0.75rem; background: var(--bg-2);
     border: 1px solid var(--ink); border-radius: 6px;
   }
-  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); min-width: 140px; }
-  .ctrl.grow { flex: 1; min-width: 200px; }
+  /* `flex-basis` over `min-width` so each control still prefers ~140 px
+     but can shrink below that when the row wraps onto a phone-narrow
+     line — without this the row punches the dash column past 320 px. */
+  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 140px; min-width: 0; }
+  .ctrl.grow { flex: 2 1 200px; }
   .ctrl input, .ctrl select {
     font-family: var(--mono); font-size: 0.78rem;
     padding: 5px 8px; border: 1px solid var(--ink);
