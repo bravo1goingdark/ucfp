@@ -89,7 +89,10 @@ body::before {
   z-index: 1;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 28px 40px 80px;
+  /* Side padding scales from 14 px on tiny phones up to 40 px on
+     wide viewports — keeps content from kissing the edges on mobile
+     without adding bespoke media queries. */
+  padding: clamp(16px, 2vw, 28px) clamp(14px, 3vw, 40px) clamp(48px, 6vw, 80px);
 }
 
 /* -------- nav -------- */
@@ -1145,7 +1148,7 @@ section.final-cta {
   flex-direction: column;
   max-width: 1320px;
   margin: 0 auto;
-  padding: 20px 32px 60px;
+  padding: clamp(14px, 2vw, 20px) clamp(14px, 3vw, 32px) clamp(40px, 6vw, 60px);
 }
 .dash-top {
   display: grid;
@@ -1653,13 +1656,32 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
   .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 820px) {
-  .dashboard-shell { padding: 16px 20px 56px; }
   .dash-body { grid-template-columns: 1fr; gap: 16px; }
-  .sidebar { position: static; }
-  .sidebar ul { flex-direction: row; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-  .sidebar a { border-left: 0; border-bottom: 2px solid transparent; padding: 8px 10px; }
-  .sidebar a.active { border-left: 0; border-bottom-color: var(--accent-ink); }
-  .dash-top { grid-template-columns: 1fr; gap: 12px; }
+  /* The sidebar is now a slide-in drawer (see (app)/+layout.svelte);
+     keep the legacy horizontal-scrunch styles only for sidebars NOT
+     inside `.dash-nav-drawer` (e.g. ad-hoc usages). */
+  .dash-body > .sidebar { position: static; }
+  .dash-body > .sidebar ul { flex-direction: row; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+  .dash-body > .sidebar a { border-left: 0; border-bottom: 2px solid transparent; padding: 8px 10px; }
+  .dash-body > .sidebar a.active { border-left: 0; border-bottom-color: var(--accent-ink); }
+  .dash-top {
+    grid-template-columns: auto 1fr auto;
+    gap: 10px;
+    align-items: center;
+  }
   .dash-top-right { justify-content: flex-end; }
   .dash-grid { grid-template-columns: 1fr; }
+  .user-chip { display: none; }
 }
+@media (max-width: 520px) {
+  .dash-top { grid-template-columns: auto auto 1fr; gap: 8px; }
+  .breadcrumb { display: none; }
+  .logout-btn { padding: 6px 10px; font-size: 11px; }
+  /* Tighter table cells on small phones — caller still scrolls
+     horizontally when columns overflow. */
+  table.data { font-size: 12.5px; }
+  table.data thead th, table.data tbody td { padding: 8px 10px; }
+}
+/* The data-scroll wrapper must not push its grid parent wider than
+   the viewport — `min-width: 0` lets the column actually shrink. */
+.dash-main, .dash-section { min-width: 0; }
