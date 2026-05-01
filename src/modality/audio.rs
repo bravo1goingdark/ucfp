@@ -492,24 +492,58 @@ pub struct InspectAudioResult {
     /// Downsampled amplitude envelope: 256 buckets of max-abs sample
     /// magnitude per bucket. Renders as a tiny waveform strip.
     pub envelope: Vec<f32>,
-    /// Log-magnitude spectrogram as a base64 PNG (grayscale, low end =
-    /// dark, high end = bright). Width = downsampled time frames,
-    /// height = downsampled frequency bins. The UI scales this with
-    /// `image-rendering: pixelated`.
+    /// Linear-frequency log-magnitude spectrogram as a base64 PNG
+    /// (viridis colormap, low end = dark purple, high end = yellow).
+    /// Width = downsampled time frames, height = downsampled freq bins.
     pub spectrogram_png_b64: String,
-    /// Width of the spectrogram PNG in pixels (= number of time frames).
+    /// Width of the linear spectrogram PNG (= number of time frames).
     pub spec_width: u32,
-    /// Height of the spectrogram PNG in pixels (= number of freq bins).
+    /// Height of the linear spectrogram PNG (= number of freq bins).
     pub spec_height: u32,
+    /// Mel-scaled log-power spectrogram as a viridis-coloured PNG.
+    /// Mel is closer to perceptual loudness — low frequencies get more
+    /// detail, high frequencies are compressed. Same time axis as the
+    /// linear spectrogram so the UI can stack them.
+    pub mel_spec_png_b64: String,
+    /// Width of the mel spectrogram PNG.
+    pub mel_spec_width: u32,
+    /// Height of the mel spectrogram PNG (= mel band count).
+    pub mel_spec_height: u32,
+    /// Lower frequency edge of the mel filterbank (Hz).
+    pub mel_fmin_hz: f32,
+    /// Upper frequency edge of the mel filterbank (Hz).
+    pub mel_fmax_hz: f32,
     /// First N peaks the picker emitted, as `(t_ms, freq_hz, db)`
     /// triples. Capped to keep payloads small.
     pub peaks: Vec<InspectAudioPeak>,
     /// Total number of peaks the picker emitted.
     pub total_peaks: usize,
+    /// Wang anchor → target landmark pairs (the actual fingerprint
+    /// inputs). Each pair is the line the UI draws between two peaks
+    /// to visualise WHY a hash was emitted.
+    pub landmark_pairs: Vec<InspectAudioLandmark>,
+    /// Total number of landmark pairs emitted (uncapped count).
+    pub total_landmarks: usize,
     /// Final Wang fingerprint as hex.
     pub fingerprint_hex: String,
     /// Length of the underlying fingerprint in bytes.
     pub fingerprint_bytes: usize,
+}
+
+/// One Wang landmark pair — anchor → target peak coordinates in real
+/// (ms, Hz) units. The UI draws these as faint lines on top of the
+/// spectrogram to make the pairing rule visible.
+#[cfg(feature = "inspect")]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct InspectAudioLandmark {
+    /// Anchor peak time (ms from start).
+    pub t1_ms: f32,
+    /// Anchor peak frequency (Hz).
+    pub f1_hz: f32,
+    /// Target peak time (ms from start).
+    pub t2_ms: f32,
+    /// Target peak frequency (Hz).
+    pub f2_hz: f32,
 }
 
 /// One peak surfaced by the audio inspector — picked landmarks from
@@ -535,10 +569,11 @@ pub struct InspectAudioPeak {
 /// hex round-trip a normal ingest.
 #[cfg(feature = "inspect")]
 pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioResult> {
+    use audiofp::classical::WangConfig;
+    use audiofp::dsp::mel::{MelFilterBank, MelScale};
     use audiofp::dsp::peaks::{PeakPicker, PeakPickerConfig};
     use audiofp::dsp::stft::{ShortTimeFFT, StftConfig};
     use audiofp::dsp::windows::WindowKind;
-    use base64::Engine;
 
     if samples.is_empty() {
         return Err(Error::Modality("audio inspect: empty sample buffer".into()));
@@ -548,9 +583,8 @@ pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioRe
     // Stage 1 — amplitude envelope (256 buckets).
     let envelope = downsample_envelope(samples, 256);
 
-    // Stage 2 — STFT magnitudes. n_fft=1024 / hop=256 gives ~31.25 ms /
-    // 8 ms cadence at 8 kHz; downsample the 513-bin x N-frame grid to
-    // a UI-friendly target.
+    // Stage 2a — STFT magnitudes. n_fft=1024 / hop=256 gives ~31.25 ms /
+    // 8 ms cadence at 8 kHz.
     let n_fft = 1024usize;
     let hop = 256usize;
     let mut stft = ShortTimeFFT::new(StftConfig {
@@ -561,15 +595,34 @@ pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioRe
     });
     let (mag_flat, n_frames, n_bins) = stft.magnitude_flat(samples);
 
-    let target_w = 256u32; // time frames
-    let target_h = 96u32; //  freq bins
-    let (spec_grid, spec_w, spec_h) =
-        downsample_spec(&mag_flat, n_frames, n_bins, target_w, target_h);
-    let spec_png = encode_spec_png_b64(&spec_grid, spec_w, spec_h)?;
+    // Linear-frequency spectrogram (viridis). 96 bins is enough vertical
+    // resolution to pick out peaks without making the PNG huge.
+    let (lin_grid, lin_w, lin_h) = downsample_spec(&mag_flat, n_frames, n_bins, 256, 96);
+    let lin_spec_png = encode_spec_png_b64_viridis(&lin_grid, lin_w, lin_h)?;
 
-    // Stage 3 — pick peaks on the *full-resolution* magnitude grid so
-    // the (t_ms, freq_hz) coordinates match what Wang sees, then cap
-    // the list for transport.
+    // Stage 2b — Mel-scaled spectrogram. Mel-spaced bins compress the
+    // upper frequencies and expand the low end where most spectral
+    // structure (formants, harmonics, drums) actually lives.
+    let mel_n = 64usize;
+    let mel_fmin = 0.0f32;
+    let mel_fmax = (sample_rate as f32) / 2.0;
+    let bank = MelFilterBank::new(
+        mel_n,
+        n_fft,
+        sample_rate,
+        mel_fmin,
+        mel_fmax,
+        MelScale::Slaney,
+    );
+    let mel_grid_full = compute_mel_grid(&bank, &mag_flat, n_frames, n_bins, mel_n);
+    // Already mel-scaled vertically; just downsample the time axis to
+    // keep the PNG narrow. Skip the bin axis (mel_n is already 64).
+    let target_w_mel = 256u32.min(n_frames as u32).max(1);
+    let mel_grid = downsample_time_only(&mel_grid_full, n_frames, mel_n, target_w_mel);
+    let mel_spec_png = encode_spec_png_b64_viridis(&mel_grid, target_w_mel, mel_n as u32)?;
+
+    // Stage 3 — pick peaks on the *full-resolution* linear magnitude
+    // grid so the (t_ms, freq_hz) coordinates match what Wang sees.
     let frames_per_sec = sample_rate as f32 / hop as f32;
     let mut picker = PeakPicker::new(PeakPickerConfig::default());
     let raw_peaks = picker.pick(&mag_flat, n_frames, n_bins, frames_per_sec);
@@ -590,26 +643,38 @@ pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioRe
         })
         .collect();
 
+    // Stage 3b — Wang landmark pairs. Re-runs Wang's pairing rule on
+    // the picked peaks so the UI can draw anchor → target lines on
+    // the spectrogram, making the "why was this hashed?" visible.
+    let cfg = WangConfig::default();
+    let landmark_pairs = compute_landmark_pairs(&raw_peaks, &cfg, frame_ms, bin_hz, 256);
+    let total_landmarks = count_total_landmark_pairs(&raw_peaks, &cfg);
+
     // Stage 4 — final Wang fingerprint via the regular pipeline. Soft
     // fail so short clips that don't satisfy Wang's `min_samples` still
-    // get the envelope / spectrogram / peaks panes; the fingerprint
-    // stage just shows empty bytes.
+    // get the envelope / spectrogram / peaks / landmarks panes.
     let (fingerprint_hex, fingerprint_bytes) = match fingerprint_wang(samples, sample_rate, 0, 0) {
         Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len()),
         Err(_) => (String::new(), 0),
     };
 
-    let _ = base64::engine::general_purpose::STANDARD.encode(b""); // touch the trait import
     Ok(InspectAudioResult {
         algorithm: ALGORITHM_WANG,
         sample_rate,
         duration_secs,
         envelope,
-        spectrogram_png_b64: spec_png,
-        spec_width: spec_w,
-        spec_height: spec_h,
+        spectrogram_png_b64: lin_spec_png,
+        spec_width: lin_w,
+        spec_height: lin_h,
+        mel_spec_png_b64: mel_spec_png,
+        mel_spec_width: target_w_mel,
+        mel_spec_height: mel_n as u32,
+        mel_fmin_hz: mel_fmin,
+        mel_fmax_hz: mel_fmax,
         peaks,
         total_peaks,
+        landmark_pairs,
+        total_landmarks,
         fingerprint_hex,
         fingerprint_bytes,
     })
@@ -678,29 +743,213 @@ fn downsample_spec(
     (out, w, h)
 }
 
-/// Encode a magnitude grid as a grayscale base64 PNG. Magnitudes are
-/// log-scaled (dB) and clamped to a fixed dynamic range so faint noise
-/// doesn't wash out loud peaks.
+/// Encode a magnitude grid as a viridis-coloured base64 PNG.
+///
+/// Magnitudes are log-scaled (dB) against the grid's own peak and
+/// clamped to a -60 dB floor so background noise doesn't wash the
+/// foreground out. Each cell maps through the [`viridis`] palette so
+/// quiet bins land on dark purple, loud bins on bright yellow — a
+/// far more legible spectrogram than the previous grayscale.
 #[cfg(feature = "inspect")]
-fn encode_spec_png_b64(grid: &[f32], w: u32, h: u32) -> Result<String> {
+fn encode_spec_png_b64_viridis(grid: &[f32], w: u32, h: u32) -> Result<String> {
     use base64::Engine;
-    use image::{GrayImage, ImageFormat, Luma};
+    use image::{ImageFormat, Rgb, RgbImage};
 
     let max_mag = grid.iter().copied().fold(0.0f32, f32::max).max(1e-9);
-    let mut img = GrayImage::new(w, h);
+    let mut img = RgbImage::new(w, h);
     const DB_FLOOR: f32 = -60.0;
     for (i, &m) in grid.iter().enumerate() {
         let db = 20.0 * (m.max(1e-9) / max_mag).log10();
-        let norm = ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0);
-        let v = (norm * 255.0) as u8;
+        let t = ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0);
+        let [r, g, b] = viridis(t);
         let x = (i as u32) % w;
         let y = (i as u32) / w;
-        img.put_pixel(x, y, Luma([v]));
+        img.put_pixel(x, y, Rgb([r, g, b]));
     }
     let mut buf: Vec<u8> = Vec::new();
     img.write_to(&mut std::io::Cursor::new(&mut buf), ImageFormat::Png)
         .map_err(|e| Error::Modality(format!("spectrogram png encode: {e}")))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+}
+
+/// 9-stop viridis approximation. Linearly interpolated; at this
+/// resolution the result is visually indistinguishable from matplotlib's
+/// 256-stop table for spectrogram rendering and ships in ~80 bytes
+/// of static data instead of 768.
+#[cfg(feature = "inspect")]
+fn viridis(t: f32) -> [u8; 3] {
+    const STOPS: [[u8; 3]; 9] = [
+        [68, 1, 84],    // 0.000  dark purple
+        [72, 35, 116],  // 0.125
+        [64, 67, 135],  // 0.250
+        [52, 94, 141],  // 0.375
+        [41, 121, 142], // 0.500
+        [32, 144, 140], // 0.625
+        [34, 167, 132], // 0.750
+        [121, 209, 81], // 0.875
+        [253, 231, 37], // 1.000  yellow
+    ];
+    let t = t.clamp(0.0, 1.0);
+    let scaled = t * (STOPS.len() - 1) as f32;
+    let lo = scaled.floor() as usize;
+    let hi = (lo + 1).min(STOPS.len() - 1);
+    let f = scaled - lo as f32;
+    let lerp = |a: u8, b: u8| -> u8 {
+        let av = a as f32;
+        let bv = b as f32;
+        ((av + (bv - av) * f).round() as u32).min(255) as u8
+    };
+    [
+        lerp(STOPS[lo][0], STOPS[hi][0]),
+        lerp(STOPS[lo][1], STOPS[hi][1]),
+        lerp(STOPS[lo][2], STOPS[hi][2]),
+    ]
+}
+
+/// Apply the mel filterbank to every STFT magnitude frame and return a
+/// row-major `(n_frames × n_mels)` log-mel grid, with low frequencies
+/// at the bottom of the image (y is flipped from the natural index
+/// order so the rendering matches the linear spectrogram convention).
+#[cfg(feature = "inspect")]
+fn compute_mel_grid(
+    bank: &audiofp::dsp::mel::MelFilterBank,
+    mag_flat: &[f32],
+    n_frames: usize,
+    n_bins: usize,
+    n_mels: usize,
+) -> Vec<f32> {
+    let mut out = vec![0.0_f32; n_frames * n_mels];
+    let mut frame_out = vec![0.0_f32; n_mels];
+    for f in 0..n_frames {
+        let mag = &mag_flat[f * n_bins..(f + 1) * n_bins];
+        bank.log_mel(mag, &mut frame_out);
+        // The grid is laid out time-first (one frame per row) — flip y
+        // so the encode loop renders low-frequency at the bottom.
+        for (k, v) in frame_out.iter().enumerate() {
+            let y = n_mels - 1 - k;
+            // log_mel returns log10(power); pull back to a magnitude-like
+            // scale so the encode_spec_png_b64_viridis dB math (which
+            // expects raw magnitudes) sees comparable numbers.
+            out[f * n_mels + y] = 10.0_f32.powf(*v / 2.0);
+        }
+    }
+    // Transpose to (height, width) layout the encoder expects:
+    // it indexes as `out[y * w + x]`, so we need rows = mel band,
+    // cols = time frame.
+    let mut transposed = vec![0.0_f32; n_frames * n_mels];
+    for f in 0..n_frames {
+        for k in 0..n_mels {
+            transposed[k * n_frames + f] = out[f * n_mels + k];
+        }
+    }
+    transposed
+}
+
+/// Downsample only the time axis of a `(height × n_frames)` grid to
+/// `(height × target_w)` via max-pool. Used when the height is already
+/// the desired resolution (e.g. mel bands are picked up-front).
+#[cfg(feature = "inspect")]
+fn downsample_time_only(grid: &[f32], n_frames: usize, height: usize, target_w: u32) -> Vec<f32> {
+    let w = (target_w as usize).min(n_frames).max(1);
+    let mut out = vec![0.0_f32; w * height];
+    let xs = n_frames as f64 / w as f64;
+    for x in 0..w {
+        let f0 = (x as f64 * xs).floor() as usize;
+        let f1 = (((x + 1) as f64) * xs).ceil() as usize;
+        let f1 = f1.min(n_frames);
+        for y in 0..height {
+            let mut peak = 0.0f32;
+            for f in f0..f1 {
+                let v = grid[y * n_frames + f];
+                if v > peak {
+                    peak = v;
+                }
+            }
+            out[y * w + x] = peak;
+        }
+    }
+    out
+}
+
+/// Re-run Wang's anchor → target pairing rule on the picked peaks so
+/// the UI can draw the actual hash inputs (not just standalone dots).
+///
+/// For each anchor peak: look forward in time within the configured
+/// target zone (`Δt ≤ target_zone_t`, `|Δf| ≤ target_zone_f`) and
+/// take up to `fan_out` neighbouring peaks. Each (anchor, target)
+/// becomes one Wang hash — and one line on the inspector image.
+#[cfg(feature = "inspect")]
+fn compute_landmark_pairs(
+    peaks: &[audiofp::dsp::peaks::Peak],
+    cfg: &audiofp::classical::WangConfig,
+    frame_ms: f32,
+    bin_hz: f32,
+    cap: usize,
+) -> Vec<InspectAudioLandmark> {
+    let mut out: Vec<InspectAudioLandmark> = Vec::with_capacity(cap);
+    for (i, anchor) in peaks.iter().enumerate() {
+        let mut taken = 0usize;
+        for target in &peaks[i + 1..] {
+            if out.len() >= cap {
+                return out;
+            }
+            let dt = target.t_frame as i32 - anchor.t_frame as i32;
+            if dt <= 0 {
+                continue;
+            }
+            if dt > cfg.target_zone_t as i32 {
+                break; // peaks are time-sorted; no later peak fits
+            }
+            let df = (target.f_bin as i32 - anchor.f_bin as i32).abs();
+            if df > cfg.target_zone_f as i32 {
+                continue;
+            }
+            out.push(InspectAudioLandmark {
+                t1_ms: anchor.t_frame as f32 * frame_ms,
+                f1_hz: anchor.f_bin as f32 * bin_hz,
+                t2_ms: target.t_frame as f32 * frame_ms,
+                f2_hz: target.f_bin as f32 * bin_hz,
+            });
+            taken += 1;
+            if taken >= cfg.fan_out as usize {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Total number of landmark pairs Wang would emit for this peak set —
+/// surfaced separately so the UI can show "showing 256 of N" when
+/// `compute_landmark_pairs` capped the result.
+#[cfg(feature = "inspect")]
+fn count_total_landmark_pairs(
+    peaks: &[audiofp::dsp::peaks::Peak],
+    cfg: &audiofp::classical::WangConfig,
+) -> usize {
+    let mut total = 0usize;
+    for (i, anchor) in peaks.iter().enumerate() {
+        let mut taken = 0usize;
+        for target in &peaks[i + 1..] {
+            let dt = target.t_frame as i32 - anchor.t_frame as i32;
+            if dt <= 0 {
+                continue;
+            }
+            if dt > cfg.target_zone_t as i32 {
+                break;
+            }
+            let df = (target.f_bin as i32 - anchor.f_bin as i32).abs();
+            if df > cfg.target_zone_f as i32 {
+                continue;
+            }
+            taken += 1;
+            total += 1;
+            if taken >= cfg.fan_out as usize {
+                break;
+            }
+        }
+    }
+    total
 }
 
 #[cfg(feature = "inspect")]

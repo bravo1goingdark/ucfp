@@ -61,6 +61,7 @@
     config_hash: number;
   };
   type AudioPeak = { t_ms: number; freq_hz: number; db: number };
+  type AudioLandmark = { t1_ms: number; f1_hz: number; t2_ms: number; f2_hz: number };
   type AudioStages = {
     kind: 'audio';
     algorithm: string;
@@ -70,8 +71,15 @@
     spectrogram_png_b64: string;
     spec_width: number;
     spec_height: number;
+    mel_spec_png_b64: string;
+    mel_spec_width: number;
+    mel_spec_height: number;
+    mel_fmin_hz: number;
+    mel_fmax_hz: number;
     peaks: AudioPeak[];
     total_peaks: number;
+    landmark_pairs: AudioLandmark[];
+    total_landmarks: number;
     fingerprint_hex: string;
     fingerprint_bytes: number;
   };
@@ -316,44 +324,62 @@
     <section class="stage" class:open={openStage === 'spectrogram'}>
       <button type="button" class="stage-head" onclick={() => toggle('spectrogram')}>
         <span class="step-num">2</span>
-        <span class="stage-label">Log-magnitude spectrogram</span>
-        <span class="stage-meta">{result.spec_width} frames × {result.spec_height} bins</span>
-      </button>
-      {#if openStage === 'spectrogram'}
-        <div class="stage-body img-stage">
-          <img class="spec-img" src="data:image/png;base64,{result.spectrogram_png_b64}" alt="log-magnitude spectrogram" />
-          <p class="caption">STFT magnitudes in dB (-60 floor → 0 max). Brighter = louder; vertical axis is frequency, low frequencies at the bottom.</p>
-        </div>
-      {/if}
-    </section>
-
-    <section class="stage" class:open={openStage === 'peaks'}>
-      <button type="button" class="stage-head" onclick={() => toggle('peaks')}>
-        <span class="step-num">3</span>
-        <span class="stage-label">Picked peaks</span>
+        <span class="stage-label">Linear spectrogram + landmarks</span>
         <span class="stage-meta">
-          {result.peaks.length} of {result.total_peaks}
-          {result.peaks.length < result.total_peaks ? '(truncated)' : ''}
+          {result.spec_width}×{result.spec_height} ·
+          {result.peaks.length}/{result.total_peaks} peaks ·
+          {result.landmark_pairs.length}/{result.total_landmarks} pairs
         </span>
       </button>
-      {#if openStage === 'peaks'}
+      {#if openStage === 'spectrogram'}
+        {@const fMaxHz = result.sample_rate / 2}
+        {@const tMaxMs = result.duration_secs * 1000}
         <div class="stage-body">
-          {#if result.peaks.length === 0}
-            <p class="caption">No peaks above the magnitude floor — input may be silent or below the noise threshold.</p>
-          {:else}
-            {@const tMax = Math.max(1, ...result.peaks.map(p => p.t_ms))}
-            {@const fMax = Math.max(1, ...result.peaks.map(p => p.freq_hz))}
-            <svg viewBox="0 0 {result.spec_width} {result.spec_height}" preserveAspectRatio="none" class="peaks-svg" role="img" aria-label="picked peaks">
+          <div class="spec-stack" style="aspect-ratio: {result.spec_width} / {result.spec_height}">
+            <img class="spec-layer" src="data:image/png;base64,{result.spectrogram_png_b64}" alt="linear-frequency log-magnitude spectrogram" />
+            <svg class="spec-layer" viewBox="0 0 {result.spec_width} {result.spec_height}" preserveAspectRatio="none" aria-hidden="true">
+              <!-- Wang anchor → target lines: drawn first so peaks dots
+                   sit on top of them. Faint amber so they don't overpower
+                   the spectrogram colour. -->
+              {#each result.landmark_pairs as l, i (i)}
+                <line
+                  x1={(l.t1_ms / tMaxMs) * result.spec_width}
+                  y1={result.spec_height - (l.f1_hz / fMaxHz) * result.spec_height}
+                  x2={(l.t2_ms / tMaxMs) * result.spec_width}
+                  y2={result.spec_height - (l.f2_hz / fMaxHz) * result.spec_height}
+                  class="landmark-line" />
+              {/each}
               {#each result.peaks as p, i (i)}
                 <circle
-                  cx={(p.t_ms / tMax) * result.spec_width}
-                  cy={result.spec_height - (p.freq_hz / fMax) * result.spec_height}
+                  cx={(p.t_ms / tMaxMs) * result.spec_width}
+                  cy={result.spec_height - (p.freq_hz / fMaxHz) * result.spec_height}
                   r="1.2"
                   class="peak-dot" />
               {/each}
             </svg>
-            <p class="caption">Each dot is a (time, frequency) landmark Wang pairs into hashes. The first 256 are shown.</p>
-          {/if}
+          </div>
+          <div class="legend">
+            <span class="lg lg-spec">log-magnitude (-60 → 0 dB, viridis)</span>
+            <span class="lg lg-peak">picked peaks</span>
+            <span class="lg lg-line">Wang pair lines (anchor → target)</span>
+          </div>
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'mel'}>
+      <button type="button" class="stage-head" onclick={() => toggle('mel')}>
+        <span class="step-num">3</span>
+        <span class="stage-label">Mel spectrogram</span>
+        <span class="stage-meta">
+          {result.mel_spec_width}×{result.mel_spec_height} mel ·
+          {Math.round(result.mel_fmin_hz)}–{Math.round(result.mel_fmax_hz)} Hz
+        </span>
+      </button>
+      {#if openStage === 'mel'}
+        <div class="stage-body">
+          <img class="spec-layer mel-img" src="data:image/png;base64,{result.mel_spec_png_b64}" alt="mel-scale log-power spectrogram" style="aspect-ratio: {result.mel_spec_width} / {result.mel_spec_height}" />
+          <p class="caption">Same audio reweighted onto a mel scale — low frequencies (where most spectral structure lives) get more vertical resolution; the upper octaves are compressed. Useful for spotting timbre, voicing, and percussion that the linear view smears.</p>
         </div>
       {/if}
     </section>
@@ -372,6 +398,7 @@
             <p class="caption">Wang produced no hashes — typical when the clip is below ~2 s or has no spectral peaks.</p>
           {:else}
             <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
+            <p class="caption">Each Wang hash packs (anchor freq, target freq, Δt) into a 32-bit int — every line you saw on the spectrogram contributes one hash.</p>
           {/if}
         </div>
       {/if}
@@ -462,7 +489,8 @@
         original → 32×32 grayscale → 8×8 grayscale (AHash input) → final hash.
       {:else}
         Click <strong>Inspect pipeline</strong> to see each stage —
-        waveform envelope → log-magnitude spectrogram → picked peaks → final hash.
+        waveform envelope → linear spectrogram (with Wang peaks &amp; pair lines overlaid)
+        → mel spectrogram → final hash.
       {/if}
     </p>
   {/if}
@@ -615,25 +643,73 @@
     stroke-width: 0.4;
     vector-effect: non-scaling-stroke;
   }
-  .spec-img {
-    image-rendering: pixelated;
+  /* Layered spectrogram + overlay. The PNG goes in as the bottom
+     layer (image-rendering: pixelated keeps the per-cell colour
+     crisp); the SVG covers the same area absolute-positioned and
+     hosts the peak dots + landmark pair lines. The wrapper carries
+     the aspect ratio inline (set per-render from the actual PNG dims)
+     so the overlay scales 1:1 with the background. */
+  .spec-stack {
+    position: relative;
     width: 100%;
-    max-width: 512px;
-    height: 192px;
+    max-width: 560px;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    background: var(--bg, #000);
+    overflow: hidden;
+  }
+  .spec-layer {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .spec-stack .spec-layer:first-child {
+    image-rendering: pixelated;
+  }
+  .mel-img {
+    position: relative;
+    width: 100%;
+    max-width: 560px;
+    image-rendering: pixelated;
     border-radius: 0.3rem;
     border: 1px solid var(--border, rgba(255,255,255,0.1));
     background: var(--bg, #000);
   }
-  .peaks-svg {
-    width: 100%;
-    max-width: 512px;
-    height: 192px;
-    background: var(--bg, rgba(0,0,0,0.4));
-    border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.1));
-  }
   .peak-dot {
-    fill: oklch(0.8 0.18 90);
-    opacity: 0.85;
+    fill: oklch(0.95 0.13 95);
+    opacity: 0.92;
   }
+  .landmark-line {
+    stroke: oklch(0.85 0.16 50);
+    stroke-width: 0.4;
+    opacity: 0.55;
+    vector-effect: non-scaling-stroke;
+  }
+  /* Tiny legend below the spectrogram showing which colour means what. */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: var(--ink-2, #888);
+  }
+  .lg {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .lg::before {
+    content: '';
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 2px;
+    background: oklch(0.5 0.18 250);
+  }
+  .lg-spec::before { background: linear-gradient(90deg, oklch(0.25 0.15 290), oklch(0.55 0.18 240), oklch(0.85 0.2 90)); }
+  .lg-peak::before { background: oklch(0.95 0.13 95); border-radius: 999px; }
+  .lg-line::before { background: oklch(0.85 0.16 50); height: 2px; align-self: center; }
 </style>
