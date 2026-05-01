@@ -755,3 +755,196 @@ fn preprocess_pdf(_bytes: &[u8]) -> Result<String> {
 // site that the optimiser elides.
 #[allow(dead_code)]
 fn _touch_tokenizer_trait<T: Tokenizer>(_: &T) {}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pipeline inspect — returns the intermediate text-pipeline stages so
+// the playground's PipelineInspector UI can render each step.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One stage payload for the text pipeline inspector.
+#[cfg(feature = "inspect")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct InspectTextResult {
+    /// Stable algorithm identifier for the MinHash flavour we ran.
+    pub algorithm: &'static str,
+    /// Original input text (capped at 8 KiB to keep payloads sane).
+    pub raw: String,
+    /// Canonicalized text (capped likewise).
+    pub canonicalized: String,
+    /// First N tokens after the base tokenizer.
+    pub tokens: Vec<String>,
+    /// Total token count (`tokens.len() <= total_tokens`).
+    pub total_tokens: usize,
+    /// First N k-shingles (one shingle per Vec entry).
+    pub shingles: Vec<String>,
+    /// Total shingle count.
+    pub total_shingles: usize,
+    /// Final MinHash fingerprint as hex.
+    pub fingerprint_hex: String,
+    /// Length in bytes of the underlying signature.
+    pub fingerprint_bytes: usize,
+    /// txtfp config hash for this configuration.
+    pub config_hash: u64,
+}
+
+/// Run the text pipeline and surface every intermediate stage. Always
+/// uses MinHash<128> — other algorithms can be added when their UIs
+/// land. Token / shingle lists are capped at 256 entries each so a
+/// 1-MiB document doesn't produce a multi-megabyte payload.
+#[cfg(feature = "inspect")]
+pub fn inspect_text(text: &str, opts: &TextOpts) -> Result<InspectTextResult> {
+    const MAX_RAW_BYTES: usize = 8 * 1024;
+    const MAX_LIST_LEN: usize = 256;
+    const MAX_SHINGLE_BYTES: usize = 256;
+
+    let canon = build_canonicalizer(opts);
+    let prepared = preprocess(text, opts.preprocess)?;
+    let canonicalized = canon.canonicalize(&prepared);
+
+    // Tokens — collect the first MAX_LIST_LEN, count the rest.
+    let (tokens, total_tokens) = collect_tokens_capped(&canonicalized, opts, MAX_LIST_LEN);
+
+    // Shingles — build once via the same shingle tokenizer the
+    // fingerprinter uses, capped likewise.
+    let (shingles, total_shingles) =
+        collect_shingles_capped(&canonicalized, opts, MAX_LIST_LEN, MAX_SHINGLE_BYTES);
+
+    // Final fingerprint.
+    let rec = fingerprint_minhash_with::<DEFAULT_H>(text, opts, 0, 0)?;
+    let fingerprint_hex = hex_lower(&rec.fingerprint);
+    let fingerprint_bytes = rec.fingerprint.len();
+    let config_hash = rec.config_hash;
+
+    Ok(InspectTextResult {
+        algorithm: ALGORITHM_MINHASH_128,
+        raw: truncate_chars(text, MAX_RAW_BYTES),
+        canonicalized: truncate_chars(&canonicalized, MAX_RAW_BYTES),
+        tokens,
+        total_tokens,
+        shingles,
+        total_shingles,
+        fingerprint_hex,
+        fingerprint_bytes,
+        config_hash,
+    })
+}
+
+#[cfg(feature = "inspect")]
+fn collect_tokens_capped(
+    text: &str,
+    opts: &TextOpts,
+    cap: usize,
+) -> (Vec<String>, usize) {
+    let mut out: Vec<String> = Vec::with_capacity(cap.min(64));
+    let mut total = 0usize;
+    let mut visit = |t: &str| {
+        if out.len() < cap {
+            out.push(t.to_string());
+        }
+        total += 1;
+    };
+    match opts.tokenizer {
+        TokenizerKind::Word => {
+            WordTokenizer.for_each_token(text, &mut visit);
+        }
+        TokenizerKind::Grapheme => {
+            GraphemeTokenizer.for_each_token(text, &mut visit);
+        }
+        // CJK tokenizers are feature-gated; fall through to word for
+        // builds where they are not compiled in. Inspect is best-effort.
+        #[cfg(feature = "text-cjk-japanese")]
+        TokenizerKind::CjkJp => {
+            txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::Lindera)
+                .for_each_token(text, &mut visit);
+        }
+        #[cfg(not(feature = "text-cjk-japanese"))]
+        TokenizerKind::CjkJp => WordTokenizer.for_each_token(text, &mut visit),
+        #[cfg(feature = "text-cjk-korean")]
+        TokenizerKind::CjkKo => {
+            txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::LinderaKoDic)
+                .for_each_token(text, &mut visit);
+        }
+        #[cfg(not(feature = "text-cjk-korean"))]
+        TokenizerKind::CjkKo => WordTokenizer.for_each_token(text, &mut visit),
+    }
+    (out, total)
+}
+
+#[cfg(feature = "inspect")]
+fn collect_shingles_capped(
+    text: &str,
+    opts: &TextOpts,
+    list_cap: usize,
+    per_shingle_byte_cap: usize,
+) -> (Vec<String>, usize) {
+    let mut out: Vec<String> = Vec::with_capacity(list_cap.min(64));
+    let mut total = 0usize;
+    let mut visit = |s: &str| {
+        if out.len() < list_cap {
+            out.push(truncate_chars(s, per_shingle_byte_cap));
+        }
+        total += 1;
+    };
+    match opts.tokenizer {
+        TokenizerKind::Word => {
+            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
+                .for_each_token(text, &mut visit);
+        }
+        TokenizerKind::Grapheme => {
+            ShingleTokenizer { k: opts.k, inner: GraphemeTokenizer }
+                .for_each_token(text, &mut visit);
+        }
+        #[cfg(feature = "text-cjk-japanese")]
+        TokenizerKind::CjkJp => {
+            ShingleTokenizer {
+                k: opts.k,
+                inner: txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::Lindera),
+            }.for_each_token(text, &mut visit);
+        }
+        #[cfg(not(feature = "text-cjk-japanese"))]
+        TokenizerKind::CjkJp => {
+            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
+                .for_each_token(text, &mut visit);
+        }
+        #[cfg(feature = "text-cjk-korean")]
+        TokenizerKind::CjkKo => {
+            ShingleTokenizer {
+                k: opts.k,
+                inner: txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::LinderaKoDic),
+            }.for_each_token(text, &mut visit);
+        }
+        #[cfg(not(feature = "text-cjk-korean"))]
+        TokenizerKind::CjkKo => {
+            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
+                .for_each_token(text, &mut visit);
+        }
+    }
+    (out, total)
+}
+
+#[cfg(feature = "inspect")]
+fn truncate_chars(s: &str, max_bytes: usize) -> String {
+    if s.len() <= max_bytes {
+        return s.to_string();
+    }
+    // Find the largest valid char boundary <= max_bytes.
+    let mut cut = max_bytes;
+    while cut > 0 && !s.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    let mut out = s[..cut].to_string();
+    out.push_str("…");
+    out
+}
+
+#[cfg(feature = "inspect")]
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+

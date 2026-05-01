@@ -65,9 +65,11 @@
       size={110} />
   </div>
 
-{:else if algorithm === 'minhash-h128' && bytes.length === 1024}
-  <MinHashSlotHeatmap bytes={bytes}
-    diffAgainst={diffAgainst && diffAgainst.length === 1024 ? diffAgainst : undefined}
+{:else if algorithm === 'minhash-h128' && bytes.length === 1032}
+  <!-- Skip the 8-byte MinHashSig header (schema:u16 + _pad:[u8;6]); the
+       remaining 1024 bytes are the H × u64 slots the heatmap renders. -->
+  <MinHashSlotHeatmap bytes={bytes.subarray(8)}
+    diffAgainst={diffAgainst && diffAgainst.length === 1032 ? diffAgainst.subarray(8) : undefined}
     label="MinHash · 128 slots × u64"
     width={384} height={56} />
 

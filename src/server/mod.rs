@@ -173,6 +173,12 @@ where
             axum::routing::delete(handlers::delete_input),
         );
 
+    #[cfg(all(feature = "inspect", feature = "text"))]
+    let r = r.route(
+        "/v1/pipeline/inspect/text/{tenant_id}",
+        post(handlers::inspect_text::<I>),
+    );
+
     r
 }
 

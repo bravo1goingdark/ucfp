@@ -11,6 +11,7 @@
   import AlgorithmView from '$components/charts/AlgorithmView.svelte';
   import { hasAlgorithmView } from '$components/charts/algorithmView';
   import TuningForm from '$lib/components/playground/TuningForm.svelte';
+  import PipelineInspector from '$lib/components/playground/PipelineInspector.svelte';
   import type { RecordHistoryEntry } from '$lib/types/api';
 
   const history = createRecordHistory();
@@ -1131,6 +1132,18 @@
                 <EmbeddingBars vector={lastEmbedding} maxBars={128} height={64} />
               </div>
             {/if}
+            <!-- Pipeline inspector — text only for now. The component
+                 itself shows an inline placeholder for image / audio. -->
+            <div class="viz-section">
+              <PipelineInspector
+                {modality}
+                text={textInput}
+                inputId={cachedInputIdA}
+                opts={{
+                  k: optK, h: optH, tokenizer: optTokenizer, preprocess: optPreprocess,
+                  ...extraOpts,
+                }} />
+            </div>
           {:else}
             <div class="result-empty">
               <span class="empty-icon">⬡</span>

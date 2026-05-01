@@ -1076,3 +1076,88 @@ async fn input_cache_roundtrip_then_text_ingest_via_input_id() {
     assert!(bad.status().is_client_error());
 }
 
+
+#[cfg(feature = "inspect")]
+#[tokio::test]
+async fn pipeline_inspect_text_returns_each_stage() {
+    let (app, _dir) = fixture().await;
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/pipeline/inspect/text/0?k=3&tokenizer=word")
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::from("Hello, World! Hello again."))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = read_json(resp).await;
+
+    // Stable algorithm tag.
+    assert_eq!(body["algorithm"], "minhash-h128");
+    // Canonicalization lowercases the input.
+    let canon = body["canonicalized"].as_str().unwrap();
+    assert!(canon.starts_with("hello"), "expected lowercase canonicalized: {canon}");
+    // Token list is non-empty and contains expected tokens.
+    let tokens = body["tokens"].as_array().unwrap();
+    assert!(!tokens.is_empty());
+    assert!(tokens.iter().any(|t| t == "hello"));
+    // Shingle list is non-empty for k=3.
+    let shingles = body["shingles"].as_array().unwrap();
+    assert!(!shingles.is_empty());
+    // MinHash<128> is repr(C) { schema:u16, _pad:[u8;6], hashes:[u64;128] }
+    // → 8 + 8*128 = 1032 bytes (= 2064 hex chars).
+    let fp = body["fingerprint_hex"].as_str().unwrap();
+    assert_eq!(fp.len(), 2064);
+    assert_eq!(body["fingerprint_bytes"], 1032);
+}
+
+
+// Regression contract: a no-opts MinHash<128> fingerprint of a known
+// fixed input must produce the same bytes after refactors. Catches
+// silent canonicalizer / shingle / hasher drift that the looser
+// "fingerprint_bytes > 0" assertions in `ingest_text_round_trip` miss.
+//
+// Golden values were captured from the v0.2 hash family (Xxh3_64) +
+// txtfp 0.2.0 NFKC canonicalizer + shingle k=5 / Word tokenizer. Bump
+// these intentionally if the upstream contract genuinely changes; an
+// accidental change here means a regression worth investigating.
+#[cfg(feature = "text")]
+#[tokio::test]
+async fn golden_text_minhash_no_opts_is_stable() {
+    let (app, _dir) = fixture().await;
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/ingest/text/0/1")
+                .header("content-type", "text/plain; charset=utf-8")
+                .body(Body::from("the quick brown fox jumps over the lazy dog"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let body: serde_json::Value = read_json(resp).await;
+    let hex = body["fingerprint_hex"].as_str().expect("fingerprint_hex");
+    // Schema header (8 B) + first slot (8 B) — the rest of the 1024-byte
+    // signature is implicitly covered through the assertion that this
+    // prefix is stable: any drift in canonicalizer / tokenizer / hasher
+    // shifts the very first hash slot.
+    assert_eq!(
+        &hex[..32],
+        "0100000000000000a26accc88c8a8106",
+        "MinHash regression — first 16 bytes (schema + first slot) drifted",
+    );
+    assert_eq!(
+        body["config_hash"], 2_212_816_233_060_047_056_u64,
+        "MinHash regression — config_hash drifted (canonicalizer or tokenizer changed?)",
+    );
+    assert_eq!(body["fingerprint_bytes"], 1032);
+}
+

@@ -1047,3 +1047,55 @@ pub(super) async fn delete_input(
     })
 }
 
+
+// ── Pipeline inspect (feature `inspect`) ───────────────────────────────
+
+/// `POST /v1/pipeline/inspect/text` — run the text fingerprinting
+/// pipeline and return every intermediate stage so the playground's
+/// PipelineInspector UI can show what each step produced.
+#[cfg(all(feature = "inspect", feature = "text"))]
+pub(super) async fn inspect_text<I: IndexBackend>(
+    State(_index): State<Arc<I>>,
+    ctx: Option<Extension<ApiKeyContext>>,
+    Path(tenant_id): Path<u32>,
+    Qs(q): Qs<crate::server::dto::InspectTextQuery>,
+    body: Bytes,
+) -> Result<Json<crate::modality::text::InspectTextResult>, ApiError> {
+    tenant_guard(ctx, tenant_id)?;
+
+    // Resolve body from cache when input_id is supplied (live-tune).
+    let body = if let Some(input_id) = q.input_id {
+        crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?
+            .bytes
+    } else {
+        body
+    };
+    let text = std::str::from_utf8(&body)
+        .map_err(|e| Error::Modality(format!("body is not valid UTF-8: {e}")))?;
+
+    // Translate the inspect query into a TextParams-equivalent and reuse
+    // build_text_opts so canon_* + tokenizer + preprocess all flow
+    // through the same translation as the regular ingest path.
+    let params = crate::server::dto::TextParams {
+        algorithm: crate::server::dto::TextAlgorithm::Minhash,
+        k: q.k,
+        h: q.h,
+        tokenizer: q.tokenizer,
+        preprocess: q.preprocess,
+        model_id: None,
+        api_key: None,
+        return_embedding: None,
+        canon_normalization: q.canon_normalization,
+        canon_case_fold: q.canon_case_fold,
+        canon_strip_bidi: q.canon_strip_bidi,
+        canon_strip_format: q.canon_strip_format,
+        canon_apply_confusable: q.canon_apply_confusable,
+        input_id: None,
+    };
+    let opts = build_text_opts(&params)?;
+    let result = crate::modality::text::inspect_text(text, &opts)?;
+    Ok(Json(result))
+}
+

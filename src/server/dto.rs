@@ -539,6 +539,39 @@ pub struct InputsPutResponse {
     pub ttl_secs: u64,
 }
 
+// ── Pipeline inspect (feature `inspect`) ───────────────────────────────
+
+/// Query parameters for `POST /v1/pipeline/inspect/text`. Mirrors the
+/// subset of `TextParams` we currently honor for inspection — no
+/// algorithm selector (always MinHash<128>), no semantic / streaming.
+#[cfg(all(feature = "inspect", feature = "text"))]
+#[derive(Deserialize, Default)]
+pub(super) struct InspectTextQuery {
+    #[serde(default)]
+    pub k: Option<usize>,
+    #[serde(default)]
+    pub h: Option<usize>,
+    #[serde(default)]
+    pub tokenizer: Option<TokenizerKind>,
+    #[serde(default)]
+    pub preprocess: Option<PreprocessKind>,
+    // Canonicalizer overrides — same shape as TextParams.
+    #[serde(default)]
+    pub canon_normalization: Option<String>,
+    #[serde(default)]
+    pub canon_case_fold: Option<bool>,
+    #[serde(default)]
+    pub canon_strip_bidi: Option<bool>,
+    #[serde(default)]
+    pub canon_strip_format: Option<bool>,
+    #[serde(default)]
+    pub canon_apply_confusable: Option<bool>,
+    /// Live-tune handle. When supplied, the inspect runs against the
+    /// cached bytes for this id instead of the request body.
+    #[serde(default)]
+    pub input_id: Option<u64>,
+}
+
 // ── Watermark detection response ───────────────────────────────────────
 
 /// Response body for `POST /v1/ingest/audio/{tid}/{rid}/watermark`.
