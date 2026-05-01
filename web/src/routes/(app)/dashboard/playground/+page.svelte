@@ -1132,15 +1132,17 @@
                 <EmbeddingBars vector={lastEmbedding} maxBars={128} height={64} />
               </div>
             {/if}
-            <!-- Pipeline inspector — text only for now. The component
-                 itself shows an inline placeholder for image / audio. -->
+            <!-- Pipeline inspector — text + image. Audio still returns
+                 a 501 placeholder (proxy + UI both handle gracefully). -->
             <div class="viz-section">
               <PipelineInspector
                 {modality}
                 text={textInput}
+                {file}
                 inputId={cachedInputIdA}
                 opts={{
                   k: optK, h: optH, tokenizer: optTokenizer, preprocess: optPreprocess,
+                  max_dimension: optMaxDimension, min_dimension: optMinDimension, max_input_bytes: optMaxInputBytes,
                   ...extraOpts,
                 }} />
             </div>

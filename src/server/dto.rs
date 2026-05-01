@@ -572,6 +572,26 @@ pub(super) struct InspectTextQuery {
     pub input_id: Option<u64>,
 }
 
+/// Query parameters for `POST /v1/pipeline/inspect/image/{tenant_id}`.
+/// Mirrors the subset of `ImageParams` we honor for inspection — no
+/// algorithm selector (always the multi-hash bundle), no semantic.
+#[cfg(all(feature = "inspect", feature = "image"))]
+#[derive(Deserialize, Default)]
+pub(super) struct InspectImageQuery {
+    /// Override `imgfprint::PreprocessConfig::max_input_bytes`.
+    #[serde(default)]
+    pub max_input_bytes: Option<usize>,
+    /// Override `imgfprint::PreprocessConfig::max_dimension`.
+    #[serde(default)]
+    pub max_dimension: Option<u32>,
+    /// Override `imgfprint::PreprocessConfig::min_dimension`.
+    #[serde(default)]
+    pub min_dimension: Option<u32>,
+    /// Live-tune handle.
+    #[serde(default)]
+    pub input_id: Option<u64>,
+}
+
 // ── Watermark detection response ───────────────────────────────────────
 
 /// Response body for `POST /v1/ingest/audio/{tid}/{rid}/watermark`.

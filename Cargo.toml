@@ -71,9 +71,12 @@ multi-tenant = ["dep:reqwest"]
 multipart    = ["server", "axum/multipart"]
 
 # Playground introspection: pipeline-stage `inspect` endpoint and the
-# session-cached `/v1/inputs` LRU that powers live-tune. Self-hosters
-# that don't ship the playground UI can leave this off and pay nothing.
-inspect      = ["server"]
+# session-cached `/v1/inputs` LRU that powers live-tune. Image stage
+# extraction (resize → grayscale thumbnail → bits) needs `image` +
+# `base64`; both are already pulled transitively by `imgfprint` so the
+# build graph doesn't grow on a `default` build. Self-hosters that
+# don't ship the playground UI can leave this off and pay nothing.
+inspect      = ["server", "dep:image", "dep:base64"]
 
 # Existing graduations (kept).
 qdrant = ["dep:qdrant-client"]
@@ -128,6 +131,11 @@ subtle                      = { version = "2.6", optional = true }
 # all crate code (including the three modality SDKs) inherits the
 # throughput win without any per-call change.
 mimalloc                    = { version = "0.1.50", default-features = false, optional = true }
+# Used by the `inspect` feature for image stage extraction. `image` is
+# already pulled transitively by imgfprint, so this is a free edge in
+# any default build.
+image                       = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+base64                      = { version = "0.22", optional = true }
 
 # ── Optional graduations ────────────────────────────────────────────────
 qdrant-client = { version = "1", optional = true }

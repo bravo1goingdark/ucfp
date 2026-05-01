@@ -1161,3 +1161,45 @@ async fn golden_text_minhash_no_opts_is_stable() {
     assert_eq!(body["fingerprint_bytes"], 1032);
 }
 
+
+#[cfg(all(feature = "inspect", feature = "image"))]
+#[tokio::test]
+async fn pipeline_inspect_image_returns_each_stage() {
+    let (app, _dir) = fixture().await;
+
+    let png = synthetic_png(64, 64);
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/pipeline/inspect/image/0")
+                .header("content-type", "image/png")
+                .body(Body::from(png))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body: serde_json::Value = read_json(resp).await;
+
+    assert_eq!(body["algorithm"], "imgfprint-multihash-v1");
+    assert_eq!(body["width"], 64);
+    assert_eq!(body["height"], 64);
+    // Every base64 stage is non-empty and looks PNG-shaped (starts with the
+    // base64 of the PNG magic byte 0x89).
+    let original = body["original_png_b64"].as_str().unwrap();
+    assert!(original.starts_with("iVBORw0KGgo"), "original_png_b64 missing PNG header: {}", &original[..16]);
+    let g32 = body["gray32_png_b64"].as_str().unwrap();
+    assert!(g32.starts_with("iVBORw0KGgo"));
+    let g8 = body["gray8_png_b64"].as_str().unwrap();
+    assert!(g8.starts_with("iVBORw0KGgo"));
+    // AHash mean is in valid u8 range and non-zero for the synthetic
+    // colour-ramp test image.
+    let mean = body["ahash_mean"].as_u64().unwrap();
+    assert!(mean > 0 && mean < 256);
+    // Final fingerprint matches the multi-hash bundle shape (536 bytes).
+    assert_eq!(body["fingerprint_bytes"], 536);
+    assert_eq!(body["fingerprint_hex"].as_str().unwrap().len(), 1072);
+}
+

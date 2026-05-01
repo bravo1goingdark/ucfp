@@ -179,6 +179,12 @@ where
         post(handlers::inspect_text::<I>),
     );
 
+    #[cfg(all(feature = "inspect", feature = "image"))]
+    let r = r.route(
+        "/v1/pipeline/inspect/image/{tenant_id}",
+        post(handlers::inspect_image::<I>),
+    );
+
     r
 }
 

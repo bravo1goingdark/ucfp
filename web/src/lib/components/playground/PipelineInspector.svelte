@@ -1,11 +1,10 @@
 <!--
   PipelineInspector — surfaces every intermediate stage of the
-  fingerprinting pipeline so users can see what each step produced
-  (raw → canonicalized → tokens → shingles → final hash).
+  fingerprinting pipeline so users can see what each step produced.
 
-  Text only for now. Image and audio stages return 501 from the proxy
-  until the per-modality extractors land in src/server/handlers.rs;
-  the component renders an explanatory placeholder for those.
+  Text: raw → canonicalized → tokens → shingles → final hash.
+  Image: original → 32×32 grayscale → 8×8 grayscale + AHash mean → final hex.
+  Audio: not implemented yet — proxy returns 501.
 
   Triggered explicitly via the "Inspect pipeline" button — never on
   every keystroke or slider tick. Caches the last result client-side.
@@ -15,14 +14,17 @@
     modality: 'text' | 'image' | 'audio';
     /** UTF-8 text body (text modality). */
     text: string;
+    /** File handle (image / audio modality). */
+    file?: File | null;
     /** Cached input id for live-tune; sent instead of a body when present. */
     inputId?: number | null;
     /** Live tunables forwarded as query params (subset relevant to inspect). */
     opts?: Record<string, unknown>;
   };
-  let { modality, text, inputId = null, opts = {} }: Props = $props();
+  let { modality, text, file = null, inputId = null, opts = {} }: Props = $props();
 
   type TextStages = {
+    kind: 'text';
     algorithm: string;
     raw: string;
     canonicalized: string;
@@ -34,22 +36,41 @@
     fingerprint_bytes: number;
     config_hash: number;
   };
+  type ImageStages = {
+    kind: 'image';
+    algorithm: string;
+    width: number;
+    height: number;
+    original_png_b64: string;
+    gray32_png_b64: string;
+    gray8_png_b64: string;
+    ahash_mean: number;
+    fingerprint_hex: string;
+    fingerprint_bytes: number;
+    config_hash: number;
+  };
+  type Stages = TextStages | ImageStages;
 
-  let result = $state<TextStages | null>(null);
+  let result = $state<Stages | null>(null);
   let loading = $state(false);
   let errMsg = $state<string | null>(null);
   let openStage = $state<string | null>('canonicalized');
 
-  const INSPECT_OPT_KEYS = [
+  const TEXT_OPT_KEYS = [
     'k','h','tokenizer','preprocess',
     'canon_normalization','canon_case_fold','canon_strip_bidi',
     'canon_strip_format','canon_apply_confusable',
   ];
+  const IMAGE_OPT_KEYS = ['max_input_bytes','max_dimension','min_dimension'];
 
   async function run(): Promise<void> {
     if (loading) return;
-    if (modality !== 'text') {
-      errMsg = `Pipeline inspect for ${modality} isn't implemented yet — text only.`;
+    if (modality === 'audio') {
+      errMsg = `Pipeline inspect for audio isn't implemented yet — text and image only.`;
+      return;
+    }
+    if (modality === 'image' && !file && inputId == null) {
+      errMsg = `Drop an image file first, then click Inspect.`;
       return;
     }
     errMsg = null;
@@ -57,23 +78,40 @@
     try {
       const sp = new URLSearchParams({ modality });
       if (inputId != null) sp.set('input_id', String(inputId));
-      for (const k of INSPECT_OPT_KEYS) {
+      const optKeys = modality === 'text' ? TEXT_OPT_KEYS : IMAGE_OPT_KEYS;
+      for (const k of optKeys) {
         const v = opts[k];
         if (v == null || v === '') continue;
         sp.set(k, String(v));
       }
+      let body: BodyInit;
+      let contentType: string;
+      if (modality === 'text') {
+        body = inputId != null ? '' : text;
+        contentType = 'text/plain; charset=utf-8';
+      } else {
+        body = inputId != null ? new ArrayBuffer(0) : await file!.arrayBuffer();
+        contentType = 'application/octet-stream';
+      }
       const res = await fetch(`/api/pipeline/inspect?${sp.toString()}`, {
         method: 'POST',
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-        body: inputId != null ? '' : text,
+        headers: { 'content-type': contentType },
+        body,
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => String(res.status));
         errMsg = `Inspect failed (${res.status}): ${detail.slice(0, 200)}`;
         return;
       }
-      result = (await res.json()) as TextStages;
-      openStage ??= 'canonicalized';
+      const parsed = await res.json() as Record<string, unknown>;
+      // Discriminate by a field that's unique to each modality response.
+      if ('canonicalized' in parsed) {
+        result = { kind: 'text', ...(parsed as Omit<TextStages, 'kind'>) };
+        openStage ??= 'canonicalized';
+      } else if ('original_png_b64' in parsed) {
+        result = { kind: 'image', ...(parsed as Omit<ImageStages, 'kind'>) };
+        openStage ??= 'gray8';
+      }
     } catch (e) {
       errMsg = `Inspect error: ${(e as Error).message}`;
     } finally {
@@ -130,7 +168,64 @@
     <p class="err" role="alert">{errMsg}</p>
   {/if}
 
-  {#if result}
+  {#if result && result.kind === 'image'}
+    <section class="stage" class:open={openStage === 'original'}>
+      <button type="button" class="stage-head" onclick={() => toggle('original')}>
+        <span class="step-num">1</span>
+        <span class="stage-label">Original</span>
+        <span class="stage-meta">{result.width} × {result.height} px</span>
+      </button>
+      {#if openStage === 'original'}
+        <div class="stage-body img-stage">
+          <img class="img-original" src="data:image/png;base64,{result.original_png_b64}" alt="original (thumbnail)" />
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'gray32'}>
+      <button type="button" class="stage-head" onclick={() => toggle('gray32')}>
+        <span class="step-num">2</span>
+        <span class="stage-label">32 × 32 grayscale</span>
+        <span class="stage-meta">PHash DCT input</span>
+      </button>
+      {#if openStage === 'gray32'}
+        <div class="stage-body img-stage">
+          <img class="img-pixel img-32" src="data:image/png;base64,{result.gray32_png_b64}" alt="32×32 grayscale" />
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'gray8'}>
+      <button type="button" class="stage-head" onclick={() => toggle('gray8')}>
+        <span class="step-num">3</span>
+        <span class="stage-label">8 × 8 grayscale</span>
+        <span class="stage-meta">AHash input · mean = {result.ahash_mean}</span>
+      </button>
+      {#if openStage === 'gray8'}
+        <div class="stage-body img-stage">
+          <img class="img-pixel img-8" src="data:image/png;base64,{result.gray8_png_b64}" alt="8×8 grayscale" />
+          <p class="caption">Each cell is one input pixel for AHash. Pixels above the mean ({result.ahash_mean}) become a 1 bit; below, a 0.</p>
+        </div>
+      {/if}
+    </section>
+
+    <section class="stage" class:open={openStage === 'fingerprint'}>
+      <button type="button" class="stage-head" onclick={() => toggle('fingerprint')}>
+        <span class="step-num">4</span>
+        <span class="stage-label">Fingerprint</span>
+        <span class="stage-meta">
+          {result.algorithm} · {result.fingerprint_bytes} bytes
+        </span>
+      </button>
+      {#if openStage === 'fingerprint'}
+        <div class="stage-body">
+          <div class="fp-meta mono">config_hash 0x{result.config_hash.toString(16)}</div>
+          <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
+        </div>
+      {/if}
+    </section>
+
+  {:else if result && result.kind === 'text'}
     {@const spans = diffSpans(result.raw, result.canonicalized)}
     {@const changedCount = spans.filter(s => s.changed).reduce((a, s) => a + s.text.length, 0)}
 
@@ -207,10 +302,14 @@
     </section>
   {:else if !loading && !errMsg}
     <p class="hint">
-      Click <strong>Inspect pipeline</strong> to see each stage —
-      raw → canonicalized → tokens → shingles → final hash.
-      {#if modality !== 'text'}
-        <br /><em>Pipeline inspect for {modality} isn't implemented yet.</em>
+      {#if modality === 'text'}
+        Click <strong>Inspect pipeline</strong> to see each stage —
+        raw → canonicalized → tokens → shingles → final hash.
+      {:else if modality === 'image'}
+        Click <strong>Inspect pipeline</strong> to see each stage —
+        original → 32×32 grayscale → 8×8 grayscale (AHash input) → final hash.
+      {:else}
+        <em>Pipeline inspect for audio isn't implemented yet.</em>
       {/if}
     </p>
   {/if}
@@ -318,5 +417,28 @@
   .chip.shingle {
     background: oklch(0.5 0.12 240 / 0.16);
     border-color: oklch(0.5 0.12 240 / 0.3);
+  }
+  /* Image-stage rendering — pixelated upscale for the 8×8 / 32×32 panes
+     so users can see the discrete bit cells without antialiasing fuzz. */
+  .img-stage { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .img-original {
+    max-width: 100%;
+    max-height: 256px;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+  }
+  .img-pixel {
+    image-rendering: pixelated;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+  }
+  .img-32 { width: 192px; height: 192px; }
+  .img-8  { width: 192px; height: 192px; }
+  .caption {
+    margin: 0;
+    font-size: 0.74rem;
+    opacity: 0.7;
+    line-height: 1.4;
+    max-width: 480px;
   }
 </style>

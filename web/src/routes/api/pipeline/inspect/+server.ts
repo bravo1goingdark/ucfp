@@ -32,37 +32,46 @@ export const POST: RequestHandler = async (event) => {
 
   const sp = event.url.searchParams;
   const modality = sp.get('modality') ?? 'text';
-  if (modality !== 'text') {
+  if (modality !== 'text' && modality !== 'image') {
     return json(
-      { error: `pipeline inspect for ${modality} is not implemented yet — text only.` },
+      { error: `pipeline inspect for ${modality} is not implemented yet (text/image only).` },
       { status: 501 }
     );
   }
 
-  // Forward the same canonicalizer + tokenizer + preprocess + input_id
-  // surface the upstream inspect_text handler accepts. Numeric / enum
-  // params are not pre-validated here — upstream rejects bad values.
-  const upstreamQuery = new URLSearchParams();
-  for (const k of [
+  // Forward the param allowlist that the upstream handler for this
+  // modality reads. Anything not in the list is silently dropped.
+  const TEXT_KEYS = [
     'k','h','tokenizer','preprocess',
     'canon_normalization','canon_case_fold','canon_strip_bidi',
     'canon_strip_format','canon_apply_confusable',
     'input_id',
-  ]) {
+  ];
+  const IMAGE_KEYS = ['max_input_bytes','max_dimension','min_dimension','input_id'];
+  const allowedKeys = modality === 'text' ? TEXT_KEYS : IMAGE_KEYS;
+
+  const upstreamQuery = new URLSearchParams();
+  for (const k of allowedKeys) {
     const v = sp.get(k);
     if (v != null && v !== '') upstreamQuery.set(k, v);
   }
 
+  const upstreamPath = modality === 'text'
+    ? `/v1/pipeline/inspect/text/${tenantId}`
+    : `/v1/pipeline/inspect/image/${tenantId}`;
   const upstream =
-    `${env.UCFP_API_URL.replace(/\/$/, '')}/v1/pipeline/inspect/text/${tenantId}` +
+    `${env.UCFP_API_URL.replace(/\/$/, '')}${upstreamPath}` +
     (upstreamQuery.toString() ? `?${upstreamQuery.toString()}` : '');
   const body = await request.arrayBuffer();
+  const defaultCt = modality === 'text'
+    ? 'text/plain; charset=utf-8'
+    : 'application/octet-stream';
   let res: Response;
   try {
     res = await fetch(upstream, {
       method: 'POST',
       headers: {
-        'content-type': request.headers.get('content-type') ?? 'text/plain; charset=utf-8',
+        'content-type': request.headers.get('content-type') ?? defaultCt,
         authorization: `Bearer ${env.UCFP_API_TOKEN}`,
         'x-ucfp-tenant': String(tenantId),
       },

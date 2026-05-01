@@ -236,3 +236,122 @@ pub fn fingerprint_semantic(
         metadata: Bytes::new(),
     })
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pipeline inspect — surfaces the intermediate image-pipeline stages so
+// the playground's PipelineInspector UI can render each step.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// One stage payload for the image pipeline inspector.
+///
+/// Each `*_png_b64` field is a complete PNG file encoded as base64
+/// (no `data:` URI prefix — the UI prepends it). Sizes are tuned so the
+/// total payload stays under ~50 KiB for a typical photo: original
+/// thumbnail at 256 px max edge, 32×32 / 8×8 stages at native size.
+#[cfg(feature = "inspect")]
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct InspectImageResult {
+    /// Stable algorithm identifier (currently always `imgfprint-multihash-v1`).
+    pub algorithm: &'static str,
+    /// Original image width in pixels (pre-thumbnail).
+    pub width: u32,
+    /// Original image height in pixels (pre-thumbnail).
+    pub height: u32,
+    /// Decoded original, downscaled to ≤256 px max edge for display.
+    pub original_png_b64: String,
+    /// 32×32 grayscale — the input PHash applies its DCT to.
+    pub gray32_png_b64: String,
+    /// 8×8 grayscale — the input AHash mean-thresholds.
+    pub gray8_png_b64: String,
+    /// AHash mean — the threshold used to derive the 64-bit AHash.
+    pub ahash_mean: u8,
+    /// Final multi-hash bundle bytes as hex.
+    pub fingerprint_hex: String,
+    /// Length of the underlying multi-hash bundle in bytes.
+    pub fingerprint_bytes: usize,
+    /// imgfprint config hash captured for this run.
+    pub config_hash: u64,
+}
+
+/// Run the image pipeline and surface each intermediate stage.
+///
+/// Always uses the multi-hash bundle (PHash + DHash + AHash). PHash's
+/// 32×32 DCT input and AHash's 8×8 grayscale input are exposed as
+/// PNG thumbnails so the UI can paint them as-is.
+///
+/// Image-decode + resize go through the `image` crate's nearest-
+/// neighbour path — these are visualisation aids, not the bytes that
+/// feed imgfprint's actual fingerprint computation. The fingerprint
+/// itself comes from imgfprint's default pipeline so it round-trips
+/// the regular `fingerprint_with` call.
+#[cfg(feature = "inspect")]
+pub fn inspect_image(bytes: &[u8], pre: &PreprocessConfig) -> Result<InspectImageResult> {
+    use image::{GenericImageView, imageops::FilterType};
+
+    let img = image::load_from_memory(bytes)
+        .map_err(|e| Error::Modality(format!("image decode: {e}")))?;
+    let (w, h) = img.dimensions();
+
+    // Stage 1: original thumbnail — at most 256 px max edge.
+    let max_edge = 256u32;
+    let original_thumb = if w.max(h) > max_edge {
+        let scale = max_edge as f32 / w.max(h) as f32;
+        let nw = (w as f32 * scale).round().max(1.0) as u32;
+        let nh = (h as f32 * scale).round().max(1.0) as u32;
+        img.resize(nw, nh, FilterType::Triangle)
+    } else {
+        img.clone()
+    };
+    let original_png_b64 = encode_png_b64(&original_thumb)?;
+
+    // Stage 2: 32×32 grayscale (PHash DCT input).
+    let gray32 = img.resize_exact(32, 32, FilterType::Triangle).grayscale();
+    let gray32_png_b64 = encode_png_b64(&gray32)?;
+
+    // Stage 3: 8×8 grayscale (AHash input) + the mean threshold.
+    let gray8 = img.resize_exact(8, 8, FilterType::Triangle).grayscale();
+    let gray8_l8 = gray8.to_luma8();
+    let mean_u32: u32 = gray8_l8.as_raw().iter().map(|&v| v as u32).sum();
+    let ahash_mean = (mean_u32 / 64) as u8;
+    let gray8_png_b64 = encode_png_b64(&gray8)?;
+
+    // Stage 4: final fingerprint — reuse the regular pipeline.
+    let rec = fingerprint_with(bytes, 0, 0, pre)?;
+    let fingerprint_hex = hex_lower(&rec.fingerprint);
+    let fingerprint_bytes = rec.fingerprint.len();
+    let config_hash = rec.config_hash;
+
+    Ok(InspectImageResult {
+        algorithm: ALGORITHM_MULTIHASH,
+        width: w,
+        height: h,
+        original_png_b64,
+        gray32_png_b64,
+        gray8_png_b64,
+        ahash_mean,
+        fingerprint_hex,
+        fingerprint_bytes,
+        config_hash,
+    })
+}
+
+#[cfg(feature = "inspect")]
+fn encode_png_b64(img: &image::DynamicImage) -> Result<String> {
+    use base64::Engine;
+    let mut buf: Vec<u8> = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+        .map_err(|e| Error::Modality(format!("png encode: {e}")))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
+}
+
+#[cfg(feature = "inspect")]
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+

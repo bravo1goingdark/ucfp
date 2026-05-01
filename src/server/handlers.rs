@@ -1099,3 +1099,38 @@ pub(super) async fn inspect_text<I: IndexBackend>(
     Ok(Json(result))
 }
 
+
+/// `POST /v1/pipeline/inspect/image/{tenant_id}` — image-pipeline
+/// stage extractor: original thumbnail + 32×32 grayscale + 8×8
+/// grayscale + AHash mean + final fingerprint hex. All thumbnails
+/// are PNG-encoded base64 strings; the UI prepends `data:image/png;base64,`.
+#[cfg(all(feature = "inspect", feature = "image"))]
+pub(super) async fn inspect_image<I: IndexBackend>(
+    State(_index): State<Arc<I>>,
+    ctx: Option<Extension<ApiKeyContext>>,
+    Path(tenant_id): Path<u32>,
+    Qs(q): Qs<crate::server::dto::InspectImageQuery>,
+    body: Bytes,
+) -> Result<Json<crate::modality::image::InspectImageResult>, ApiError> {
+    tenant_guard(ctx, tenant_id)?;
+
+    let body = if let Some(input_id) = q.input_id {
+        crate::server::inputs_cache::cache()
+            .get(tenant_id, input_id)
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?
+            .bytes
+    } else {
+        body
+    };
+
+    // Build the same PreprocessConfig the regular ingest path would:
+    // missing fields fall back to the SDK defaults.
+    let mut pre = imgfprint::PreprocessConfig::default();
+    if let Some(v) = q.max_input_bytes { pre.max_input_bytes = v; }
+    if let Some(v) = q.max_dimension   { pre.max_dimension   = v; }
+    if let Some(v) = q.min_dimension   { pre.min_dimension   = v; }
+
+    let result = crate::modality::image::inspect_image(&body, &pre)?;
+    Ok(Json(result))
+}
+
