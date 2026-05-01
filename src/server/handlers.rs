@@ -668,26 +668,34 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
     State(index): State<Arc<I>>,
     ctx: Option<Extension<ApiKeyContext>>,
     Path((tenant_id, record_id)): Path<(u32, u64)>,
-    Qs(mut params): Qs<AudioParams>,
+    Qs(params): Qs<AudioParams>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
     // Live-tune (feature `inspect`): when `?input_id=…` is supplied,
     // pull bytes — and the original sample_rate — from the cache
-    // instead of reading the request body.
+    // instead of reading the request body. Rebind `params` as mutable
+    // only inside the cfg block so slim builds without `inspect` don't
+    // trip clippy's `unused_mut` lint on the un-mutated params.
     #[cfg(feature = "inspect")]
-    let body = if let Some(input_id) = params.input_id {
-        let entry = crate::server::inputs_cache::cache()
-            .get(tenant_id, input_id)
-            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?;
-        if let Some(sr) = entry.sample_rate
-            && params.sample_rate == 0
-        {
-            params.sample_rate = sr;
-        }
-        entry.bytes
-    } else {
-        body
+    let (body, params) = {
+        let mut params = params;
+        let body = if let Some(input_id) = params.input_id {
+            let entry = crate::server::inputs_cache::cache()
+                .get(tenant_id, input_id)
+                .ok_or_else(|| {
+                    Error::Modality(format!("input_id {input_id} not found or expired"))
+                })?;
+            if let Some(sr) = entry.sample_rate
+                && params.sample_rate == 0
+            {
+                params.sample_rate = sr;
+            }
+            entry.bytes
+        } else {
+            body
+        };
+        (body, params)
     };
     if !body.len().is_multiple_of(4) {
         return Err(Error::Modality(format!(

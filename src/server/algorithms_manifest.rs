@@ -400,6 +400,10 @@ fn text_catalog() -> ModalityCatalog {
         },
     ];
     // Drop hidden algorithms when their feature isn't compiled in.
+    // Clippy's `match_like_matches_macro` triggers in slim builds where
+    // every arm collapses to `false` — silence it here since the cfg!()
+    // values are only meaningful as a runtime feature gate.
+    #[allow(clippy::match_like_matches_macro)]
     algorithms.retain(|a| match a.id {
         "simhash-tf" | "simhash-idf" => cfg!(feature = "text-simhash"),
         "lsh" => cfg!(feature = "text-lsh"),
@@ -491,6 +495,7 @@ fn image_catalog() -> ModalityCatalog {
             presets: vec![],
         },
     ];
+    #[allow(clippy::match_like_matches_macro)]
     algorithms.retain(|a| match a.id {
         "phash" | "dhash" | "ahash" => cfg!(feature = "image-perceptual"),
         "semantic" => cfg!(feature = "image-semantic"),
@@ -687,6 +692,7 @@ fn audio_catalog() -> ModalityCatalog {
             presets: vec![],
         },
     ];
+    #[allow(clippy::match_like_matches_macro)]
     algorithms.retain(|a| match a.id {
         "panako" => cfg!(feature = "audio-panako"),
         "haitsma" => cfg!(feature = "audio-haitsma"),
