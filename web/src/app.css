@@ -1132,6 +1132,45 @@ section.final-cta {
 @media (max-width: 520px) {
   .integ-grid   { grid-template-columns: repeat(2, 1fr); }
   .feat-grid    { grid-template-columns: 1fr; }
+
+  /* Reclaim every horizontal pixel — at this size the page is one
+     column anyway, so generous side padding just chops content off. */
+  .shell { padding: 14px 12px 40px; }
+
+  /* Marketing demo + code panes: 28-30 px of padding on either side
+     swallows the visualisation on a 360 px phone. */
+  .demo .pane    { padding: 18px 14px; }
+  .code          { padding: 14px 14px; }
+
+  /* Pricing tiers, FAQ panel, hero meta: tighten chrome but keep the
+     content readable. */
+  .tier          { padding: 22px 16px 26px; }
+  section.final-cta { padding: 32px 18px; }
+
+  /* Big section headlines and the footer "big" art clamp use floors
+     that read as cramped on tiny phones — drop the floor so the text
+     actually scales down with the viewport. */
+  header.hero h1 { font-size: clamp(38px, 10vw, 56px); }
+  .footer-stack .big { font-size: clamp(40px, 14vw, 80px); }
+
+  /* Marketing flex rows with large gaps overflow on narrow viewports
+     because the gap eats most of the available width. */
+  .social, .social .logos { gap: 12px; }
+  .hero-meta .row { gap: 8px; }
+  .hero-meta .row .k { width: auto; min-width: 56px; }
+
+  /* Bring the playground filter-row controls in line. */
+  .pg-head, .pg-head-controls { gap: 0.5rem; }
+}
+
+/* Marketing 8-col fingerprint grid forces 8 cells onto one row. On
+   ultra-narrow phones (≤360 px) the cells become unreadable; flip to
+   a 4×10 layout so each cell reclaims width. */
+@media (max-width: 380px) {
+  .fp-grid {
+    grid-template-columns: repeat(4, 1fr);
+    aspect-ratio: 4 / 10;
+  }
 }
 
 /* ============================================================

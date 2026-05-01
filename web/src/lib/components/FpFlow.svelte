@@ -254,6 +254,13 @@
   .flow-wrap {
     width: 100%; height: 320px;
     background: var(--bg-2);
+    /* svelte-flow renders fixed-width nodes (130 px) with 170 px gaps,
+       so the diagram itself is wider than a phone viewport. Allow the
+       wrapper to scroll horizontally instead of clipping nodes off. */
+    overflow-x: auto;
+  }
+  @media (max-width: 520px) {
+    .flow-wrap { height: 360px; }
   }
   .flow-wrap :global(.svelte-flow) { background: transparent; }
   .flow-wrap :global(.svelte-flow__edge-path) { stroke: var(--ink-2); stroke-width: 1.5; }
