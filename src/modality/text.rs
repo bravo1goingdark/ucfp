@@ -830,11 +830,7 @@ pub fn inspect_text(text: &str, opts: &TextOpts) -> Result<InspectTextResult> {
 }
 
 #[cfg(feature = "inspect")]
-fn collect_tokens_capped(
-    text: &str,
-    opts: &TextOpts,
-    cap: usize,
-) -> (Vec<String>, usize) {
+fn collect_tokens_capped(text: &str, opts: &TextOpts, cap: usize) -> (Vec<String>, usize) {
     let mut out: Vec<String> = Vec::with_capacity(cap.min(64));
     let mut total = 0usize;
     let mut visit = |t: &str| {
@@ -854,8 +850,7 @@ fn collect_tokens_capped(
         // builds where they are not compiled in. Inspect is best-effort.
         #[cfg(feature = "text-cjk-japanese")]
         TokenizerKind::CjkJp => {
-            txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::Lindera)
-                .for_each_token(text, &mut visit);
+            txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::Lindera).for_each_token(text, &mut visit);
         }
         #[cfg(not(feature = "text-cjk-japanese"))]
         TokenizerKind::CjkJp => WordTokenizer.for_each_token(text, &mut visit),
@@ -887,36 +882,50 @@ fn collect_shingles_capped(
     };
     match opts.tokenizer {
         TokenizerKind::Word => {
-            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
-                .for_each_token(text, &mut visit);
+            ShingleTokenizer {
+                k: opts.k,
+                inner: WordTokenizer,
+            }
+            .for_each_token(text, &mut visit);
         }
         TokenizerKind::Grapheme => {
-            ShingleTokenizer { k: opts.k, inner: GraphemeTokenizer }
-                .for_each_token(text, &mut visit);
+            ShingleTokenizer {
+                k: opts.k,
+                inner: GraphemeTokenizer,
+            }
+            .for_each_token(text, &mut visit);
         }
         #[cfg(feature = "text-cjk-japanese")]
         TokenizerKind::CjkJp => {
             ShingleTokenizer {
                 k: opts.k,
                 inner: txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::Lindera),
-            }.for_each_token(text, &mut visit);
+            }
+            .for_each_token(text, &mut visit);
         }
         #[cfg(not(feature = "text-cjk-japanese"))]
         TokenizerKind::CjkJp => {
-            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
-                .for_each_token(text, &mut visit);
+            ShingleTokenizer {
+                k: opts.k,
+                inner: WordTokenizer,
+            }
+            .for_each_token(text, &mut visit);
         }
         #[cfg(feature = "text-cjk-korean")]
         TokenizerKind::CjkKo => {
             ShingleTokenizer {
                 k: opts.k,
                 inner: txtfp::CjkTokenizer::new(txtfp::CjkSegmenter::LinderaKoDic),
-            }.for_each_token(text, &mut visit);
+            }
+            .for_each_token(text, &mut visit);
         }
         #[cfg(not(feature = "text-cjk-korean"))]
         TokenizerKind::CjkKo => {
-            ShingleTokenizer { k: opts.k, inner: WordTokenizer }
-                .for_each_token(text, &mut visit);
+            ShingleTokenizer {
+                k: opts.k,
+                inner: WordTokenizer,
+            }
+            .for_each_token(text, &mut visit);
         }
     }
     (out, total)
@@ -933,7 +942,7 @@ fn truncate_chars(s: &str, max_bytes: usize) -> String {
         cut -= 1;
     }
     let mut out = s[..cut].to_string();
-    out.push_str("…");
+    out.push('…');
     out
 }
 
@@ -947,4 +956,3 @@ fn hex_lower(bytes: &[u8]) -> String {
     }
     out
 }
-

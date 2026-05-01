@@ -86,8 +86,7 @@ pub(super) async fn info() -> Json<InfoResponse> {
 /// `GET /v1/algorithms` — machine-readable schema of every algorithm
 /// the server can run. The frontend renders the playground tuning form
 /// generically from this manifest.
-pub(super) async fn algorithms()
--> Json<crate::server::algorithms_manifest::AlgorithmsResponse> {
+pub(super) async fn algorithms() -> Json<crate::server::algorithms_manifest::AlgorithmsResponse> {
     Json(crate::server::algorithms_manifest::build())
 }
 
@@ -680,13 +679,11 @@ pub(super) async fn ingest_audio<I: IndexBackend>(
     let body = if let Some(input_id) = params.input_id {
         let entry = crate::server::inputs_cache::cache()
             .get(tenant_id, input_id)
-            .ok_or_else(|| {
-                Error::Modality(format!("input_id {input_id} not found or expired"))
-            })?;
-        if let Some(sr) = entry.sample_rate {
-            if params.sample_rate == 0 {
-                params.sample_rate = sr;
-            }
+            .ok_or_else(|| Error::Modality(format!("input_id {input_id} not found or expired")))?;
+        if let Some(sr) = entry.sample_rate
+            && params.sample_rate == 0
+        {
+            params.sample_rate = sr;
         }
         entry.bytes
     } else {
@@ -905,12 +902,7 @@ pub(super) async fn ingest_audio_watermark<I: IndexBackend>(
         let opts = crate::modality::audio::WatermarkOpts {
             threshold: params.watermark_threshold,
         };
-        crate::modality::audio::detect_watermark_with(
-            &samples,
-            params.sample_rate,
-            model,
-            &opts,
-        )?
+        crate::modality::audio::detect_watermark_with(&samples, params.sample_rate, model, &opts)?
     } else {
         crate::modality::audio::detect_watermark(&samples, params.sample_rate, model)?
     };
@@ -1047,7 +1039,6 @@ pub(super) async fn delete_input(
     })
 }
 
-
 // ── Pipeline inspect (feature `inspect`) ───────────────────────────────
 
 /// `POST /v1/pipeline/inspect/text` — run the text fingerprinting
@@ -1099,7 +1090,6 @@ pub(super) async fn inspect_text<I: IndexBackend>(
     Ok(Json(result))
 }
 
-
 /// `POST /v1/pipeline/inspect/image/{tenant_id}` — image-pipeline
 /// stage extractor: original thumbnail + 32×32 grayscale + 8×8
 /// grayscale + AHash mean + final fingerprint hex. All thumbnails
@@ -1126,11 +1116,16 @@ pub(super) async fn inspect_image<I: IndexBackend>(
     // Build the same PreprocessConfig the regular ingest path would:
     // missing fields fall back to the SDK defaults.
     let mut pre = imgfprint::PreprocessConfig::default();
-    if let Some(v) = q.max_input_bytes { pre.max_input_bytes = v; }
-    if let Some(v) = q.max_dimension   { pre.max_dimension   = v; }
-    if let Some(v) = q.min_dimension   { pre.min_dimension   = v; }
+    if let Some(v) = q.max_input_bytes {
+        pre.max_input_bytes = v;
+    }
+    if let Some(v) = q.max_dimension {
+        pre.max_dimension = v;
+    }
+    if let Some(v) = q.min_dimension {
+        pre.min_dimension = v;
+    }
 
     let result = crate::modality::image::inspect_image(&body, &pre)?;
     Ok(Json(result))
 }
-

@@ -166,12 +166,10 @@ where
     );
 
     #[cfg(feature = "inspect")]
-    let r = r
-        .route("/v1/inputs", post(handlers::put_input))
-        .route(
-            "/v1/inputs/{tenant_id}/{input_id}",
-            axum::routing::delete(handlers::delete_input),
-        );
+    let r = r.route("/v1/inputs", post(handlers::put_input)).route(
+        "/v1/inputs/{tenant_id}/{input_id}",
+        axum::routing::delete(handlers::delete_input),
+    );
 
     #[cfg(all(feature = "inspect", feature = "text"))]
     let r = r.route(

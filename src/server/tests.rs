@@ -1076,7 +1076,6 @@ async fn input_cache_roundtrip_then_text_ingest_via_input_id() {
     assert!(bad.status().is_client_error());
 }
 
-
 #[cfg(feature = "inspect")]
 #[tokio::test]
 async fn pipeline_inspect_text_returns_each_stage() {
@@ -1101,7 +1100,10 @@ async fn pipeline_inspect_text_returns_each_stage() {
     assert_eq!(body["algorithm"], "minhash-h128");
     // Canonicalization lowercases the input.
     let canon = body["canonicalized"].as_str().unwrap();
-    assert!(canon.starts_with("hello"), "expected lowercase canonicalized: {canon}");
+    assert!(
+        canon.starts_with("hello"),
+        "expected lowercase canonicalized: {canon}"
+    );
     // Token list is non-empty and contains expected tokens.
     let tokens = body["tokens"].as_array().unwrap();
     assert!(!tokens.is_empty());
@@ -1115,7 +1117,6 @@ async fn pipeline_inspect_text_returns_each_stage() {
     assert_eq!(fp.len(), 2064);
     assert_eq!(body["fingerprint_bytes"], 1032);
 }
-
 
 // Regression contract: a no-opts MinHash<128> fingerprint of a known
 // fixed input must produce the same bytes after refactors. Catches
@@ -1161,7 +1162,6 @@ async fn golden_text_minhash_no_opts_is_stable() {
     assert_eq!(body["fingerprint_bytes"], 1032);
 }
 
-
 #[cfg(all(feature = "inspect", feature = "image"))]
 #[tokio::test]
 async fn pipeline_inspect_image_returns_each_stage() {
@@ -1189,7 +1189,11 @@ async fn pipeline_inspect_image_returns_each_stage() {
     // Every base64 stage is non-empty and looks PNG-shaped (starts with the
     // base64 of the PNG magic byte 0x89).
     let original = body["original_png_b64"].as_str().unwrap();
-    assert!(original.starts_with("iVBORw0KGgo"), "original_png_b64 missing PNG header: {}", &original[..16]);
+    assert!(
+        original.starts_with("iVBORw0KGgo"),
+        "original_png_b64 missing PNG header: {}",
+        &original[..16]
+    );
     let g32 = body["gray32_png_b64"].as_str().unwrap();
     assert!(g32.starts_with("iVBORw0KGgo"));
     let g8 = body["gray8_png_b64"].as_str().unwrap();
@@ -1202,4 +1206,3 @@ async fn pipeline_inspect_image_returns_each_stage() {
     assert_eq!(body["fingerprint_bytes"], 536);
     assert_eq!(body["fingerprint_hex"].as_str().unwrap().len(), 1072);
 }
-

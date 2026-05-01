@@ -1,16 +1,23 @@
 //! `GET /v1/algorithms` — machine-readable schema of every algorithm
 //! the server can run, with the full set of tunable knobs.
-#![allow(dead_code)] // helper builders are only used by cfg-gated catalogs.
 //!
 //! The frontend reads this manifest at boot and renders the playground's
 //! tuning form generically: one labeled control per [`Tunable`], typed by
 //! [`TunableKind`], defaulted from [`Tunable::default_value`].
 //!
 //! When you add a knob upstream:
-//!   1. Extend the matching `*Params` DTO in `dto.rs`.
-//!   2. Wire the field into the modality wrapper in `modality/{...}.rs`.
-//!   3. Add a [`Tunable`] entry here.
+//!
+//! 1. Extend the matching `*Params` DTO in `dto.rs`.
+//! 2. Wire the field into the modality wrapper in `modality/{...}.rs`.
+//! 3. Add a [`Tunable`] entry here.
+//!
 //! Everything else (UI, serde wire-format, defaults) flows from this file.
+
+// Helper builders below are used only by the per-modality `*_catalog()`
+// arms, each cfg-gated on a modality feature. Slim builds (no modality
+// features) correctly flag them as unused — silence the warning rather
+// than mirroring all six cfg gates per helper.
+#![allow(dead_code)]
 
 use serde::Serialize;
 
@@ -228,16 +235,46 @@ fn text_catalog() -> ModalityCatalog {
                 "Unicode normalization form. NFKC collapses ligatures and full-width forms (default).",
                 &["nfc", "nfkc", "none"],
             ),
-            t_bool("canon_case_fold", "Case fold", "Apply Unicode case folding (default on)."),
-            t_bool("canon_strip_bidi", "Strip Bidi", "Remove Bidi-control codepoints (Trojan-Source defense)."),
-            t_bool("canon_strip_format", "Strip format chars", "Remove Cf-category codepoints (BOM, ZWSP, …)."),
-            t_bool("canon_apply_confusable", "UTS #39 confusable skeleton", "Requires the `text-security` feature."),
+            t_bool(
+                "canon_case_fold",
+                "Case fold",
+                "Apply Unicode case folding (default on).",
+            ),
+            t_bool(
+                "canon_strip_bidi",
+                "Strip Bidi",
+                "Remove Bidi-control codepoints (Trojan-Source defense).",
+            ),
+            t_bool(
+                "canon_strip_format",
+                "Strip format chars",
+                "Remove Cf-category codepoints (BOM, ZWSP, …).",
+            ),
+            t_bool(
+                "canon_apply_confusable",
+                "UTS #39 confusable skeleton",
+                "Requires the `text-security` feature.",
+            ),
         ]
     };
     let common_tok = || {
         vec![
-            t_int("k", "Shingle k", "Width of the k-shingle window (default 5).", 1, 16, 1),
-            t_int("h", "MinHash slots (H)", "Signature size; higher = better Jaccard estimate (default 128).", 16, 1024, 16),
+            t_int(
+                "k",
+                "Shingle k",
+                "Width of the k-shingle window (default 5).",
+                1,
+                16,
+                1,
+            ),
+            t_int(
+                "h",
+                "MinHash slots (H)",
+                "Signature size; higher = better Jaccard estimate (default 128).",
+                16,
+                1024,
+                16,
+            ),
             t_enum(
                 "tokenizer",
                 "Tokenizer",
@@ -484,11 +521,46 @@ fn audio_catalog() -> ModalityCatalog {
             description: "Landmark-pair hashes; classic Shazam-style fingerprint.",
             tunables: vec![
                 sample_rate(),
-                t_int("fan_out", "Fan-out", "Target peaks paired with each anchor (default 10).", 1, 64, 1),
-                t_int("target_zone_t", "Target zone Δt (frames)", "Max time delta for pairing (default 63).", 1, 512, 1),
-                t_int("target_zone_f", "Target zone Δf (bins)", "Max frequency delta for pairing (default 64).", 1, 1024, 1),
-                t_int("peaks_per_sec", "Peaks per second", "Per-second cap on peak count (default 30).", 1, 256, 1),
-                t_float("min_anchor_mag_db", "Min anchor magnitude (dB)", "Magnitude floor for anchors (default -50).", -120.0, 0.0, 1.0),
+                t_int(
+                    "fan_out",
+                    "Fan-out",
+                    "Target peaks paired with each anchor (default 10).",
+                    1,
+                    64,
+                    1,
+                ),
+                t_int(
+                    "target_zone_t",
+                    "Target zone Δt (frames)",
+                    "Max time delta for pairing (default 63).",
+                    1,
+                    512,
+                    1,
+                ),
+                t_int(
+                    "target_zone_f",
+                    "Target zone Δf (bins)",
+                    "Max frequency delta for pairing (default 64).",
+                    1,
+                    1024,
+                    1,
+                ),
+                t_int(
+                    "peaks_per_sec",
+                    "Peaks per second",
+                    "Per-second cap on peak count (default 30).",
+                    1,
+                    256,
+                    1,
+                ),
+                t_float(
+                    "min_anchor_mag_db",
+                    "Min anchor magnitude (dB)",
+                    "Magnitude floor for anchors (default -50).",
+                    -120.0,
+                    0.0,
+                    1.0,
+                ),
             ],
             presets: vec![Preset {
                 id: "balanced",
@@ -502,11 +574,46 @@ fn audio_catalog() -> ModalityCatalog {
             description: "Tempo-invariant (±5%) triplet-hash fingerprint.",
             tunables: vec![
                 sample_rate(),
-                t_int("panako_fan_out", "Fan-out", "Triplets per anchor (default 5).", 1, 64, 1),
-                t_int("panako_target_zone_t", "Target zone Δt (frames)", "Max time delta (default 96).", 1, 512, 1),
-                t_int("panako_target_zone_f", "Target zone Δf (bins)", "Max frequency delta (default 96).", 1, 1024, 1),
-                t_int("panako_peaks_per_sec", "Peaks per second", "Per-second cap (default 30).", 1, 256, 1),
-                t_float("panako_min_anchor_mag_db", "Min anchor magnitude (dB)", "Magnitude floor (default -50).", -120.0, 0.0, 1.0),
+                t_int(
+                    "panako_fan_out",
+                    "Fan-out",
+                    "Triplets per anchor (default 5).",
+                    1,
+                    64,
+                    1,
+                ),
+                t_int(
+                    "panako_target_zone_t",
+                    "Target zone Δt (frames)",
+                    "Max time delta (default 96).",
+                    1,
+                    512,
+                    1,
+                ),
+                t_int(
+                    "panako_target_zone_f",
+                    "Target zone Δf (bins)",
+                    "Max frequency delta (default 96).",
+                    1,
+                    1024,
+                    1,
+                ),
+                t_int(
+                    "panako_peaks_per_sec",
+                    "Peaks per second",
+                    "Per-second cap (default 30).",
+                    1,
+                    256,
+                    1,
+                ),
+                t_float(
+                    "panako_min_anchor_mag_db",
+                    "Min anchor magnitude (dB)",
+                    "Magnitude floor (default -50).",
+                    -120.0,
+                    0.0,
+                    1.0,
+                ),
             ],
             presets: vec![],
         },
@@ -516,8 +623,22 @@ fn audio_catalog() -> ModalityCatalog {
             description: "Philips robust hash; band-power sign bits, very compact (312 B/sec).",
             tunables: vec![
                 sample_rate(),
-                t_float("haitsma_fmin", "Lower band edge (Hz)", "Default 300.", 1.0, 22_000.0, 1.0),
-                t_float("haitsma_fmax", "Upper band edge (Hz)", "Default 2000.", 1.0, 22_000.0, 1.0),
+                t_float(
+                    "haitsma_fmin",
+                    "Lower band edge (Hz)",
+                    "Default 300.",
+                    1.0,
+                    22_000.0,
+                    1.0,
+                ),
+                t_float(
+                    "haitsma_fmax",
+                    "Upper band edge (Hz)",
+                    "Default 2000.",
+                    1.0,
+                    22_000.0,
+                    1.0,
+                ),
             ],
             presets: vec![],
         },
@@ -527,8 +648,19 @@ fn audio_catalog() -> ModalityCatalog {
             description: "Generic log-mel ONNX embedder; per-window dense vectors.",
             tunables: vec![
                 sample_rate(),
-                t_string("model_id", "Model path", "Filesystem path to the ONNX model."),
-                t_float("neural_fmax", "Mel filterbank fmax (Hz)", "Override; defaults to sample_rate / 2.", 1.0, 96_000.0, 1.0),
+                t_string(
+                    "model_id",
+                    "Model path",
+                    "Filesystem path to the ONNX model.",
+                ),
+                t_float(
+                    "neural_fmax",
+                    "Mel filterbank fmax (Hz)",
+                    "Override; defaults to sample_rate / 2.",
+                    1.0,
+                    96_000.0,
+                    1.0,
+                ),
             ],
             presets: vec![],
         },
@@ -538,8 +670,19 @@ fn audio_catalog() -> ModalityCatalog {
             description: "Run an AudioSeal-style detector; no fingerprint stored, returns confidence + payload.",
             tunables: vec![
                 sample_rate(),
-                t_string("model_id", "Model path", "Filesystem path to the AudioSeal ONNX detector."),
-                t_float("watermark_threshold", "Detection threshold", "Confidence cutoff in [0, 1] (default 0.5).", 0.0, 1.0, 0.01),
+                t_string(
+                    "model_id",
+                    "Model path",
+                    "Filesystem path to the AudioSeal ONNX detector.",
+                ),
+                t_float(
+                    "watermark_threshold",
+                    "Detection threshold",
+                    "Confidence cutoff in [0, 1] (default 0.5).",
+                    0.0,
+                    1.0,
+                    0.01,
+                ),
             ],
             presets: vec![],
         },
