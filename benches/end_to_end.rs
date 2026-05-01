@@ -29,8 +29,8 @@ fn bench_text_minhash(c: &mut Criterion) {
     g.throughput(Throughput::Bytes(text.len() as u64));
     g.bench_function("default-opts", |b| {
         b.iter(|| {
-            let rec = ucfp::text::fingerprint_minhash(black_box(&text), 0, 1)
-                .expect("text fingerprint");
+            let rec =
+                ucfp::text::fingerprint_minhash(black_box(&text), 0, 1).expect("text fingerprint");
             black_box(rec.fingerprint.len())
         });
     });
@@ -45,8 +45,7 @@ fn bench_image_multihash(c: &mut Criterion) {
     g.throughput(Throughput::Bytes(png.len() as u64));
     g.bench_function("default-preprocess", |b| {
         b.iter(|| {
-            let rec = ucfp::image::fingerprint(black_box(&png), 0, 1)
-                .expect("image fingerprint");
+            let rec = ucfp::image::fingerprint(black_box(&png), 0, 1).expect("image fingerprint");
             black_box(rec.fingerprint.len())
         });
     });
