@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { fingerprintLocal, bytesEntropy, hammingDistance } from '$lib/utils/fingerprint';
+  import { fingerprintLocal, bytesEntropy, hammingDistance, cosineSimilarity, l2Distance } from '$lib/utils/fingerprint';
   import FpFlow from '$components/FpFlow.svelte';
   import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
   import { buildResampledAudioForm, AUDIO_RATES_BY_ALG } from '$lib/utils/audioResample';
@@ -171,9 +171,12 @@
 
   // Last response embedding (when ?return_embedding=1 was sent and the
   // algorithm produced one). Used by the "Find similar" handoff.
-  let lastEmbedding = $state<number[] | null>(null);
-  let lastRecordId  = $state<string | null>(null);
-  let lastTenantId  = $state<number>(0);
+  let lastEmbedding  = $state<number[] | null>(null);
+  // Compare-mode counterpart for B — semantic algorithms need both
+  // sides' vectors so the compare panel can compute cosine + L2.
+  let lastEmbeddingB = $state<number[] | null>(null);
+  let lastRecordId   = $state<string | null>(null);
+  let lastTenantId   = $state<number>(0);
 
   // Controlled open state for the three <details> panels — sidesteps the
   // sporadic Chromium issue where a flex/grid summary swallows the click
@@ -246,6 +249,15 @@
     return mask;
   });
 
+  // Vector compare for embedding-bearing algorithms. Cosine ranges in
+  // [-1, 1] (1 = identical direction); L2 is unbounded but finite.
+  const cosineSim = $derived.by(() =>
+    lastEmbedding && lastEmbeddingB ? cosineSimilarity(lastEmbedding, lastEmbeddingB) : null,
+  );
+  const l2Dist = $derived.by(() =>
+    lastEmbedding && lastEmbeddingB ? l2Distance(lastEmbedding, lastEmbeddingB) : null,
+  );
+
   const needsAdvanced = $derived(NEEDS_API_KEY.has(algorithm) || NEEDS_MODEL.has(algorithm));
 
   // ── localStorage persistence ──────────────────────────────────────────────
@@ -283,6 +295,7 @@
     cells = []; cellsB = [];
     hexBytesA = null; hexBytesB = null;
     fullBytesA = null; fullBytesB = null;
+    lastEmbedding = null; lastEmbeddingB = null;
   }
 
   // ── FormData builder (audio resampling delegates to shared helper) ───────
@@ -341,6 +354,10 @@
     entropy: string;
     latencyMs: string;
     isLocal: boolean;
+    /** Dense embedding when the algorithm produced one (semantic-*).
+     *  Threaded through so compare-mode can store A's and B's separately
+     *  for cosine + L2 panels. */
+    embedding: number[] | null;
   };
   type FpRunWatermark = {
     kind: 'watermark';
@@ -433,6 +450,7 @@
         entropy: `${bytesEntropy(local.bytes).toFixed(2)} bits`,
         latencyMs: `${elapsed} ms`,
         isLocal: true,
+        embedding: null,
       };
     }
     if (res.status === 501) {
@@ -445,12 +463,15 @@
 
     const data = await res.json() as Record<string, unknown>;
 
-    // Stash record_id + tenant_id + embedding from the *just-completed*
-    // call so the "Save to records" and "Find similar" buttons have
-    // something to use.
+    // Stash record_id + tenant_id from the just-completed call so the
+    // "Save to records" and "Find similar" buttons have something to
+    // use. The embedding is threaded through the FpRunOk result so the
+    // caller (compute / computeB) can write it to the matching slot —
+    // writing it globally here would clobber A's embedding when B runs.
     lastRecordId = data.record_id != null ? String(data.record_id) : null;
     lastTenantId = typeof data.tenant_id === 'number' ? data.tenant_id : 0;
-    lastEmbedding = Array.isArray(data.embedding) ? (data.embedding as number[]) : null;
+    const embedding: number[] | null =
+      Array.isArray(data.embedding) ? (data.embedding as number[]) : null;
 
     if (data.watermark === true) {
       return {
@@ -489,6 +510,7 @@
       entropy: `${bytesEntropy(displayBytes).toFixed(2)} bits`,
       latencyMs: `${elapsed} ms`,
       isLocal: false,
+      embedding,
     };
   }
 
@@ -562,6 +584,7 @@
       entropy    = result.entropy;
       latencyMs  = result.latencyMs;
       isLocal    = result.isLocal;
+      lastEmbedding = result.embedding;
       hasResult  = true;
       // Record opts snapshot so the live-tune effect doesn't fire an
       // immediate redundant retune right after this manual compute.
@@ -758,6 +781,7 @@
       entropyB   = result.entropy;
       latencyMsB = result.latencyMs;
       isLocalB   = result.isLocal;
+      lastEmbeddingB = result.embedding;
       hasResultB = true;
     } catch (e) {
       errorMsgB = `Network error: ${(e as Error).message}`;
@@ -786,7 +810,7 @@
         fullBytesA = ra.fullBytes;
         hexStr = ra.hexStr; algLabel = ra.algLabel; cfgHash = ra.cfgHash;
         fpBytes = ra.fpBytes; entropy = ra.entropy; latencyMs = ra.latencyMs;
-        isLocal = ra.isLocal; hasResult = true;
+        isLocal = ra.isLocal; lastEmbedding = ra.embedding; hasResult = true;
       }
       // apply B
       if (rb.kind === 'error') errorMsgB = rb.msg;
@@ -795,7 +819,7 @@
         fullBytesB = rb.fullBytes;
         hexStrB = rb.hexStr; algLabelB = rb.algLabel;
         fpBytesB = rb.fpBytes; entropyB = rb.entropy; latencyMsB = rb.latencyMs;
-        isLocalB = rb.isLocal; hasResultB = true;
+        isLocalB = rb.isLocal; lastEmbeddingB = rb.embedding; hasResultB = true;
       }
     } catch (e) {
       errorMsg = `Network error: ${(e as Error).message}`;
@@ -1401,6 +1425,39 @@
           <AlgorithmView algorithm={algLabel} bytes={fullBytesA} diffAgainst={fullBytesB} />
         </div>
       {/if}
+
+      <!-- Vector compare for embedding-bearing algorithms (semantic-*, neural).
+           Cosine + L2 are surfaced because Hamming alone is misleading on
+           dense vectors — two embeddings can have near-identical bit patterns
+           on a few dimensions but very different overall geometry. -->
+      {#if lastEmbedding && lastEmbeddingB && cosineSim != null && l2Dist != null}
+        {@const cosOk = cosineSim != null}
+        {@const cosBar = cosOk ? Math.max(0, Math.min(100, ((cosineSim! + 1) / 2) * 100)) : 0}
+        <div class="vec-compare-section">
+          <div class="pane-label">Vector compare · embedding ({lastEmbedding.length}-d)</div>
+          <div class="vec-stats">
+            <div class="vec-stat">
+              <span class="vec-num">{cosineSim!.toFixed(4)}</span>
+              <span class="vec-label">cosine similarity</span>
+              <div class="vec-bar"><div class="vec-bar-fill" style="width:{cosBar}%"></div></div>
+            </div>
+            <div class="vec-stat">
+              <span class="vec-num">{l2Dist!.toFixed(4)}</span>
+              <span class="vec-label">L2 distance</span>
+            </div>
+          </div>
+          <div class="vec-bars">
+            <div class="vec-side">
+              <div class="vec-side-label">A</div>
+              <EmbeddingBars vector={lastEmbedding} maxBars={128} height={56} />
+            </div>
+            <div class="vec-side">
+              <div class="vec-side-label">B</div>
+              <EmbeddingBars vector={lastEmbeddingB} maxBars={128} height={56} />
+            </div>
+          </div>
+        </div>
+      {/if}
     {/if}
   {/if}
 
@@ -1599,6 +1656,68 @@
   .hex-str.copyable:focus  { outline: 2px solid var(--accent, #6ad); outline-offset: 1px; }
   .hex-str.copyable:active { background: var(--bg-3, rgba(255,255,255,0.08)); }
   /* Floating toast surfaced after a successful (or failed) copy. */
+  .vec-compare-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 0.65rem 0.75rem;
+    background: var(--bg-2, rgba(255,255,255,0.03));
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border-radius: 0.55rem;
+  }
+  .vec-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.6rem;
+  }
+  .vec-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.45rem 0.55rem;
+    background: var(--bg, rgba(255,255,255,0.02));
+    border: 1px solid var(--border, rgba(255,255,255,0.06));
+    border-radius: 0.4rem;
+  }
+  .vec-num {
+    font-family: var(--mono, monospace);
+    font-size: 1.1rem;
+    color: var(--ink, inherit);
+  }
+  .vec-label {
+    font-size: 0.7rem;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .vec-bar {
+    margin-top: 0.3rem;
+    height: 4px;
+    background: var(--bg-2, rgba(255,255,255,0.06));
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .vec-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, oklch(0.55 0.18 240), oklch(0.7 0.18 150));
+    transition: width 0.2s ease-out;
+  }
+  .vec-bars {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem;
+  }
+  .vec-side {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .vec-side-label {
+    font-family: var(--mono, monospace);
+    font-size: 0.7rem;
+    opacity: 0.65;
+    text-transform: uppercase;
+  }
   .copy-toast {
     position: fixed;
     bottom: 1.25rem;

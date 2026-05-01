@@ -51,6 +51,37 @@ export function hammingDistance(a: Uint8Array, b: Uint8Array): number {
   return d;
 }
 
+/**
+ * Cosine similarity in [-1, 1] between two equal-length dense vectors.
+ * Returns null when either vector is empty / mismatched length / zero.
+ * Used by the compare-mode embedding panel for semantic algorithms.
+ */
+export function cosineSimilarity(a: number[], b: number[]): number | null {
+  if (!a.length || a.length !== b.length) return null;
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom === 0 ? null : dot / denom;
+}
+
+/**
+ * Euclidean (L2) distance between two equal-length dense vectors.
+ * Returns null when lengths mismatch.
+ */
+export function l2Distance(a: number[], b: number[]): number | null {
+  if (!a.length || a.length !== b.length) return null;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const d = a[i] - b[i];
+    sum += d * d;
+  }
+  return Math.sqrt(sum);
+}
+
 export function fingerprintLocal(input: string): {
   bytes: Uint8Array;
   hex: string;

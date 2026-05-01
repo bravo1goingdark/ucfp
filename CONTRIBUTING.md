@@ -125,6 +125,22 @@ If your change only touches a subset of crates, you can run individual commands 
   when you change hot paths and paste results into the PR if they inform the review.
 - If you add a new feature flag, add tests for both enabled and disabled states so CI validates both.
 
+### End-to-end perf bench
+
+`benches/end_to_end.rs` measures one fingerprint per modality (text MinHash,
+image multi-hash, audio Wang) using the same modality wrappers `/v1/ingest/*`
+calls. Use it locally to track the perf delta of allocator / CPU-baseline /
+hot-path changes across releases:
+
+```bash
+cargo bench --bench end_to_end                                # current baseline
+RUSTFLAGS="-C target-cpu=native" cargo bench --bench end_to_end   # native opt-in
+```
+
+CI does **not** run this — criterion takes minutes per pass and bench numbers
+aren't deterministic enough across runners to gate PRs. Operators run the
+bench when changing a hot path and post the before/after into the PR.
+
 ### CPU baseline / `target-cpu=native`
 
 The committed `.cargo/config.toml` pins the codegen baseline to portable
