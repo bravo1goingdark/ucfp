@@ -59,6 +59,7 @@ impl From<RecordIn> for Record {
             embedding: r.embedding,
             model_id: r.model_id,
             metadata: Bytes::from(r.metadata),
+            text: None,
         }
     }
 }

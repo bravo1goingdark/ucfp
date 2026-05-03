@@ -1,6 +1,7 @@
 ---
 title: API reference — image
 order: 4
+category: API reference
 description: Image fingerprinting — multi-hash, perceptual hashes (pHash, dHash, aHash), and semantic embeddings.
 ---
 

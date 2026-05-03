@@ -18,7 +18,7 @@ default = ["embedded", "server", "audio", "image", "text"]
 # runtime stays gated under `server`.
 embedded = [
     "dep:redb", "dep:hnsw_rs", "dep:pulp", "dep:roaring", "dep:rkyv", "dep:rayon",
-    "dep:tokio",
+    "dep:tokio", "dep:fst",
 ]
 
 # HTTP server binary. Disable for library-only consumers.
@@ -117,6 +117,11 @@ pulp    = { version = "0.22", optional = true }
 roaring = { version = "0.11", optional = true }
 rkyv    = { version = "0.8",  optional = true }
 rayon   = { version = "1.12", optional = true }
+# BM25 term dictionary (`bm25_term_fst_v1`). BurntSushi's mmap-friendly
+# FST per ARCHITECTURE §4 — every commit rebuilds the per-tenant map
+# from the redb-resident posting universe, so the dict stays consistent
+# with the postings table inside one redb txn.
+fst     = { version = "0.4.7", optional = true }
 
 # ── Server (feature-gated) ──────────────────────────────────────────────
 axum                        = { version = "0.8", optional = true }

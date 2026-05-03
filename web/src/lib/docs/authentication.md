@@ -1,6 +1,7 @@
 ---
 title: Authentication
 order: 2
+category: Get started
 description: Bearer tokens, the X-Api-Key fallback, and how to rotate keys safely.
 ---
 

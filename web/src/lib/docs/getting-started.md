@@ -1,6 +1,7 @@
 ---
 title: Getting started
 order: 1
+category: Get started
 description: Install UCFP, send your first fingerprint, and learn the proxy contract behind /api/fingerprint.
 ---
 

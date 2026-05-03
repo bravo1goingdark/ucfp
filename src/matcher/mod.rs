@@ -91,18 +91,13 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
     pub async fn search(&self, q: &Query) -> Result<Vec<Hit>> {
         let mut fused: Vec<Hit> = match (q.vector.as_ref(), q.terms.is_empty()) {
             (Some(v), false) => {
-                // Sequential for now; benchmark before parallelizing — see
-                // ARCHITECTURE §3 for the latency budget. When the parallel
-                // path matters, add `futures` to core deps and `try_join!`.
+                // Hybrid: kick off knn + bm25 in parallel via tokio::join.
+                // Both calls are spawn_blocking-backed inside the embedded
+                // backend, so they actually use independent worker threads.
                 let terms: Vec<&str> = q.terms.iter().map(String::as_str).collect();
-                let vec_hits = self
-                    .index
-                    .knn(q.tenant_id, v, q.k, q.filter.as_ref())
-                    .await?;
-                let bm_hits = self
-                    .index
-                    .bm25(q.tenant_id, &terms, q.k, q.filter.as_ref())
-                    .await?;
+                let knn_fut = self.index.knn(q.tenant_id, v, q.k, q.filter.as_ref());
+                let bm_fut = self.index.bm25(q.tenant_id, &terms, q.k, q.filter.as_ref());
+                let (vec_hits, bm_hits) = tokio::try_join!(knn_fut, bm_fut)?;
                 rrf(&[&vec_hits, &bm_hits], q.rrf_k)
             }
             (Some(v), true) => {

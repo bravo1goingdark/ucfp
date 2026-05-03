@@ -1,6 +1,7 @@
 ---
 title: API reference — text
 order: 3
+category: API reference
 description: Every text fingerprinting algorithm UCFP exposes — MinHash, SimHash, LSH, TLSH, semantic embeddings — with full parameter coverage.
 ---
 
@@ -194,3 +195,53 @@ Every text route returns the same envelope:
 ```
 
 `config_hash` is the txtfp `config_hash(canon, tokenizer_tag, algorithm_tag)` — two records with the same `config_hash` are directly comparable; different `config_hash` means you must re-fingerprint to compare.
+
+## BM25 keyword search
+
+Every text record ingested through `minhash`, `simhash`, `lsh`, or `tlsh` is **also indexed for BM25** in the same redb transaction that stores the fingerprint. No separate ingest call.
+
+> [!NOTE]
+> BM25 indexing happens automatically. The `text` field on `Record` carries the post-preprocess form (HTML / Markdown stripped) so BM25 matches what users actually see.
+
+### Query — `POST /v1/search`
+
+```bash
+curl -sS https://ucfp.dev/v1/search \
+  -H 'Authorization: Bearer ucfp_…' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "tenant_id": 17,
+    "terms": ["rust", "async", "language"],
+    "k": 10
+  }'
+```
+
+Returns top-`k` records ranked by Okapi BM25 (`k1=1.2`, `b=0.75`).
+
+### Hybrid (vector + BM25)
+
+Send both `vector` and `terms` to fuse with Reciprocal Rank Fusion:
+
+```json
+{
+  "tenant_id": 17,
+  "vector": [0.018, -0.221, ...],
+  "terms": ["rust", "async"],
+  "k": 10,
+  "rrf_k": 60
+}
+```
+
+The two retrievals run in parallel inside the matcher. `rrf_k=60` is the universal default (Azure AI Search, Elasticsearch, Qdrant, Weaviate).
+
+### Tokenizer
+
+The BM25 path uses a simple lowercase + non-alphanumeric splitter. CJK / phrase / fuzzy / regex queries are out of scope for the redb-backed implementation — promote to tantivy if those become product requirements (see `docs/ARCHITECTURE.md` §4).
+
+### Limits
+
+| Limit | Value | Notes |
+| --- | --- | --- |
+| Hyperparams | `k1=1.2`, `b=0.75` | Robertson/Spärck Jones defaults; not currently configurable |
+| `filter` parameter | unsupported on BM25 | Returns `Error::Unsupported`; metadata pre-filter is a follow-up |
+| Term universe | bounded by FST + redb size | ARCHITECTURE §4 calls out ~few-GB term universes |

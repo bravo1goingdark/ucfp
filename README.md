@@ -231,6 +231,13 @@ docker run -p 8080:8080 \
 | **Video** | Planned — keyframe extraction, scene hashes |
 | **Document** | Planned — OCR + layout fingerprinting |
 
+| Retrieval | Status |
+|:----------|:-------|
+| **Vector k-NN** | Stable — brute-force cosine over `redb` (HNSW deferred until ~1M vectors) |
+| **BM25 keyword** | Stable — `fst::Map` term dict + `roaring` postings inside the same redb txn as the fingerprint write; `k1=1.2`, `b=0.75`. See `api-reference/text/bm25` |
+| **Hybrid (vector + BM25)** | Stable — runs both retrievers in parallel via `tokio::try_join!`, fused with Reciprocal Rank Fusion (`rrf_k=60`) |
+| **Filter pre-pass on BM25** | Planned — roaring intersection on the filter expression before scoring |
+
 ## Development
 
 ```bash

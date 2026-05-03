@@ -1,6 +1,7 @@
 ---
 title: SDK — JavaScript
 order: 9
+category: SDKs
 description: Install the @ucfp/client npm package and call every modality from Node, Bun, Deno, or the browser.
 ---
 

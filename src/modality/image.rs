@@ -83,6 +83,7 @@ pub fn fingerprint_with(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -188,6 +189,7 @@ fn fingerprint_single(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -234,6 +236,7 @@ pub fn fingerprint_semantic(
         embedding: Some(vector),
         model_id: Some(model_path.to_string()),
         metadata: Bytes::new(),
+        text: None,
     })
 }
 

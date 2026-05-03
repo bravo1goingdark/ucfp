@@ -9,11 +9,12 @@ export const load: PageServerLoad = async () => {
   const docs = await loadDocs();
   // Strip the heavy `html`/`body`/`headings` fields — the index page only
   // needs metadata.
-  const summary = docs.map(({ slug, title, order, description }) => ({
+  const summary = docs.map(({ slug, title, order, description, category }) => ({
     slug,
     title,
     order,
-    description
+    description,
+    category
   }));
   return { docs: summary };
 };

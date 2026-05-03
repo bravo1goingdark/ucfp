@@ -32,6 +32,7 @@ export type Doc = {
   title: string;
   order: number;
   description: string;
+  category: string;
   body: string;       // raw markdown (frontmatter stripped)
   html: string;       // rendered + highlighted html
   headings: { id: string; text: string }[]; // <h2> only, for the right-rail TOC
@@ -41,6 +42,7 @@ type Frontmatter = {
   title: string;
   order: number;
   description: string;
+  category: string;
 };
 
 // ── Frontmatter ──────────────────────────────────────────────────────────
@@ -56,7 +58,7 @@ function parseFrontmatter(raw: string): { fm: Frontmatter; body: string } {
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
   if (!match) {
     return {
-      fm: { title: 'Untitled', order: 999, description: '' },
+      fm: { title: 'Untitled', order: 999, description: '', category: 'Docs' },
       body: raw
     };
   }
@@ -81,7 +83,8 @@ function parseFrontmatter(raw: string): { fm: Frontmatter; body: string } {
     fm: {
       title: String(fm.title ?? 'Untitled'),
       order: typeof fm.order === 'number' ? fm.order : 999,
-      description: String(fm.description ?? '')
+      description: String(fm.description ?? ''),
+      category: String(fm.category ?? 'Docs')
     },
     body
   };
@@ -142,7 +145,21 @@ async function renderMarkdown(md: string): Promise<{ html: string; headings: { i
   // global instance, which causes walkTokens to fire N times on the Nth doc
   // (producing exponentially bloated HTML).
   const renderer = new Renderer();
-  renderer.code = ({ text }: { text: string }) => text;
+  // walkTokens has replaced `token.text` with the shiki HTML; we wrap it
+  // here with a header bar carrying the language label + a copy button.
+  // The pre.shiki block stays inside so existing CSS still applies.
+  renderer.code = function ({ text, lang }: { text: string; lang?: string }) {
+    const display = displayLang(lang);
+    return (
+      `<div class="code-block" data-lang="${escapeAttr(display)}">` +
+      `<div class="code-block-header">` +
+      `<span class="code-block-lang">${escapeHtml(display)}</span>` +
+      `<button class="copy-btn" type="button" aria-label="Copy code">Copy</button>` +
+      `</div>` +
+      text +
+      `</div>\n`
+    );
+  };
   renderer.heading = function (this: { parser: { parseInline: (tokens: unknown[]) => string } }, token: { depth: number; text: string; tokens: unknown[] }) {
     const inner = this.parser.parseInline(token.tokens);
     if (token.depth === 2) {
@@ -151,6 +168,26 @@ async function renderMarkdown(md: string): Promise<{ html: string; headings: { i
       return `<h2 id="${id}">${inner}</h2>\n`;
     }
     return `<h${token.depth}>${inner}</h${token.depth}>\n`;
+  };
+  // GFM-style admonitions: a blockquote whose first line is `[!NOTE]`,
+  // `[!WARNING]`, `[!TIP]`, `[!INFO]`, `[!IMPORTANT]`, or `[!CAUTION]`
+  // gets rendered as a callout div instead of a <blockquote>.
+  renderer.blockquote = function (this: { parser: { parse: (tokens: unknown[]) => string } }, token: { tokens: unknown[] }) {
+    const inner = this.parser.parse(token.tokens);
+    const m = inner.match(/^<p>\s*\[!(NOTE|TIP|WARNING|INFO|IMPORTANT|CAUTION)\]\s*([\s\S]*?)<\/p>\n?([\s\S]*)$/);
+    if (m) {
+      const kind = m[1].toLowerCase();
+      const firstLine = m[2].trim();
+      const rest = m[3];
+      const body = (firstLine ? `<p>${firstLine}</p>\n` : '') + rest;
+      return (
+        `<div class="callout callout-${kind}">` +
+        `<div class="callout-title">${calloutLabel(kind)}</div>` +
+        `<div class="callout-body">${body}</div>` +
+        `</div>\n`
+      );
+    }
+    return `<blockquote>${inner}</blockquote>\n`;
   };
 
   const instance = new Marked({
@@ -199,6 +236,39 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function displayLang(lang: string | undefined): string {
+  const v = (lang ?? '').toLowerCase().trim();
+  if (!v) return 'text';
+  if (v === 'sh' || v === 'shell' || v === 'console') return 'bash';
+  if (v === 'ts') return 'typescript';
+  if (v === 'js') return 'javascript';
+  if (v === 'py') return 'python';
+  return v;
+}
+
+function calloutLabel(kind: string): string {
+  switch (kind) {
+    case 'note':
+      return 'Note';
+    case 'tip':
+      return 'Tip';
+    case 'warning':
+      return 'Warning';
+    case 'info':
+      return 'Info';
+    case 'important':
+      return 'Important';
+    case 'caution':
+      return 'Caution';
+    default:
+      return kind;
+  }
+}
+
 // ── Public API ───────────────────────────────────────────────────────────
 //
 // `import.meta.glob` with `eager: true` + `query: '?raw'` + `import: 'default'`
@@ -232,6 +302,7 @@ async function buildAll(): Promise<Doc[]> {
       title: fm.title,
       order: fm.order,
       description: fm.description,
+      category: fm.category,
       body,
       html,
       headings

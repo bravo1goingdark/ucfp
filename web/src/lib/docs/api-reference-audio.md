@@ -1,6 +1,7 @@
 ---
 title: API reference — audio
 order: 5
+category: API reference
 description: Audio fingerprinting — Wang (Shazam-style), Panako, Haitsma, neural embeddings, and watermark detection.
 ---
 

@@ -61,6 +61,14 @@ pub struct Record {
     pub model_id: Option<String>,
     /// Variable-length application metadata (rkyv-archived in storage).
     pub metadata: Bytes,
+    /// Original text content for BM25 inverted-index ingestion.
+    ///
+    /// Set by the text modality builders (MinHash / SimHash / LSH) so the
+    /// embedded backend can update the per-tenant FST + roaring postings
+    /// inside the same redb transaction that stores the fingerprint
+    /// itself. `None` for non-text modalities — the BM25 path is then a
+    /// no-op for that record. See ARCHITECTURE §4.
+    pub text: Option<String>,
 }
 
 /// Metadata view of a stored fingerprint without materialising its bytes.

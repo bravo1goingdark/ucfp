@@ -1,6 +1,7 @@
 ---
 title: Error codes
 order: 6
+category: API reference
 description: Every HTTP status UCFP returns, what triggers it, and what to do.
 ---
 

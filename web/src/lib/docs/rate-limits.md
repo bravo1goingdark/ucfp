@@ -1,6 +1,7 @@
 ---
 title: Rate limits
 order: 7
+category: API reference
 description: Per-IP demo quotas, authenticated defaults, and the X-RateLimit / Retry-After headers UCFP returns.
 ---
 

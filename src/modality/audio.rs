@@ -93,6 +93,7 @@ pub fn fingerprint_wang_with(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -150,6 +151,7 @@ pub fn fingerprint_panako_with(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -217,6 +219,7 @@ pub fn fingerprint_haitsma_with(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -313,6 +316,7 @@ pub fn fingerprint_neural_with(
         embedding: Some(first_embedding),
         model_id: Some(model_path.to_string()),
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -470,6 +474,7 @@ impl StreamingWangSession {
             embedding: None,
             model_id: None,
             metadata: Bytes::new(),
+            text: None,
         }]
     }
 }

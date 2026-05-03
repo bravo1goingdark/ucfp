@@ -1,6 +1,7 @@
 ---
 title: Examples
 order: 8
+category: Recipes
 description: End-to-end recipes — dedup a pretraining corpus, gate image uploads, and match audio against a catalogue.
 ---
 

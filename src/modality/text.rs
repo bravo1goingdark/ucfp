@@ -231,6 +231,7 @@ pub fn fingerprint_minhash_with<const H: usize>(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: Some(prepared),
     })
 }
 
@@ -268,6 +269,51 @@ fn cjk_minhash<const H: usize>(
     _prepared: &str,
     _korean: bool,
 ) -> Result<(Vec<u8>, String)> {
+    Err(Error::Modality(
+        "CJK tokenizer requested but no text-cjk-* feature is enabled".into(),
+    ))
+}
+
+/// CJK-tokenizer SimHash dispatcher. Mirrors [`cjk_minhash`] but feeds
+/// the morphological segmenter directly to `SimHashFingerprinter` —
+/// SimHash works per-token (no k-shingling) so the tokenizer is used
+/// raw rather than wrapped in [`ShingleTokenizer`].
+#[cfg(all(
+    feature = "text-simhash",
+    any(feature = "text-cjk-japanese", feature = "text-cjk-korean")
+))]
+fn cjk_simhash(
+    canon: &Canonicalizer,
+    prepared: &str,
+    weighting: txtfp::Weighting,
+    korean: bool,
+) -> Result<Vec<u8>> {
+    use txtfp::{CjkSegmenter, CjkTokenizer, SimHashFingerprinter};
+    let segmenter = if korean {
+        CjkSegmenter::LinderaKoDic
+    } else {
+        CjkSegmenter::Lindera
+    };
+    let tok = CjkTokenizer::new(segmenter);
+    let fp = SimHashFingerprinter::new(canon.clone(), tok).with_weighting(weighting);
+    Ok(fp
+        .fingerprint(prepared)
+        .map_err(|e| Error::Modality(e.to_string()))?
+        .as_bytes()
+        .to_vec())
+}
+
+/// Stub for builds without any CJK feature gated together with simhash.
+#[cfg(all(
+    feature = "text-simhash",
+    not(any(feature = "text-cjk-japanese", feature = "text-cjk-korean"))
+))]
+fn cjk_simhash(
+    _canon: &Canonicalizer,
+    _prepared: &str,
+    _weighting: txtfp::Weighting,
+    _korean: bool,
+) -> Result<Vec<u8>> {
     Err(Error::Modality(
         "CJK tokenizer requested but no text-cjk-* feature is enabled".into(),
     ))
@@ -347,11 +393,8 @@ fn simhash_dispatch(
                 .as_bytes()
                 .to_vec()
         }
-        TokenizerKind::CjkJp | TokenizerKind::CjkKo => {
-            return Err(Error::Modality(
-                "SimHash with CJK tokenizers is not yet supported".into(),
-            ));
-        }
+        TokenizerKind::CjkJp => cjk_simhash(&canon, &prepared, weighting, /*korean=*/ false)?,
+        TokenizerKind::CjkKo => cjk_simhash(&canon, &prepared, weighting, /*korean=*/ true)?,
     };
 
     let tok_tag = match opts.tokenizer {
@@ -373,6 +416,7 @@ fn simhash_dispatch(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: Some(prepared),
     })
 }
 
@@ -435,6 +479,7 @@ pub fn fingerprint_tlsh(
         embedding: None,
         model_id: None,
         metadata: Bytes::new(),
+        text: Some(prepared),
     })
 }
 
@@ -589,6 +634,7 @@ fn semantic_record(
         embedding: Some(vector),
         model_id,
         metadata: Bytes::new(),
+        text: None,
     })
 }
 
@@ -678,6 +724,7 @@ impl StreamingMinHashSession {
             embedding: None,
             model_id: None,
             metadata: Bytes::new(),
+            text: None,
         }])
     }
 }

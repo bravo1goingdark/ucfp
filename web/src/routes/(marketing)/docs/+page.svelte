@@ -5,6 +5,18 @@
   import { breadcrumbJsonLd } from '$lib/seo';
 
   let { data }: { data: PageData } = $props();
+
+  // Group docs by category, preserving the order in which categories
+  // first appear (driven by frontmatter `order`).
+  const groups = $derived.by(() => {
+    const map = new Map<string, typeof data.docs>();
+    for (const doc of data.docs) {
+      const list = map.get(doc.category);
+      if (list) list.push(doc);
+      else map.set(doc.category, [doc]);
+    }
+    return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
+  });
 </script>
 
 <Seo
@@ -27,18 +39,22 @@
       point — most teams begin with <a href="/docs/getting-started">Getting started</a>.
     </p>
 
-    <ul class="docs-grid">
-      {#each data.docs as doc (doc.slug)}
-        <li class="doc-card">
-          <a href={`/docs/${doc.slug}`}>
-            <div class="num">{String(doc.order).padStart(2, '0')}</div>
-            <h2>{doc.title}</h2>
-            <p>{doc.description}</p>
-            <span class="arrow" aria-hidden="true">→</span>
-          </a>
-        </li>
-      {/each}
-    </ul>
+    {#each groups as group (group.name)}
+      <section class="group">
+        <h2 class="group-heading">{group.name}</h2>
+        <ul class="docs-grid">
+          {#each group.items as doc (doc.slug)}
+            <li class="doc-card">
+              <a href={`/docs/${doc.slug}`}>
+                <h3>{doc.title}</h3>
+                <p>{doc.description}</p>
+                <span class="arrow" aria-hidden="true">→</span>
+              </a>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/each}
   </main>
 
   <div class="docs-toc-spacer" aria-hidden="true"></div>
@@ -47,8 +63,8 @@
 <style>
   .docs-shell {
     display: grid;
-    grid-template-columns: 220px 1fr 200px;
-    gap: 24px;
+    grid-template-columns: 240px 1fr 200px;
+    gap: 32px;
     margin-top: 24px;
     align-items: start;
   }
@@ -65,10 +81,24 @@
     font-family: var(--serif);
     font-style: italic;
   }
+  .group {
+    margin-top: 44px;
+  }
+  .group-heading {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    margin: 0 0 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
   .docs-grid {
     list-style: none;
     padding: 0;
-    margin: 36px 0 0;
+    margin: 0;
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0;
@@ -82,26 +112,20 @@
   }
   .doc-card a {
     display: block;
-    padding: 24px 24px 28px;
+    padding: 20px 22px 24px;
     text-decoration: none;
     color: inherit;
     position: relative;
-    min-height: 180px;
+    min-height: 130px;
     transition: background 0.15s ease;
   }
-  .doc-card a:hover { background: rgba(255, 255, 255, 0.45); }
-  .doc-card .num {
-    font-family: var(--mono);
-    font-size: 11px;
-    color: var(--muted);
-    letter-spacing: 0.14em;
-  }
-  .doc-card h2 {
+  .doc-card a:hover { background: rgba(255, 255, 255, 0.5); }
+  .doc-card h3 {
     font-family: var(--sans);
     font-weight: 500;
-    font-size: 19px;
+    font-size: 18px;
     letter-spacing: -0.01em;
-    margin: 14px 0 8px;
+    margin: 0 0 8px;
     color: var(--ink);
   }
   .doc-card p {
@@ -109,11 +133,12 @@
     color: var(--ink-2);
     margin: 0;
     line-height: 1.55;
+    max-width: 48ch;
   }
   .doc-card .arrow {
     position: absolute;
-    bottom: 16px;
-    right: 24px;
+    bottom: 14px;
+    right: 22px;
     font-family: var(--mono);
     font-size: 14px;
     color: var(--accent-ink);
@@ -122,7 +147,7 @@
   .doc-card a:hover .arrow { transform: translateX(4px); }
 
   @media (max-width: 1100px) {
-    .docs-shell { grid-template-columns: 200px 1fr; }
+    .docs-shell { grid-template-columns: 220px 1fr; gap: 24px; }
     .docs-toc-spacer { display: none; }
   }
   @media (max-width: 800px) {

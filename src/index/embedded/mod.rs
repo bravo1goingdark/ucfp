@@ -15,6 +15,8 @@
 //! `bm25` is not yet implemented — returns [`Error::Index`] with a clear
 //! message until the FST + roaring postings layout from §4 is wired.
 
+mod bm25;
+
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -75,6 +77,7 @@ impl EmbeddedBackend {
             let _ = txn
                 .open_table(CATALOG)
                 .map_err(|e| Error::Index(e.to_string()))?;
+            bm25::bootstrap_tables(&txn)?;
         }
         txn.commit().map_err(|e| Error::Index(e.to_string()))?;
 
@@ -174,6 +177,19 @@ impl IndexBackend for EmbeddedBackend {
                     cat.insert(key, row.as_slice())
                         .map_err(|e| Error::Index(e.to_string()))?;
                 }
+
+                // BM25 index update — same txn as the fingerprint write.
+                // Records without text are skipped; clear_one keeps the
+                // index in step if a text record is re-ingested without
+                // text (e.g. modality change).
+                for rec in &batch {
+                    match rec.text.as_deref() {
+                        Some(t) => bm25::upsert_one(&txn, rec.tenant_id, rec.record_id, t)?,
+                        None => {
+                            bm25::clear_one(&txn, rec.tenant_id, rec.record_id)?;
+                        }
+                    }
+                }
             }
             txn.commit().map_err(|e| Error::Index(e.to_string()))?;
             Ok(())
@@ -207,6 +223,11 @@ impl IndexBackend for EmbeddedBackend {
                     meta.remove(key).map_err(|e| Error::Index(e.to_string()))?;
                     vecs.remove(key).map_err(|e| Error::Index(e.to_string()))?;
                     cat.remove(key).map_err(|e| Error::Index(e.to_string()))?;
+                }
+                // Pull doc out of the BM25 index too — otherwise a deleted
+                // record keeps polluting term postings + corpus stats.
+                for id in &ids {
+                    bm25::clear_one(&txn, tenant_id, *id)?;
                 }
             }
             txn.commit().map_err(|e| Error::Index(e.to_string()))?;
@@ -307,15 +328,27 @@ impl IndexBackend for EmbeddedBackend {
 
     async fn bm25(
         &self,
-        _tenant_id: u32,
-        _terms: &[&str],
-        _k: usize,
-        _filter: Option<&Bytes>,
+        tenant_id: u32,
+        terms: &[&str],
+        k: usize,
+        filter: Option<&Bytes>,
     ) -> Result<Vec<Hit>> {
-        Err(Error::Index(
-            "EmbeddedBackend::bm25 not implemented (TODO: FST + roaring postings, ARCHITECTURE §4)"
-                .into(),
-        ))
+        // v1 ignores `filter` — metadata pre-filter for BM25 is documented
+        // as a follow-up. Surfacing here so callers don't silently get
+        // un-filtered results when they expected otherwise.
+        if filter.is_some() {
+            return Err(Error::Unsupported(
+                "BM25 filter pre-filtering is not yet supported on EmbeddedBackend".into(),
+            ));
+        }
+        let db = self.db.clone();
+        let owned_terms: Vec<String> = terms.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || -> Result<Vec<Hit>> {
+            let term_refs: Vec<&str> = owned_terms.iter().map(String::as_str).collect();
+            bm25::search(&db, tenant_id, &term_refs, k)
+        })
+        .await
+        .map_err(|e| Error::Index(format!("join error: {e}")))?
     }
 
     async fn flush(&self) -> Result<()> {
@@ -454,6 +487,7 @@ mod tests {
             embedding: Some(embedding),
             model_id: Some("test-model".into()),
             metadata: Bytes::new(),
+            text: None,
         }
     }
 
@@ -526,11 +560,46 @@ mod tests {
         assert_eq!(hits[0].record_id, 10);
     }
 
+    fn text_rec(tenant: u32, rid: u64, text: &str) -> Record {
+        Record {
+            tenant_id: tenant,
+            record_id: rid,
+            modality: Modality::Text,
+            format_version: 1,
+            algorithm: "minhash-h128".into(),
+            config_hash: 0,
+            fingerprint: Bytes::from_static(b"fp"),
+            embedding: None,
+            model_id: None,
+            metadata: Bytes::new(),
+            text: Some(text.to_string()),
+        }
+    }
+
     #[tokio::test]
-    async fn bm25_returns_not_implemented() {
+    async fn bm25_round_trip_via_upsert() {
+        // End-to-end: a record with `text` flows through `upsert` and
+        // becomes searchable via `bm25`. Verifies the BM25 path is wired
+        // alongside the fingerprint write inside the same redb txn.
         let dir = tempfile::tempdir().unwrap();
         let db = fixture(&dir.path().join("ucfp.redb"));
-        let result = db.bm25(1, &["foo"], 10, None).await;
-        assert!(matches!(result, Err(Error::Index(_))));
+        let r1 = text_rec(1, 100, "rust async language");
+        let r2 = text_rec(1, 101, "go async language");
+        db.upsert(&[r1, r2]).await.unwrap();
+
+        let hits = db.bm25(1, &["rust"], 10, None).await.unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].record_id, 100);
+        assert_eq!(hits[0].source, HitSource::Bm25);
+    }
+
+    #[tokio::test]
+    async fn bm25_filter_param_is_unsupported() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = fixture(&dir.path().join("ucfp.redb"));
+        let result = db
+            .bm25(1, &["foo"], 10, Some(&Bytes::from_static(b"\x00")))
+            .await;
+        assert!(matches!(result, Err(Error::Unsupported(_))));
     }
 }

@@ -1,18 +1,31 @@
 <script lang="ts">
   import { page } from '$app/stores';
 
-  type Props = {
-    docs: { slug: string; title: string; order: number }[];
-  };
+  type DocItem = { slug: string; title: string; order: number; category: string };
+  type Props = { docs: DocItem[] };
   let { docs }: Props = $props();
 
   const currentPath = $derived($page.url.pathname);
+
+  // Group docs by category, preserving the order in which categories first
+  // appear in the sorted doc list (so "Get started" comes before "API
+  // reference" because order=1 lives in "Get started").
+  const groups = $derived.by(() => {
+    const map = new Map<string, DocItem[]>();
+    for (const doc of docs) {
+      const list = map.get(doc.category);
+      if (list) list.push(doc);
+      else map.set(doc.category, [doc]);
+    }
+    return Array.from(map.entries()).map(([name, items]) => ({ name, items }));
+  });
 </script>
 
 <aside class="docs-sidebar" aria-label="Documentation navigation">
-  <div class="rail-label">Docs</div>
+  <div class="rail-label">Documentation</div>
+
   <nav>
-    <ul>
+    <ul class="top">
       <li>
         <a
           href="/docs"
@@ -22,19 +35,24 @@
           Overview
         </a>
       </li>
-      {#each docs as doc (doc.slug)}
-        <li>
-          <a
-            href={`/docs/${doc.slug}`}
-            class="doc-link"
-            class:active={currentPath === `/docs/${doc.slug}`}
-          >
-            <span class="num">{String(doc.order).padStart(2, '0')}</span>
-            {doc.title}
-          </a>
-        </li>
-      {/each}
     </ul>
+
+    {#each groups as group (group.name)}
+      <div class="group-label">{group.name}</div>
+      <ul>
+        {#each group.items as doc (doc.slug)}
+          <li>
+            <a
+              href={`/docs/${doc.slug}`}
+              class="doc-link"
+              class:active={currentPath === `/docs/${doc.slug}`}
+            >
+              {doc.title}
+            </a>
+          </li>
+        {/each}
+      </ul>
+    {/each}
   </nav>
 </aside>
 
@@ -56,6 +74,15 @@
     margin-bottom: 14px;
     padding: 4px 8px;
   }
+  .group-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 18px 0 6px;
+    padding: 4px 8px;
+  }
   ul {
     list-style: none;
     padding: 0;
@@ -64,16 +91,15 @@
     flex-direction: column;
     gap: 2px;
   }
+  ul.top { margin-bottom: 4px; }
   .doc-link {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
+    display: block;
     text-decoration: none;
     color: var(--ink-2);
     font-family: var(--sans);
     font-size: 13.5px;
     line-height: 1.4;
-    padding: 7px 8px;
+    padding: 6px 10px;
     border-left: 2px solid transparent;
     transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
@@ -84,18 +110,7 @@
   .doc-link.active {
     color: var(--ink);
     border-left-color: var(--accent-ink);
-    background: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.55);
     font-weight: 500;
-  }
-  .num {
-    font-family: var(--mono);
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 0.08em;
-    flex-shrink: 0;
-    width: 18px;
-  }
-  .doc-link.active .num {
-    color: var(--accent-ink);
   }
 </style>

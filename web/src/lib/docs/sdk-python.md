@@ -1,6 +1,7 @@
 ---
 title: SDK — Python
 order: 10
+category: SDKs
 description: Install the ucfp pip package and call every modality from a synchronous, type-annotated client.
 ---
 
