@@ -125,6 +125,9 @@ pub struct Hit {
     pub vector_rank: Option<u32>,
     /// Hybrid-only: 1-indexed rank produced by the BM25 ranker.
     pub bm25_rank: Option<u32>,
+    /// BM25 explainability — top-N matched terms with their contributions
+    /// to this hit's score. Empty unless [`Query::explain`] is set.
+    pub term_hits: Vec<TermHit>,
 }
 
 /// Which ranker produced a [`Hit`].
@@ -164,6 +167,10 @@ pub struct Query {
     pub filter: Option<Bytes>,
     /// RRF fusion constant. Default 60 per ARCHITECTURE §4.
     pub rrf_k: u32,
+    /// When `true`, retrievers populate per-hit explainability (matched
+    /// BM25 terms with idf/tf/contribution). Off by default — surfaces
+    /// only when the caller asks (`?explain=1` on `/v1/query`).
+    pub explain: bool,
 }
 
 impl Default for Query {
@@ -176,6 +183,23 @@ impl Default for Query {
             terms: Vec::new(),
             filter: None,
             rrf_k: 60,
+            explain: false,
         }
     }
+}
+
+/// Per-hit BM25 term match — surfaces which query terms matched a record
+/// and how much each one contributed to the BM25 score. Populated only
+/// when `Query::explain == true`. Cap is small by default (top-N by
+/// contribution) so the response stays bounded.
+#[derive(Clone, Debug)]
+pub struct TermHit {
+    /// The token as it appears in the query / index.
+    pub term: String,
+    /// Inverse document frequency at index time.
+    pub idf: f32,
+    /// Term frequency in this document.
+    pub tf: u32,
+    /// BM25 contribution to the doc score from this term.
+    pub contribution: f32,
 }

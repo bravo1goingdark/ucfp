@@ -572,8 +572,52 @@ pub struct InspectAudioPeak {
 /// downsamples internally for visualisation; the final fingerprint
 /// goes through the regular `fingerprint_wang` path so config_hash and
 /// hex round-trip a normal ingest.
+/// Algorithm selector for [`inspect_audio_with`]. Maps to the Rust SDK's
+/// fingerprint-* functions so the caller chooses which fingerprint hex
+/// the inspect response surfaces alongside the shared spectrogram /
+/// envelope / peak / landmark stages.
+#[cfg(feature = "inspect")]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum InspectAudioAlgorithm {
+    /// Wang landmark fingerprinter — the default.
+    #[default]
+    Wang,
+    /// Panako triplet hashes.
+    #[cfg(feature = "audio-panako")]
+    Panako,
+    /// Haitsma sub-band energy diffs at 5 kHz.
+    #[cfg(feature = "audio-haitsma")]
+    Haitsma,
+    /// Neural ONNX embedder — inspect surfaces the spectrograms but
+    /// doesn't compute the fingerprint without a configured model_path.
+    #[cfg(feature = "audio-neural")]
+    Neural,
+}
+
+/// Run the audio inspect pipeline with the default Wang fingerprinter.
+/// See [`inspect_audio_with`] for the explicit algorithm form.
 #[cfg(feature = "inspect")]
 pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioResult> {
+    inspect_audio_with(samples, sample_rate, InspectAudioAlgorithm::Wang)
+}
+
+/// Same as [`inspect_audio`] but lets the caller pick which algorithm
+/// produces the surfaced fingerprint. The shared DSP stages (envelope,
+/// linear + mel spectrogram, picked peaks, landmark pairs) are returned
+/// for *every* algorithm — they reflect the upstream input the
+/// fingerprinter actually sees and are useful regardless of which
+/// downstream hash you compare with.
+///
+/// For neural / haitsma where the fingerprinter resamples internally
+/// to a different rate, the displayed spectrogram is at the request
+/// `sample_rate`; the UI should annotate the algorithm-specific
+/// resampling so the user isn't confused.
+#[cfg(feature = "inspect")]
+pub fn inspect_audio_with(
+    samples: &[f32],
+    sample_rate: u32,
+    algorithm: InspectAudioAlgorithm,
+) -> Result<InspectAudioResult> {
     use audiofp::classical::WangConfig;
     use audiofp::dsp::mel::{MelFilterBank, MelScale};
     use audiofp::dsp::peaks::{PeakPicker, PeakPickerConfig};
@@ -655,16 +699,42 @@ pub fn inspect_audio(samples: &[f32], sample_rate: u32) -> Result<InspectAudioRe
     let landmark_pairs = compute_landmark_pairs(&raw_peaks, &cfg, frame_ms, bin_hz, 256);
     let total_landmarks = count_total_landmark_pairs(&raw_peaks, &cfg);
 
-    // Stage 4 — final Wang fingerprint via the regular pipeline. Soft
-    // fail so short clips that don't satisfy Wang's `min_samples` still
-    // get the envelope / spectrogram / peaks / landmarks panes.
-    let (fingerprint_hex, fingerprint_bytes) = match fingerprint_wang(samples, sample_rate, 0, 0) {
-        Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len()),
-        Err(_) => (String::new(), 0),
+    // Stage 4 — final fingerprint via the chosen algorithm. Soft-fail
+    // so short clips / unconfigured ONNX runtimes / etc. still surface
+    // the envelope / spectrogram / peaks / landmarks panes.
+    let (fingerprint_hex, fingerprint_bytes, algo_tag) = match algorithm {
+        InspectAudioAlgorithm::Wang => match fingerprint_wang(samples, sample_rate, 0, 0) {
+            Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len(), ALGORITHM_WANG),
+            Err(_) => (String::new(), 0, ALGORITHM_WANG),
+        },
+        #[cfg(feature = "audio-panako")]
+        InspectAudioAlgorithm::Panako => match fingerprint_panako(samples, sample_rate, 0, 0) {
+            Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len(), ALGORITHM_PANAKO),
+            Err(_) => (String::new(), 0, ALGORITHM_PANAKO),
+        },
+        #[cfg(feature = "audio-haitsma")]
+        InspectAudioAlgorithm::Haitsma => match fingerprint_haitsma(samples, sample_rate, 0, 0) {
+            Ok(rec) => (
+                hex_lower_audio(&rec.fingerprint),
+                rec.fingerprint.len(),
+                ALGORITHM_HAITSMA,
+            ),
+            Err(_) => (String::new(), 0, ALGORITHM_HAITSMA),
+        },
+        #[cfg(feature = "audio-neural")]
+        InspectAudioAlgorithm::Neural => {
+            // Neural inspect intentionally skips the fingerprint hex —
+            // computing it requires an ONNX model_path the inspect
+            // endpoint doesn't take. The spectrogram + mel + envelope
+            // panes are still surfaced (they're what the embedder sees
+            // before the model). UIs can show "fingerprint: configure a
+            // model_id to compute" for this branch.
+            (String::new(), 0, ALGORITHM_NEURAL)
+        }
     };
 
     Ok(InspectAudioResult {
-        algorithm: ALGORITHM_WANG,
+        algorithm: algo_tag,
         sample_rate,
         duration_secs,
         envelope,

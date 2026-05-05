@@ -43,6 +43,21 @@ pub trait IndexBackend: Send + Sync {
         filter: Option<&Bytes>,
     ) -> Result<Vec<Hit>>;
 
+    /// Like [`Self::bm25`] but populates [`Hit::term_hits`] for each result.
+    /// Default impl delegates to `bm25` so backends that don't surface
+    /// term-level scoring still compose; the returned hits will simply
+    /// have empty `term_hits` lists. Override on backends that have the
+    /// per-(doc, term) accumulator already in scope.
+    async fn bm25_explain(
+        &self,
+        tenant_id: u32,
+        terms: &[&str],
+        k: usize,
+        filter: Option<&Bytes>,
+    ) -> Result<Vec<Hit>> {
+        self.bm25(tenant_id, terms, k, filter).await
+    }
+
     /// Force pending writes to disk. Backends should already commit per
     /// upsert batch; this exists for explicit shutdown / snapshot points.
     async fn flush(&self) -> Result<()>;

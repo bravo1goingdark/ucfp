@@ -124,6 +124,34 @@ struct CatalogEntry {
     metadata_len: u32,
 }
 
+impl EmbeddedBackend {
+    async fn bm25_inner(
+        &self,
+        tenant_id: u32,
+        terms: &[&str],
+        k: usize,
+        filter: Option<&Bytes>,
+        explain: bool,
+    ) -> Result<Vec<Hit>> {
+        // v1 ignores `filter` — metadata pre-filter for BM25 is documented
+        // as a follow-up. Surfacing here so callers don't silently get
+        // un-filtered results when they expected otherwise.
+        if filter.is_some() {
+            return Err(Error::Unsupported(
+                "BM25 filter pre-filtering is not yet supported on EmbeddedBackend".into(),
+            ));
+        }
+        let db = self.db.clone();
+        let owned_terms: Vec<String> = terms.iter().map(|s| (*s).to_string()).collect();
+        tokio::task::spawn_blocking(move || -> Result<Vec<Hit>> {
+            let term_refs: Vec<&str> = owned_terms.iter().map(String::as_str).collect();
+            bm25::search_explain(&db, tenant_id, &term_refs, k, explain)
+        })
+        .await
+        .map_err(|e| Error::Index(format!("join error: {e}")))?
+    }
+}
+
 #[async_trait::async_trait]
 impl IndexBackend for EmbeddedBackend {
     async fn upsert(&self, batch: &[Record]) -> Result<()> {
@@ -323,6 +351,7 @@ impl IndexBackend for EmbeddedBackend {
                     bm25_score: None,
                     vector_rank: None,
                     bm25_rank: None,
+                    term_hits: Vec::new(),
                 })
                 .collect())
         })
@@ -337,22 +366,17 @@ impl IndexBackend for EmbeddedBackend {
         k: usize,
         filter: Option<&Bytes>,
     ) -> Result<Vec<Hit>> {
-        // v1 ignores `filter` — metadata pre-filter for BM25 is documented
-        // as a follow-up. Surfacing here so callers don't silently get
-        // un-filtered results when they expected otherwise.
-        if filter.is_some() {
-            return Err(Error::Unsupported(
-                "BM25 filter pre-filtering is not yet supported on EmbeddedBackend".into(),
-            ));
-        }
-        let db = self.db.clone();
-        let owned_terms: Vec<String> = terms.iter().map(|s| (*s).to_string()).collect();
-        tokio::task::spawn_blocking(move || -> Result<Vec<Hit>> {
-            let term_refs: Vec<&str> = owned_terms.iter().map(String::as_str).collect();
-            bm25::search(&db, tenant_id, &term_refs, k)
-        })
-        .await
-        .map_err(|e| Error::Index(format!("join error: {e}")))?
+        self.bm25_inner(tenant_id, terms, k, filter, false).await
+    }
+
+    async fn bm25_explain(
+        &self,
+        tenant_id: u32,
+        terms: &[&str],
+        k: usize,
+        filter: Option<&Bytes>,
+    ) -> Result<Vec<Hit>> {
+        self.bm25_inner(tenant_id, terms, k, filter, true).await
     }
 
     async fn flush(&self) -> Result<()> {

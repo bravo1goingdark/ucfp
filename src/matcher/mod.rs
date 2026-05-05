@@ -79,6 +79,7 @@ pub fn rrf_with_sources(rankings: &[&[Hit]], sources: &[HitSource], rrf_k: u32) 
                     bm25_score: bs,
                     vector_rank: vr,
                     bm25_rank: br,
+                    term_hits: Vec::new(),
                 }
             },
         )
@@ -139,13 +140,37 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
                 // backend, so they actually use independent worker threads.
                 let terms: Vec<&str> = q.terms.iter().map(String::as_str).collect();
                 let knn_fut = self.index.knn(q.tenant_id, v, q.k, q.filter.as_ref());
-                let bm_fut = self.index.bm25(q.tenant_id, &terms, q.k, q.filter.as_ref());
-                let (vec_hits, bm_hits) = tokio::try_join!(knn_fut, bm_fut)?;
-                rrf_with_sources(
+                let (vec_hits, bm_hits) = if q.explain {
+                    let bm_fut =
+                        self.index.bm25_explain(q.tenant_id, &terms, q.k, q.filter.as_ref());
+                    tokio::try_join!(knn_fut, bm_fut)?
+                } else {
+                    let bm_fut = self.index.bm25(q.tenant_id, &terms, q.k, q.filter.as_ref());
+                    tokio::try_join!(knn_fut, bm_fut)?
+                };
+                let mut fused = rrf_with_sources(
                     &[&vec_hits, &bm_hits],
                     &[HitSource::Vector, HitSource::Bm25],
                     q.rrf_k,
-                )
+                );
+                // Carry forward term_hits from the BM25 ranking onto the
+                // fused output (RRF doesn't see them otherwise).
+                if q.explain {
+                    use std::collections::HashMap;
+                    let mut by_id: HashMap<(u32, u64), Vec<crate::core::TermHit>> =
+                        HashMap::new();
+                    for h in bm_hits {
+                        if !h.term_hits.is_empty() {
+                            by_id.insert((h.tenant_id, h.record_id), h.term_hits);
+                        }
+                    }
+                    for h in fused.iter_mut() {
+                        if let Some(th) = by_id.remove(&(h.tenant_id, h.record_id)) {
+                            h.term_hits = th;
+                        }
+                    }
+                }
+                fused
             }
             (Some(v), true) => {
                 self.index
@@ -154,9 +179,15 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
             }
             (None, false) => {
                 let terms: Vec<&str> = q.terms.iter().map(String::as_str).collect();
-                self.index
-                    .bm25(q.tenant_id, &terms, q.k, q.filter.as_ref())
-                    .await?
+                if q.explain {
+                    self.index
+                        .bm25_explain(q.tenant_id, &terms, q.k, q.filter.as_ref())
+                        .await?
+                } else {
+                    self.index
+                        .bm25(q.tenant_id, &terms, q.k, q.filter.as_ref())
+                        .await?
+                }
             }
             (None, true) => Vec::new(),
         };
@@ -185,6 +216,7 @@ mod tests {
             bm25_score: None,
             vector_rank: None,
             bm25_rank: None,
+            term_hits: Vec::new(),
         }
     }
 

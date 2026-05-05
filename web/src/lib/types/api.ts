@@ -90,6 +90,15 @@ export interface QueryHit {
   vector_rank?: number;
   /** Hybrid-only: 1-indexed rank from the BM25 ranker. */
   bm25_rank?: number;
+  /** BM25 explainability — populated when `?explain=1` is on the query. */
+  term_hits?: QueryTermHit[];
+}
+
+export interface QueryTermHit {
+  term: string;
+  idf: number;
+  tf: number;
+  contribution: number;
 }
 
 export interface SearchRequest {

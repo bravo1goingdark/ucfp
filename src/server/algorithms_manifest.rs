@@ -66,7 +66,7 @@ pub struct Tunable {
 }
 
 /// One algorithm a user can pick.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Algorithm {
     /// Wire `algorithm` value (matches the matching `*Algorithm` enum
     /// serde-renamed kebab-case).
@@ -80,6 +80,16 @@ pub struct Algorithm {
     /// Named presets (`balanced`, `high-recall`, `fast`). Each maps a
     /// subset of `tunables` to opinionated values.
     pub presets: Vec<Preset>,
+    /// `true` when `POST /v1/pipeline/inspect/{modality}/{tenant}` with
+    /// `?algorithm=<id>` returns a populated response. Off-by-default so
+    /// adding a new algorithm doesn't accidentally claim inspect support
+    /// it doesn't have.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inspect: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// A named knob bundle the UI surfaces as a quick-pick.
@@ -316,6 +326,7 @@ fn text_catalog() -> ModalityCatalog {
                     values: serde_json::json!({"k": 7, "h": 64, "tokenizer": "word"}),
                 },
             ],
+            inspect: true,
         },
         Algorithm {
             id: "simhash-tf",
@@ -327,6 +338,7 @@ fn text_catalog() -> ModalityCatalog {
                 v
             },
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "simhash-idf",
@@ -338,6 +350,7 @@ fn text_catalog() -> ModalityCatalog {
                 v
             },
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "lsh",
@@ -349,6 +362,7 @@ fn text_catalog() -> ModalityCatalog {
                 v
             },
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "tlsh",
@@ -356,6 +370,7 @@ fn text_catalog() -> ModalityCatalog {
             description: "Byte-level locality-sensitive hash; good for malware-style fuzzy matching.",
             tunables: canon_tunables(),
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "semantic-local",
@@ -367,6 +382,7 @@ fn text_catalog() -> ModalityCatalog {
                 "HF Hub repo id (e.g. `BAAI/bge-small-en-v1.5`) or filesystem path.",
             )],
             presets: vec![],
+            inspect: false,
         },
         Algorithm {
             id: "semantic-openai",
@@ -377,6 +393,7 @@ fn text_catalog() -> ModalityCatalog {
                 t_secret("api_key", "API key", "OpenAI API key."),
             ],
             presets: vec![],
+            inspect: false,
         },
         Algorithm {
             id: "semantic-voyage",
@@ -387,6 +404,7 @@ fn text_catalog() -> ModalityCatalog {
                 t_secret("api_key", "API key", "Voyage API key."),
             ],
             presets: vec![],
+            inspect: false,
         },
         Algorithm {
             id: "semantic-cohere",
@@ -397,6 +415,7 @@ fn text_catalog() -> ModalityCatalog {
                 t_secret("api_key", "API key", "Cohere API key."),
             ],
             presets: vec![],
+            inspect: false,
         },
     ];
     // Drop hidden algorithms when their feature isn't compiled in.
@@ -457,6 +476,7 @@ fn image_catalog() -> ModalityCatalog {
             description: "Bundles PHash + DHash + AHash; resilient across crops and recompressions.",
             tunables: preprocess_tunables(),
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "phash",
@@ -464,6 +484,7 @@ fn image_catalog() -> ModalityCatalog {
             description: "DCT-based perceptual hash; strong on geometric robustness.",
             tunables: preprocess_tunables(),
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "dhash",
@@ -471,6 +492,7 @@ fn image_catalog() -> ModalityCatalog {
             description: "Horizontal-gradient hash; cheapest of the three perceptual hashes.",
             tunables: preprocess_tunables(),
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "ahash",
@@ -478,6 +500,7 @@ fn image_catalog() -> ModalityCatalog {
             description: "Mean-thresholded average hash; baseline perceptual hash.",
             tunables: preprocess_tunables(),
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "semantic",
@@ -493,6 +516,7 @@ fn image_catalog() -> ModalityCatalog {
                 v
             },
             presets: vec![],
+            inspect: false,
         },
     ];
     #[allow(clippy::match_like_matches_macro)]
@@ -572,6 +596,7 @@ fn audio_catalog() -> ModalityCatalog {
                 label: "Balanced",
                 values: serde_json::json!({"fan_out": 10, "peaks_per_sec": 30}),
             }],
+            inspect: true,
         },
         Algorithm {
             id: "panako",
@@ -621,6 +646,7 @@ fn audio_catalog() -> ModalityCatalog {
                 ),
             ],
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "haitsma",
@@ -646,6 +672,7 @@ fn audio_catalog() -> ModalityCatalog {
                 ),
             ],
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "neural",
@@ -668,6 +695,7 @@ fn audio_catalog() -> ModalityCatalog {
                 ),
             ],
             presets: vec![],
+            inspect: true,
         },
         Algorithm {
             id: "watermark",
@@ -690,6 +718,7 @@ fn audio_catalog() -> ModalityCatalog {
                 ),
             ],
             presets: vec![],
+            inspect: false,
         },
     ];
     #[allow(clippy::match_like_matches_macro)]

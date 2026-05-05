@@ -834,12 +834,51 @@ pub struct InspectTextResult {
     pub config_hash: u64,
 }
 
-/// Run the text pipeline and surface every intermediate stage. Always
-/// uses MinHash<128> — other algorithms can be added when their UIs
-/// land. Token / shingle lists are capped at 256 entries each so a
-/// 1-MiB document doesn't produce a multi-megabyte payload.
+/// Algorithm selector for [`inspect_text_with`]. Selects which final
+/// fingerprint hex appears in the response. The shared canonicalization
+/// stages (raw, canonicalized, tokens, shingles) are returned for every
+/// algorithm — they capture the input the chosen fingerprinter sees.
+#[cfg(feature = "inspect")]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+pub enum InspectTextAlgorithm {
+    /// MinHash<128> — the default text fingerprinter.
+    #[default]
+    Minhash,
+    /// SimHash with term-frequency weighting.
+    #[cfg(feature = "text-simhash")]
+    SimhashTf,
+    /// SimHash with TF·IDF weighting (inspect uses TF only — corpus IDF
+    /// isn't available at inspect time).
+    #[cfg(feature = "text-simhash")]
+    SimhashIdf,
+    /// Banded LSH over the MinHash signature.
+    #[cfg(feature = "text-lsh")]
+    Lsh,
+    /// Trend Micro TLSH 128/1.
+    #[cfg(feature = "text-tlsh")]
+    Tlsh,
+}
+
+/// Run the text pipeline and surface every intermediate stage. Default
+/// algorithm is MinHash<128>. Use [`inspect_text_with`] to select an
+/// alternate algorithm. Token / shingle lists are capped at 256 entries
+/// each so a 1-MiB document doesn't produce a multi-megabyte payload.
 #[cfg(feature = "inspect")]
 pub fn inspect_text(text: &str, opts: &TextOpts) -> Result<InspectTextResult> {
+    inspect_text_with(text, opts, InspectTextAlgorithm::Minhash)
+}
+
+/// Run the text inspect pipeline with an explicit algorithm selector.
+/// See [`InspectTextAlgorithm`] for the supported choices. Stages
+/// (raw / canonicalized / tokens / shingles) are returned regardless;
+/// only the surfaced `fingerprint_hex` and `algorithm` tag depend on
+/// the selector.
+#[cfg(feature = "inspect")]
+pub fn inspect_text_with(
+    text: &str,
+    opts: &TextOpts,
+    algorithm: InspectTextAlgorithm,
+) -> Result<InspectTextResult> {
     const MAX_RAW_BYTES: usize = 8 * 1024;
     const MAX_LIST_LEN: usize = 256;
     const MAX_SHINGLE_BYTES: usize = 256;
@@ -856,14 +895,65 @@ pub fn inspect_text(text: &str, opts: &TextOpts) -> Result<InspectTextResult> {
     let (shingles, total_shingles) =
         collect_shingles_capped(&canonicalized, opts, MAX_LIST_LEN, MAX_SHINGLE_BYTES);
 
-    // Final fingerprint.
-    let rec = fingerprint_minhash_with::<DEFAULT_H>(text, opts, 0, 0)?;
-    let fingerprint_hex = hex_lower(&rec.fingerprint);
-    let fingerprint_bytes = rec.fingerprint.len();
-    let config_hash = rec.config_hash;
+    // Final fingerprint — dispatch to the selected algorithm. Each branch
+    // returns (algorithm tag, fingerprint hex, byte length, config hash).
+    let (algo_tag, fingerprint_hex, fingerprint_bytes, config_hash) = match algorithm {
+        InspectTextAlgorithm::Minhash => {
+            let rec = fingerprint_minhash_with::<DEFAULT_H>(text, opts, 0, 0)?;
+            (
+                ALGORITHM_MINHASH_128,
+                hex_lower(&rec.fingerprint),
+                rec.fingerprint.len(),
+                rec.config_hash,
+            )
+        }
+        #[cfg(feature = "text-simhash")]
+        InspectTextAlgorithm::SimhashTf => {
+            let rec = fingerprint_simhash_tf(text, opts, 0, 0)?;
+            (
+                ALGORITHM_SIMHASH_TF,
+                hex_lower(&rec.fingerprint),
+                rec.fingerprint.len(),
+                rec.config_hash,
+            )
+        }
+        #[cfg(feature = "text-simhash")]
+        InspectTextAlgorithm::SimhashIdf => {
+            // No corpus IDF table available at inspect time; fall back to
+            // TF weighting + the IDF algorithm tag so the UI knows which
+            // mode would have been used in production.
+            let rec = fingerprint_simhash_tf(text, opts, 0, 0)?;
+            (
+                ALGORITHM_SIMHASH_IDF,
+                hex_lower(&rec.fingerprint),
+                rec.fingerprint.len(),
+                rec.config_hash,
+            )
+        }
+        #[cfg(feature = "text-lsh")]
+        InspectTextAlgorithm::Lsh => {
+            let rec = fingerprint_lsh(text, opts, 0, 0)?;
+            (
+                ALGORITHM_LSH,
+                hex_lower(&rec.fingerprint),
+                rec.fingerprint.len(),
+                rec.config_hash,
+            )
+        }
+        #[cfg(feature = "text-tlsh")]
+        InspectTextAlgorithm::Tlsh => {
+            let rec = fingerprint_tlsh(text, opts, 0, 0)?;
+            (
+                ALGORITHM_TLSH,
+                hex_lower(&rec.fingerprint),
+                rec.fingerprint.len(),
+                rec.config_hash,
+            )
+        }
+    };
 
     Ok(InspectTextResult {
-        algorithm: ALGORITHM_MINHASH_128,
+        algorithm: algo_tag,
         raw: truncate_chars(text, MAX_RAW_BYTES),
         canonicalized: truncate_chars(&canonicalized, MAX_RAW_BYTES),
         tokens,

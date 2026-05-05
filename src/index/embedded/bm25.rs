@@ -412,14 +412,21 @@ pub(super) fn clear_one(
 
 // ── Query ───────────────────────────────────────────────────────────────
 
+/// Top-N matched terms reported per hit when `explain=true`. Caps the
+/// JSON payload to a sensible default; callers wanting more can clone +
+/// modify.
+const TERM_HITS_PER_DOC: usize = 16;
+
 /// BM25 top-k search inside `tenant_id`. `terms` is the already-
 /// tokenized query (caller is responsible for matching the index-time
-/// tokenizer).
-pub(super) fn search(
+/// tokenizer). When `explain` is true each returned hit carries the
+/// per-term contributions in [`Hit::term_hits`] (top-N by contribution).
+pub(super) fn search_explain(
     db: &redb::Database,
     tenant_id: u32,
     terms: &[&str],
     k: usize,
+    explain: bool,
 ) -> Result<Vec<Hit>> {
     use redb::ReadableDatabase;
     if k == 0 || terms.is_empty() {
@@ -464,6 +471,9 @@ pub(super) fn search(
         .map_err(|e| Error::Index(e.to_string()))?;
 
     let mut accum: HashMap<u64, f32> = HashMap::new();
+    // (doc_id) → Vec<TermHit>. Only populated when `explain` is true, so
+    // the hot search path stays a single-map walk for non-explain calls.
+    let mut explain_hits: HashMap<u64, Vec<crate::core::TermHit>> = HashMap::new();
     // Tokenize each provided query term again so single-token args like
     // "Hello, World" still split sensibly.
     let mut query_terms: Vec<String> = Vec::new();
@@ -500,20 +510,48 @@ pub(super) fn search(
             let denom = (tf as f32) + K1 * (1.0 - B + B * dl / avgdl.max(1.0));
             let contribution = idf * ((tf as f32) * (K1 + 1.0)) / denom.max(1e-6);
             *accum.entry(doc_id).or_insert(0.0) += contribution;
+            if explain {
+                explain_hits
+                    .entry(doc_id)
+                    .or_default()
+                    .push(crate::core::TermHit {
+                        term: term.clone(),
+                        idf,
+                        tf,
+                        contribution,
+                    });
+            }
         }
     }
 
     let mut hits: Vec<Hit> = accum
         .into_iter()
-        .map(|(record_id, score)| Hit {
-            tenant_id,
-            record_id,
-            score,
-            source: HitSource::Bm25,
-            vector_score: None,
-            bm25_score: None,
-            vector_rank: None,
-            bm25_rank: None,
+        .map(|(record_id, score)| {
+            let term_hits = if explain {
+                let mut th = explain_hits.remove(&record_id).unwrap_or_default();
+                // Top-N by contribution so a doc that matched a long query
+                // doesn't bloat the response.
+                th.sort_by(|a, b| {
+                    b.contribution
+                        .partial_cmp(&a.contribution)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                th.truncate(TERM_HITS_PER_DOC);
+                th
+            } else {
+                Vec::new()
+            };
+            Hit {
+                tenant_id,
+                record_id,
+                score,
+                source: HitSource::Bm25,
+                vector_score: None,
+                bm25_score: None,
+                vector_rank: None,
+                bm25_rank: None,
+                term_hits,
+            }
         })
         .collect();
 
@@ -591,7 +629,7 @@ mod tests {
         let db = open_db(&dir.path().join("u.redb"));
         upsert(&db, 1, 100, "the quick brown fox");
 
-        let hits = search(&db, 1, &["fox"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["fox"], 10, false).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].record_id, 100);
         assert!(hits[0].score > 0.0);
@@ -606,7 +644,7 @@ mod tests {
         upsert(&db, 1, 102, "go language");
 
         // "rust" scoring: doc 100 has tf=3, doc 101 tf=1. Doc 102 absent.
-        let hits = search(&db, 1, &["rust"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["rust"], 10, false).unwrap();
         let ids: Vec<u64> = hits.iter().map(|h| h.record_id).collect();
         assert_eq!(ids, vec![100, 101]);
     }
@@ -619,7 +657,7 @@ mod tests {
         upsert(&db, 1, 2, "go async language");
         upsert(&db, 1, 3, "rust safety");
 
-        let hits = search(&db, 1, &["rust", "async"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["rust", "async"], 10, false).unwrap();
         // Doc 1 hits both terms; should outrank docs that hit only one.
         assert_eq!(hits[0].record_id, 1);
     }
@@ -631,11 +669,11 @@ mod tests {
         upsert(&db, 1, 100, "tenant one document");
         upsert(&db, 2, 200, "tenant two document");
 
-        let hits1 = search(&db, 1, &["document"], 10).unwrap();
+        let hits1 = search_explain(&db, 1, &["document"], 10, false).unwrap();
         assert_eq!(hits1.len(), 1);
         assert_eq!(hits1[0].record_id, 100);
 
-        let hits2 = search(&db, 2, &["document"], 10).unwrap();
+        let hits2 = search_explain(&db, 2, &["document"], 10, false).unwrap();
         assert_eq!(hits2.len(), 1);
         assert_eq!(hits2[0].record_id, 200);
     }
@@ -645,7 +683,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let db = open_db(&dir.path().join("u.redb"));
         upsert(&db, 1, 1, "the quick brown fox");
-        let hits = search(&db, 1, &["zebra"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["zebra"], 10, false).unwrap();
         assert!(hits.is_empty());
     }
 
@@ -661,7 +699,7 @@ mod tests {
         clear_one(&txn, 1, 100).unwrap();
         txn.commit().unwrap();
 
-        let hits = search(&db, 1, &["rust"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["rust"], 10, false).unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].record_id, 101);
     }
@@ -678,7 +716,7 @@ mod tests {
         // Compare to a fresh competing doc.
         upsert(&db, 1, 101, "rust rust rust rust rust");
 
-        let hits = search(&db, 1, &["rust"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["rust"], 10, false).unwrap();
         // After re-ingest, doc 101 (5x rust) should outrank doc 100 (1x rust).
         assert_eq!(hits[0].record_id, 101);
     }
@@ -689,7 +727,7 @@ mod tests {
         let db = open_db(&dir.path().join("u.redb"));
         upsert(&db, 1, 100, "   ,,, ...   ");
         // No terms, so query returns nothing.
-        let hits = search(&db, 1, &["anything"], 10).unwrap();
+        let hits = search_explain(&db, 1, &["anything"], 10, false).unwrap();
         assert!(hits.is_empty());
     }
 }

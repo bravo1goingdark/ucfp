@@ -6,6 +6,7 @@
   import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
   import { apiFetch } from '$lib/utils/apiFetch.svelte';
   import RrfBreakdown from '$components/charts/RrfBreakdown.svelte';
+  import TermHitChips from '$components/charts/TermHitChips.svelte';
 
   const history = createRecordHistory();
   // Lookup table from record_id → saved bookmark, so hits with a known
@@ -54,6 +55,7 @@
 
   // Results
   let busy        = $state(false);
+  let explain     = $state(true);
   let error       = $state<string | null>(null);
   let hits        = $state<QueryHit[]>([]);
   let lastVecLen  = $state<number | null>(null);
@@ -172,7 +174,7 @@
       }
       lastVecLen = vec.length;
 
-      const res = await apiFetch('/api/search', {
+      const res = await apiFetch(`/api/search${explain ? '?explain=1' : ''}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ modality, k, vector: vec })
@@ -374,6 +376,11 @@
               />
             </div>
           {/if}
+          {#if h.term_hits && h.term_hits.length > 0}
+            <div class="hit-terms">
+              <TermHitChips hits={h.term_hits} max={8} />
+            </div>
+          {/if}
         </li>
       {/each}
     </ol>
@@ -495,5 +502,9 @@
   .hit-rrf {
     grid-column: 1 / -1;
     margin-top: 0.35rem;
+  }
+  .hit-terms {
+    grid-column: 1 / -1;
+    margin-top: 0.25rem;
   }
 </style>

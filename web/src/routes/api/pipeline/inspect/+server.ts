@@ -44,10 +44,10 @@ export const POST: RequestHandler = async (event) => {
     'k','h','tokenizer','preprocess',
     'canon_normalization','canon_case_fold','canon_strip_bidi',
     'canon_strip_format','canon_apply_confusable',
-    'input_id',
+    'input_id','algorithm',
   ];
   const IMAGE_KEYS = ['max_input_bytes','max_dimension','min_dimension','input_id'];
-  const AUDIO_KEYS = ['sample_rate','input_id'];
+  const AUDIO_KEYS = ['sample_rate','input_id','algorithm'];
   const allowedKeys =
     modality === 'text'  ? TEXT_KEYS  :
     modality === 'image' ? IMAGE_KEYS :

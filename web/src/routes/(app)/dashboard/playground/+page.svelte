@@ -1194,6 +1194,7 @@
                 text={textInput}
                 {file}
                 inputId={cachedInputIdA}
+                algorithm={algorithm}
                 opts={{
                   k: optK, h: optH, tokenizer: optTokenizer, preprocess: optPreprocess,
                   max_dimension: optMaxDimension, min_dimension: optMinDimension, max_input_bytes: optMaxInputBytes,

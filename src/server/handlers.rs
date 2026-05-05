@@ -128,9 +128,22 @@ pub(super) async fn describe_record<I: IndexBackend>(
 
 // ── POST /v1/query ─────────────────────────────────────────────────────
 
+#[derive(Default, serde::Deserialize)]
+pub(super) struct QueryParams {
+    /// `?explain=1` (or `true`) populates per-hit BM25 term contributions.
+    /// Off by default so the default response stays compact.
+    #[serde(default)]
+    pub explain: Option<String>,
+}
+
+fn parse_explain(p: &QueryParams) -> bool {
+    matches!(p.explain.as_deref(), Some("1" | "true" | "yes"))
+}
+
 pub(super) async fn query<I: IndexBackend>(
     State(index): State<Arc<I>>,
     ctx: Option<Extension<ApiKeyContext>>,
+    axum::extract::Query(params): axum::extract::Query<QueryParams>,
     Json(req): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, ApiError> {
     tenant_guard(ctx, req.tenant_id)?;
@@ -142,6 +155,7 @@ pub(super) async fn query<I: IndexBackend>(
         terms: Vec::new(),
         filter: None,
         rrf_k: 60,
+        explain: parse_explain(&params),
     };
     let matcher = Matcher::new(index.as_ref());
     let hits = matcher.search(&q).await?;
@@ -157,6 +171,16 @@ pub(super) async fn query<I: IndexBackend>(
             bm25_score: h.bm25_score,
             vector_rank: h.vector_rank,
             bm25_rank: h.bm25_rank,
+            term_hits: h
+                .term_hits
+                .into_iter()
+                .map(|t| crate::server::dto::TermHitOut {
+                    term: t.term,
+                    idf: t.idf,
+                    tf: t.tf,
+                    contribution: t.contribution,
+                })
+                .collect(),
         })
         .collect();
     Ok(Json(QueryResponse { hits }))
@@ -1098,7 +1122,18 @@ pub(super) async fn inspect_text<I: IndexBackend>(
         input_id: None,
     };
     let opts = build_text_opts(&params)?;
-    let result = crate::modality::text::inspect_text(text, &opts)?;
+    let algo = match q.algorithm.as_deref() {
+        #[cfg(feature = "text-simhash")]
+        Some("simhash-tf") => crate::modality::text::InspectTextAlgorithm::SimhashTf,
+        #[cfg(feature = "text-simhash")]
+        Some("simhash-idf") => crate::modality::text::InspectTextAlgorithm::SimhashIdf,
+        #[cfg(feature = "text-lsh")]
+        Some("lsh") => crate::modality::text::InspectTextAlgorithm::Lsh,
+        #[cfg(feature = "text-tlsh")]
+        Some("tlsh") => crate::modality::text::InspectTextAlgorithm::Tlsh,
+        _ => crate::modality::text::InspectTextAlgorithm::Minhash,
+    };
+    let result = crate::modality::text::inspect_text_with(text, &opts, algo)?;
     Ok(Json(result))
 }
 
@@ -1188,6 +1223,15 @@ pub(super) async fn inspect_audio<I: IndexBackend>(
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
 
-    let result = crate::modality::audio::inspect_audio(&samples, sample_rate)?;
+    let algo = match q.algorithm.as_deref() {
+        #[cfg(feature = "audio-panako")]
+        Some("panako") => crate::modality::audio::InspectAudioAlgorithm::Panako,
+        #[cfg(feature = "audio-haitsma")]
+        Some("haitsma") => crate::modality::audio::InspectAudioAlgorithm::Haitsma,
+        #[cfg(feature = "audio-neural")]
+        Some("neural") => crate::modality::audio::InspectAudioAlgorithm::Neural,
+        _ => crate::modality::audio::InspectAudioAlgorithm::Wang,
+    };
+    let result = crate::modality::audio::inspect_audio_with(&samples, sample_rate, algo)?;
     Ok(Json(result))
 }

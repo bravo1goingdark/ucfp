@@ -109,6 +109,18 @@ pub(super) struct HitOut {
     pub vector_rank: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bm25_rank: Option<u32>,
+    /// BM25 explainability — only populated when the request carried
+    /// `?explain=1`. Cap is 16 terms per hit (top by contribution).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub term_hits: Vec<TermHitOut>,
+}
+
+#[derive(Serialize)]
+pub(super) struct TermHitOut {
+    pub term: String,
+    pub idf: f32,
+    pub tf: u32,
+    pub contribution: f32,
 }
 
 // ── /v1/ingest/{modality}/{tid}/{rid} (POST) ───────────────────────────
@@ -582,6 +594,11 @@ pub(super) struct InspectTextQuery {
     /// cached bytes for this id instead of the request body.
     #[serde(default)]
     pub input_id: Option<u64>,
+    /// Algorithm selector. Recognised values:
+    /// `minhash` (default), `simhash-tf`, `simhash-idf`, `lsh`, `tlsh`.
+    /// Unknown values fall back to `minhash`.
+    #[serde(default)]
+    pub algorithm: Option<String>,
 }
 
 /// Query parameters for `POST /v1/pipeline/inspect/image/{tenant_id}`.
@@ -619,6 +636,11 @@ pub(super) struct InspectAudioQuery {
     /// bytes for this id instead of the request body.
     #[serde(default)]
     pub input_id: Option<u64>,
+    /// Algorithm selector. Recognised values:
+    /// `wang` (default), `panako`, `haitsma`, `neural`. Unknown values
+    /// fall back to `wang`.
+    #[serde(default)]
+    pub algorithm: Option<String>,
 }
 
 // ── Watermark detection response ───────────────────────────────────────

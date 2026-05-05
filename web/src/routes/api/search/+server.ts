@@ -39,9 +39,10 @@ export const POST: RequestHandler = async (event) => {
   const k = Math.min(MAX_K, Math.max(1, Math.floor(Number(body.k) || 10)));
 
   const cfg = { apiUrl: env.UCFP_API_URL, apiToken: env.UCFP_API_TOKEN, tenantId };
+  const explain = event.url.searchParams.get('explain') === '1';
   let out;
   try {
-    out = await query(cfg, { modality: body.modality, k, vector: body.vector });
+    out = await query(cfg, { modality: body.modality, k, vector: body.vector, explain });
   } catch (e) {
     error(502, `upstream unreachable: ${(e as Error).message}`);
   }

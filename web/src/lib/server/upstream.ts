@@ -55,6 +55,15 @@ export interface QueryHit {
   vector_rank?: number;
   /** Hybrid-only: 1-indexed rank from the BM25 ranker. */
   bm25_rank?: number;
+  /** BM25 explainability — populated when `?explain=1` is on the query. */
+  term_hits?: QueryTermHit[];
+}
+
+export interface QueryTermHit {
+  term: string;
+  idf: number;
+  tf: number;
+  contribution: number;
 }
 
 export interface QueryResponse {
@@ -417,10 +426,11 @@ export async function upsertRecords(
 /** POST /v1/query — vector kNN. */
 export async function query(
   cfg: UpstreamConfig,
-  q: { modality: Modality; k: number; vector: number[] },
+  q: { modality: Modality; k: number; vector: number[]; explain?: boolean },
   signal?: AbortSignal
 ): Promise<{ status: number; body: QueryResponse | string; latencyMs: number }> {
-  const url = joinUrl(cfg.apiUrl, '/v1/query');
+  const path = q.explain ? '/v1/query?explain=1' : '/v1/query';
+  const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
   const res = await upstreamFetch(url, {
     method: 'POST',

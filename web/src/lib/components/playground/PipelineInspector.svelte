@@ -26,13 +26,16 @@
     audioSampleRate?: number | null;
     /** Cached input id for live-tune; sent instead of a body when present. */
     inputId?: number | null;
+    /** Algorithm selector. Optional — defaults to upstream's default per
+     *  modality (minhash for text, multihash for image, wang for audio). */
+    algorithm?: string | null;
     /** Live tunables forwarded as query params (subset relevant to inspect). */
     opts?: Record<string, unknown>;
   };
   let {
     modality, text, file = null,
     audioBytes = null, audioSampleRate = null,
-    inputId = null, opts = {},
+    inputId = null, algorithm = null, opts = {},
   }: Props = $props();
 
   type TextStages = {
@@ -114,6 +117,7 @@
     try {
       const sp = new URLSearchParams({ modality });
       if (inputId != null) sp.set('input_id', String(inputId));
+      if (algorithm) sp.set('algorithm', algorithm);
       const optKeys =
         modality === 'text'  ? TEXT_OPT_KEYS  :
         modality === 'image' ? IMAGE_OPT_KEYS :
