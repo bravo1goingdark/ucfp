@@ -19,6 +19,7 @@
   import ModalityTabs from '$lib/components/playground/ModalityTabs.svelte';
   import type { RecordHistoryEntry } from '$lib/types/api';
   import { apiFetch } from '$lib/utils/apiFetch.svelte';
+  import { uploadWithProgress } from '$lib/utils/uploadWithProgress.svelte';
 
   const history = createRecordHistory();
 
@@ -114,6 +115,7 @@
   let filePreviewUrl = $state<string | null>(null);
   let dragActive     = $state(false);
   let running        = $state(false);
+  let uploadPct      = $state(0);  // 0..1 during the upload phase
   let errorMsg       = $state<string | null>(null);
   let rateLimitSec   = $state(0);
   let showPipeline   = $state(true);
@@ -432,10 +434,38 @@
     // search "Find similar" path needs it client-side.
     if (EMBEDDING_ALGS.has(algorithm)) url += `&return_embedding=1`;
 
-    const init: RequestInit = { method: 'POST', body };
-    if (contentType) init.headers = { 'content-type': contentType };
+    const headers: Record<string, string> = {};
+    if (contentType) headers['content-type'] = contentType;
 
-    const res = await apiFetch(url, init);
+    // Image + audio are bytes-heavy; use the XHR uploader so the user
+    // sees a percent during multi-MB uploads. Text is small enough that
+    // apiFetch is the simpler path.
+    let res: { status: number; ok: boolean; headers: Headers; text: () => Promise<string>; json: <T = unknown>() => Promise<T> };
+    uploadPct = 0;
+    try {
+      if (modality === 'text') {
+        const r = await apiFetch(url, { method: 'POST', body, headers });
+        res = {
+          status: r.status,
+          ok: r.ok,
+          headers: r.headers,
+          text: () => r.text(),
+          json: <T,>() => r.json() as Promise<T>,
+        };
+        uploadPct = 1;
+      } else {
+        res = await uploadWithProgress(url, {
+          method: 'POST',
+          body,
+          headers,
+          onProgress: (f) => (uploadPct = f),
+        });
+      }
+    } finally {
+      // Snap the bar to 100 % when the response arrives so the UI
+      // reads "uploaded, awaiting fingerprint" before the result lands.
+      uploadPct = 1;
+    }
     const elapsed = Math.round(performance.now() - t0);
 
     if (res.status === 429) {
@@ -599,6 +629,7 @@
       errorMsg = `Network error: ${(e as Error).message}`;
     } finally {
       running = false;
+      uploadPct = 0;
     }
   }
 
@@ -831,6 +862,7 @@
       errorMsg = `Network error: ${(e as Error).message}`;
     } finally {
       running = false; runningB = false;
+      uploadPct = 0;
     }
   }
 
@@ -1116,8 +1148,20 @@
 
         <button class="run-btn" onclick={compute}
           disabled={running || rateLimitSec > 0} aria-busy={running}>
-          {running ? 'Running…' : 'Run fingerprint'}
+          {#if running && uploadPct < 1}
+            Uploading… {Math.round(uploadPct * 100)}%
+          {:else if running}
+            Fingerprinting…
+          {:else}
+            Run fingerprint
+          {/if}
         </button>
+        {#if running && uploadPct > 0 && uploadPct < 1}
+          <div class="upload-bar" role="progressbar"
+            aria-valuenow={Math.round(uploadPct * 100)} aria-valuemin="0" aria-valuemax="100">
+            <div class="upload-bar-fill" style:width="{uploadPct * 100}%"></div>
+          </div>
+        {/if}
       </div>
 
       <!-- Right: result -->
@@ -1786,6 +1830,19 @@
   .run-btn { font-family: var(--mono); font-size: 0.82rem; padding: 0.55rem 1.2rem; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); border-radius: 3px; cursor: pointer; transition: opacity 0.15s; align-self: flex-start; }
   .run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .run-btn:not(:disabled):hover { opacity: 0.85; }
+  .upload-bar {
+    width: 100%;
+    height: 4px;
+    background: var(--bg-2);
+    border: 1px solid var(--line-strong);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .upload-bar-fill {
+    height: 100%;
+    background: var(--accent-ink);
+    transition: width 0.12s ease-out;
+  }
 
   /* Result pane */
   .result-pane { padding: 0.75rem; background: var(--bg-2); border-radius: 6px; border: 1px solid var(--ink); }
