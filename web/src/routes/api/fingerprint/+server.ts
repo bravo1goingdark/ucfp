@@ -44,7 +44,7 @@ interface ParsedBody {
   sampleRate?: number;
 }
 
-async function parseRequest(request: Request): Promise<ParsedBody> {
+async function parseRequest(request: Request, hasInputId: boolean): Promise<ParsedBody> {
   const ct = (request.headers.get('content-type') ?? '').toLowerCase();
 
   if (ct.startsWith('multipart/form-data')) {
@@ -75,7 +75,7 @@ async function parseRequest(request: Request): Promise<ParsedBody> {
 
   if (ct.startsWith('image/')) {
     const buf = new Uint8Array(await request.arrayBuffer());
-    if (buf.byteLength === 0) error(400, 'empty body');
+    if (buf.byteLength === 0 && !hasInputId) error(400, 'empty body');
     return {
       modality: 'image',
       body: buf,
@@ -86,7 +86,7 @@ async function parseRequest(request: Request): Promise<ParsedBody> {
 
   if (ct.startsWith('audio/')) {
     const buf = new Uint8Array(await request.arrayBuffer());
-    if (buf.byteLength === 0) error(400, 'empty body');
+    if (buf.byteLength === 0 && !hasInputId) error(400, 'empty body');
     return {
       modality: 'audio',
       body: buf,
@@ -98,7 +98,7 @@ async function parseRequest(request: Request): Promise<ParsedBody> {
 
   // Default: treat as UTF-8 text.
   const text = await request.text();
-  if (text.length === 0) error(400, 'empty body');
+  if (text.length === 0 && !hasInputId) error(400, 'empty body');
   return {
     modality: 'text',
     body: text,
@@ -168,9 +168,12 @@ export const POST: RequestHandler = async (event) => {
   }
 
   // ── modality + body ──────────────────────────────────────────────────
-  const parsed = await parseRequest(request);
-  const recordId = ulidU64();
+  // Empty bodies are normally rejected, but viewer routes pass
+  // `?input_id=…` so the upstream uses cached bytes from a prior upload.
   const sp = event.url.searchParams;
+  const hasInputId = sp.get('input_id') != null && sp.get('input_id') !== '';
+  const parsed = await parseRequest(request, hasInputId);
+  const recordId = ulidU64();
   const algorithmParam = sp.get('algorithm') ?? undefined;
   const modelId = sp.get('model_id') ?? undefined;
   const apiKey  = sp.get('api_key')  ?? undefined;
