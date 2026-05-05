@@ -93,6 +93,16 @@
   }
 </script>
 
+<style>
+  .crosshair {
+    stroke: var(--ink);
+    stroke-width: 0.6;
+    stroke-dasharray: 2 2;
+    opacity: 0.35;
+  }
+  .hover-capture { cursor: crosshair; }
+</style>
+
 <div class="linechart-wrap">
   <svg
     class="chart-svg linechart"
@@ -132,6 +142,18 @@
       />
     {/each}
 
+    <!-- Crosshair guide — drawn when any series point is hovered. -->
+    {#if hovered}
+      <line
+        class="crosshair"
+        x1={hovered.x}
+        x2={hovered.x}
+        y1={pad.top}
+        y2={height - pad.bottom}
+        pointer-events="none"
+      />
+    {/if}
+
     <!-- data dots (hover targets) -->
     {#each series as s, si (s.label)}
       {#each s.values as v, pi (pi)}
@@ -160,6 +182,46 @@
         ></circle>
       {/each}
     {/each}
+
+    <!-- Wide capture rect lets users hover anywhere in the plot area to
+         snap to the nearest x-index, instead of needing pixel-precise
+         aim on a 4-px dot. Doesn't interfere with the dots' aria-label
+         path because they're drawn on top. -->
+    <rect
+      class="hover-capture"
+      x={pad.left} y={pad.top}
+      width={innerW} height={innerH}
+      fill="transparent"
+      role="presentation"
+      onmousemove={(e: MouseEvent) => {
+        if (series.length === 0 || xLabels.length === 0) return;
+        const svg = (e.currentTarget as SVGRectElement).ownerSVGElement;
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const xRatio = (e.clientX - rect.left - (pad.left * rect.width / width)) /
+          (innerW * rect.width / width);
+        const idx = Math.max(0, Math.min(xLabels.length - 1, Math.round(xRatio * (xLabels.length - 1))));
+        // Pick the series with the largest value at this x for the tooltip
+        // anchor — visually the most relevant signal at that timestamp.
+        let bestSi = 0;
+        let bestV = -Infinity;
+        for (let s = 0; s < series.length; s++) {
+          const v = series[s].values[idx];
+          if (v > bestV) { bestV = v; bestSi = s; }
+        }
+        const v = series[bestSi].values[idx];
+        hovered = {
+          seriesIndex: bestSi,
+          pointIndex: idx,
+          x: pointX(idx, xLabels.length),
+          y: pointY(v),
+          label: series[bestSi].label,
+          value: v,
+          xLabel: xLabels[idx] ?? '',
+        };
+      }}
+      onmouseleave={() => (hovered = null)}
+    />
 
     <!-- tooltip -->
     {#if hovered}
