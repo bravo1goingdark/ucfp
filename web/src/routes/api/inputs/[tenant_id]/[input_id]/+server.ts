@@ -3,6 +3,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
+import { upstreamFetch } from '$lib/server/upstream';
 
 export const DELETE: RequestHandler = async ({ platform, params }) => {
   const env = platform?.env;
@@ -17,7 +18,7 @@ export const DELETE: RequestHandler = async ({ platform, params }) => {
   const upstream = `${env.UCFP_API_URL.replace(/\/$/, '')}/v1/inputs/${tenantId}/${inputId}`;
   let res: Response;
   try {
-    res = await fetch(upstream, {
+    res = await upstreamFetch(upstream, {
       method: 'DELETE',
       headers: {
         authorization: `Bearer ${env.UCFP_API_TOKEN}`,

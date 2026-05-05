@@ -153,6 +153,10 @@ pub(super) async fn query<I: IndexBackend>(
             record_id: h.record_id,
             score: h.score,
             source: hit_source_str(h.source),
+            vector_score: h.vector_score,
+            bm25_score: h.bm25_score,
+            vector_rank: h.vector_rank,
+            bm25_rank: h.bm25_rank,
         })
         .collect();
     Ok(Json(QueryResponse { hits }))

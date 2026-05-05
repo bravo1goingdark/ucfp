@@ -47,6 +47,14 @@ export interface QueryHit {
   record_id: number | string;
   score: number;
   source: 'vector' | 'bm25' | 'filter' | 'reranker' | 'fused';
+  /** Hybrid-only: vector ranker contribution to the fused RRF score. */
+  vector_score?: number;
+  /** Hybrid-only: BM25 ranker contribution to the fused RRF score. */
+  bm25_score?: number;
+  /** Hybrid-only: 1-indexed rank from the vector ranker. */
+  vector_rank?: number;
+  /** Hybrid-only: 1-indexed rank from the BM25 ranker. */
+  bm25_rank?: number;
 }
 
 export interface QueryResponse {
@@ -152,6 +160,97 @@ function joinUrl(base: string, path: string): string {
   return `${base.replace(/\/$/, '')}${path}`;
 }
 
+function genTraceId(): string {
+  // Fast 128-bit hex id; UUIDv4-shaped without the dashes.
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  const a = new Uint8Array(16);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(a);
+  } else {
+    for (let i = 0; i < 16; i++) a[i] = (Math.random() * 256) | 0;
+  }
+  // RFC4122 v4 layout
+  a[6] = (a[6] & 0x0f) | 0x40;
+  a[8] = (a[8] & 0x3f) | 0x80;
+  let s = '';
+  for (let i = 0; i < 16; i++) {
+    s += a[i].toString(16).padStart(2, '0');
+    if (i === 3 || i === 5 || i === 7 || i === 9) s += '-';
+  }
+  return s;
+}
+
+interface UpstreamFetchOpts {
+  /** Permit retry on 5xx / network error. POSTs default false; GET/DELETE true. */
+  idempotent?: boolean;
+  /** Max retries (default 3). */
+  retries?: number;
+}
+
+const RETRY_BACKOFF_MS = [120, 480, 1440];
+
+/**
+ * `fetch` wrapper that:
+ *  - injects an `X-Request-Id` trace header on every request (echoed by upstream),
+ *  - retries on 5xx and network errors with exponential backoff + jitter, but
+ *    only when `idempotent` is set or the method is GET/DELETE,
+ *  - propagates AbortSignal.
+ *
+ * Callers downstream (handlers in `routes/api/*+server.ts`) can read the
+ * trace id off the response with `res.headers.get('x-request-id')` and
+ * forward it back to the browser for correlation.
+ */
+export async function upstreamFetch(
+  url: string | URL,
+  init: RequestInit & { signal?: AbortSignal | null } = {},
+  opts: UpstreamFetchOpts = {},
+): Promise<Response> {
+  const method = (init.method ?? 'GET').toUpperCase();
+  const isIdempotent =
+    opts.idempotent ??
+    (method === 'GET' || method === 'HEAD' || method === 'DELETE' || method === 'OPTIONS');
+  const maxRetries = isIdempotent ? Math.min(Math.max(0, opts.retries ?? 3), 3) : 0;
+  const traceId = genTraceId();
+
+  const headers = new Headers(init.headers ?? {});
+  if (!headers.has('x-request-id')) headers.set('x-request-id', traceId);
+
+  let attempt = 0;
+  let lastError: unknown;
+  while (true) {
+    try {
+      const res = await fetch(url, { ...init, headers });
+      // Retry on transient upstream errors (5xx). 408/429 are deliberately
+      // *not* retried here — 408 means client timed out (re-issue costs us
+      // double bandwidth) and 429 is rate-limiting (caller should respect
+      // Retry-After instead of hammering).
+      if (res.status >= 500 && res.status <= 599 && attempt < maxRetries) {
+        attempt++;
+        await sleepWithJitter(RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)]);
+        continue;
+      }
+      return res;
+    } catch (err) {
+      // Don't retry an explicit abort — the caller cancelled.
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      lastError = err;
+      if (attempt < maxRetries) {
+        attempt++;
+        await sleepWithJitter(RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)]);
+        continue;
+      }
+      throw lastError;
+    }
+  }
+}
+
+async function sleepWithJitter(baseMs: number): Promise<void> {
+  const jitter = Math.random() * baseMs * 0.3;
+  await new Promise((r) => setTimeout(r, baseMs + jitter));
+}
+
 function buildHeaders(cfg: UpstreamConfig, contentType: string): HeadersInit {
   return {
     'content-type': contentType,
@@ -185,7 +284,7 @@ export async function ingest(cfg: UpstreamConfig, args: IngestArgs): Promise<Ing
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, args.contentType),
     body: args.body,
@@ -226,7 +325,7 @@ export async function ingestWatermark(
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, args.contentType),
     body: args.body,
@@ -271,7 +370,7 @@ export async function describeRecord(
   signal?: AbortSignal
 ): Promise<{ status: number; description: FingerprintDescription | null }> {
   const url = joinUrl(cfg.apiUrl, `/v1/records/${cfg.tenantId}/${recordId}`);
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'GET',
     headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
     signal
@@ -287,7 +386,7 @@ export async function deleteRecord(
   signal?: AbortSignal
 ): Promise<{ status: number }> {
   const url = joinUrl(cfg.apiUrl, `/v1/records/${cfg.tenantId}/${recordId}`);
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'DELETE',
     headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
     signal
@@ -302,7 +401,7 @@ export async function upsertRecords(
   signal?: AbortSignal
 ): Promise<{ status: number; body: UpsertResponse | string }> {
   const url = joinUrl(cfg.apiUrl, '/v1/records');
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, 'application/json'),
     body: JSON.stringify({ records }),
@@ -323,7 +422,7 @@ export async function query(
 ): Promise<{ status: number; body: QueryResponse | string; latencyMs: number }> {
   const url = joinUrl(cfg.apiUrl, '/v1/query');
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, 'application/json'),
     body: JSON.stringify({ tenant_id: cfg.tenantId, modality: q.modality, k: q.k, vector: q.vector }),
@@ -342,7 +441,7 @@ export async function getInfo(
   cfg: Pick<UpstreamConfig, 'apiUrl'>,
   signal?: AbortSignal
 ): Promise<{ status: number; info: InfoResponse | null }> {
-  const res = await fetch(joinUrl(cfg.apiUrl, '/v1/info'), { method: 'GET', signal });
+  const res = await upstreamFetch(joinUrl(cfg.apiUrl, '/v1/info'), { method: 'GET', signal });
   if (!res.ok) return { status: res.status, info: null };
   return { status: res.status, info: (await res.json()) as InfoResponse };
 }
@@ -361,7 +460,7 @@ export async function ingestTextPreprocess(
   const path = `/v1/ingest/text/${cfg.tenantId}/${args.recordId}/preprocess/${args.kind}`;
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, args.contentType),
     body: args.body,
@@ -387,7 +486,7 @@ export async function ingestTextStream(
   if (qstr) path += '?' + qstr;
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: buildHeaders(cfg, 'application/x-ndjson'),
     body: args.ndjson,
@@ -413,7 +512,7 @@ export async function ingestAudioStream(
   path += '?' + qs.toString();
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
-  const res = await fetch(url, {
+  const res = await upstreamFetch(url, {
     method: 'POST',
     headers: { authorization: `Bearer ${cfg.apiToken}`, 'x-ucfp-tenant': String(cfg.tenantId) },
     body: args.multipart,

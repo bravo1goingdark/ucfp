@@ -98,6 +98,17 @@ pub(super) struct HitOut {
     pub score: f32,
     /// `"vector" | "bm25" | "filter" | "reranker" | "fused"`.
     pub source: &'static str,
+    /// Hybrid-only: per-source contribution to the fused RRF score. Omitted
+    /// for non-fused hits so the response stays byte-stable for vector-only
+    /// or BM25-only callers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_score: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_rank: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25_rank: Option<u32>,
 }
 
 // ── /v1/ingest/{modality}/{tid}/{rid} (POST) ───────────────────────────

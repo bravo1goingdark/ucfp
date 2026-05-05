@@ -115,6 +115,16 @@ pub struct Hit {
     pub score: f32,
     /// Which retrieval path produced this hit. Useful for explainability.
     pub source: HitSource,
+    /// Hybrid-only: contribution of the vector ranker to the fused RRF
+    /// score (`1 / (rrf_k + rank_v)`). `None` for non-fused hits.
+    pub vector_score: Option<f32>,
+    /// Hybrid-only: contribution of the BM25 ranker to the fused RRF
+    /// score (`1 / (rrf_k + rank_b)`). `None` for non-fused hits.
+    pub bm25_score: Option<f32>,
+    /// Hybrid-only: 1-indexed rank produced by the vector ranker.
+    pub vector_rank: Option<u32>,
+    /// Hybrid-only: 1-indexed rank produced by the BM25 ranker.
+    pub bm25_rank: Option<u32>,
 }
 
 /// Which ranker produced a [`Hit`].

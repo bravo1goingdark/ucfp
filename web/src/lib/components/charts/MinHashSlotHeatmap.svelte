@@ -20,12 +20,12 @@
     diffAgainst?: Uint8Array;
     /** Caption shown beneath. */
     label?: string;
-    /** CSS px width of the whole strip. */
-    width?: number;
+    /** CSS px width of the whole strip. Pass `null`/omit for 100% of the parent. */
+    width?: number | null;
     /** CSS px height of the whole strip. */
     height?: number;
   };
-  let { bytes, diffAgainst, label, width = 384, height = 56 }: Props = $props();
+  let { bytes, diffAgainst, label, width = null, height = 56 }: Props = $props();
 
   const slotCount = $derived(Math.floor(bytes.length / 8));
   const ok = $derived(slotCount > 0 && bytes.length % 8 === 0);
@@ -82,7 +82,7 @@
 </script>
 
 {#if ok}
-  <div class="mh-wrap" style="width:{width}px">
+  <div class="mh-wrap" style:width={width != null ? `${width}px` : '100%'}>
     {#if label}<div class="mh-label">{label}</div>{/if}
     <div class="mh-grid"
       style="--cols:{cols}; --rows:{rows}; height:{height}px"

@@ -7,6 +7,7 @@
 // Cache for 5 minutes — the manifest changes only on a deploy.
 
 import type { RequestHandler } from './$types';
+import { upstreamFetch } from '$lib/server/upstream';
 
 export const GET: RequestHandler = async ({ platform, fetch: _fetch }) => {
   const env = platform?.env;
@@ -19,7 +20,7 @@ export const GET: RequestHandler = async ({ platform, fetch: _fetch }) => {
   const upstream = `${env.UCFP_API_URL.replace(/\/$/, '')}/v1/algorithms`;
   let res: Response;
   try {
-    res = await fetch(upstream, { headers: { accept: 'application/json' } });
+    res = await upstreamFetch(upstream, { headers: { accept: 'application/json' } });
   } catch (e) {
     return new Response(
       JSON.stringify({ error: `upstream unreachable: ${(e as Error).message}` }),

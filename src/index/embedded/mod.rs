@@ -319,6 +319,10 @@ impl IndexBackend for EmbeddedBackend {
                     record_id: rid,
                     score,
                     source: HitSource::Vector,
+                    vector_score: None,
+                    bm25_score: None,
+                    vector_rank: None,
+                    bm25_rank: None,
                 })
                 .collect())
         })

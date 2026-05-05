@@ -68,6 +68,28 @@ const handleSecurity: Handle = async ({ event, resolve }) => {
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   response.headers.set('X-Frame-Options', 'DENY');
+  response.headers.set(
+    'Permissions-Policy',
+    'camera=(), microphone=(), geolocation=(), interest-cohort=()'
+  );
+  // CSP: SSR'd SvelteKit + spectrogram/PNG data URIs from upstream inspect.
+  // `style-src 'unsafe-inline'` is required by Svelte's scoped style attrs;
+  // `img-src data: blob:` lets the audio Spectrogram render its base64 PNGs.
+  response.headers.set(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "img-src 'self' data: blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline'",
+      "connect-src 'self'",
+      "font-src 'self' data:",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "frame-ancestors 'none'",
+      "form-action 'self'"
+    ].join('; ')
+  );
   if (event.url.protocol === 'https:') {
     response.headers.set(
       'Strict-Transport-Security',

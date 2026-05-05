@@ -510,6 +510,10 @@ pub(super) fn search(
             record_id,
             score,
             source: HitSource::Bm25,
+            vector_score: None,
+            bm25_score: None,
+            vector_rank: None,
+            bm25_rank: None,
         })
         .collect();
 

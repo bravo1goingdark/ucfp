@@ -4,6 +4,7 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authenticateApiKey, extractApiKey } from '$lib/server/apikeyAuth';
+import { upstreamFetch } from '$lib/server/upstream';
 
 export const POST: RequestHandler = async (event) => {
   const { request, platform } = event;
@@ -71,7 +72,7 @@ export const POST: RequestHandler = async (event) => {
     : 'application/octet-stream';
   let res: Response;
   try {
-    res = await fetch(upstream, {
+    res = await upstreamFetch(upstream, {
       method: 'POST',
       headers: {
         'content-type': request.headers.get('content-type') ?? defaultCt,
@@ -79,7 +80,7 @@ export const POST: RequestHandler = async (event) => {
         'x-ucfp-tenant': String(tenantId),
       },
       body,
-    });
+    }, { idempotent: true });
   } catch (e) {
     return json(
       { error: `upstream unreachable: ${(e as Error).message}` },

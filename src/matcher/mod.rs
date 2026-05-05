@@ -20,25 +20,68 @@ use crate::rerank::Reranker;
 /// `rrf_k = 60` is the universal default (Azure AI Search, OpenSearch,
 /// Qdrant, Weaviate, Elasticsearch).
 pub fn rrf(rankings: &[&[Hit]], rrf_k: u32) -> Vec<Hit> {
+    rrf_with_sources(rankings, &[], rrf_k)
+}
+
+/// Like [`rrf`] but tags each input ranking with its [`HitSource`] so the
+/// per-source contribution to the fused score can be surfaced for
+/// explainability. `sources[i]` corresponds to `rankings[i]`. Sources
+/// for indices past `sources.len()` default to the first hit's reported
+/// source (best-effort backward compatibility for older callers).
+pub fn rrf_with_sources(rankings: &[&[Hit]], sources: &[HitSource], rrf_k: u32) -> Vec<Hit> {
     let denom = rrf_k as f32;
-    let mut acc: HashMap<(u32, u64), (f32, HitSource)> = HashMap::new();
-    for ranking in rankings {
-        for (rank, hit) in ranking.iter().enumerate() {
+    // Per-doc accumulator: (vec_score, bm25_score, vec_rank, bm25_rank, fallback_source).
+    let mut acc: HashMap<
+        (u32, u64),
+        (Option<f32>, Option<f32>, Option<u32>, Option<u32>, HitSource),
+    > = HashMap::new();
+    for (i, ranking) in rankings.iter().enumerate() {
+        let src = sources
+            .get(i)
+            .copied()
+            .or_else(|| ranking.first().map(|h| h.source))
+            .unwrap_or(HitSource::Fused);
+        for (rank0, hit) in ranking.iter().enumerate() {
             let key = (hit.tenant_id, hit.record_id);
-            let inc = 1.0 / (denom + (rank as f32 + 1.0));
-            acc.entry(key)
-                .and_modify(|(s, _)| *s += inc)
-                .or_insert((inc, hit.source));
+            let rank1 = (rank0 as u32) + 1;
+            let inc = 1.0 / (denom + rank1 as f32);
+            let entry = acc
+                .entry(key)
+                .or_insert((None, None, None, None, hit.source));
+            match src {
+                HitSource::Vector => {
+                    entry.0 = Some(entry.0.unwrap_or(0.0) + inc);
+                    entry.2 = entry.2.or(Some(rank1));
+                }
+                HitSource::Bm25 => {
+                    entry.1 = Some(entry.1.unwrap_or(0.0) + inc);
+                    entry.3 = entry.3.or(Some(rank1));
+                }
+                _ => {
+                    // Unknown source: fold into vector_score so the total
+                    // still matches Σ inc; rank info unavailable.
+                    entry.0 = Some(entry.0.unwrap_or(0.0) + inc);
+                }
+            }
         }
     }
     let mut out: Vec<Hit> = acc
         .into_iter()
-        .map(|((tenant_id, record_id), (score, _))| Hit {
-            tenant_id,
-            record_id,
-            score,
-            source: HitSource::Fused,
-        })
+        .map(
+            |((tenant_id, record_id), (vs, bs, vr, br, _))| {
+                let total = vs.unwrap_or(0.0) + bs.unwrap_or(0.0);
+                Hit {
+                    tenant_id,
+                    record_id,
+                    score: total,
+                    source: HitSource::Fused,
+                    vector_score: vs,
+                    bm25_score: bs,
+                    vector_rank: vr,
+                    bm25_rank: br,
+                }
+            },
+        )
         .collect();
     out.sort_by(|a, b| {
         b.score
@@ -98,7 +141,11 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
                 let knn_fut = self.index.knn(q.tenant_id, v, q.k, q.filter.as_ref());
                 let bm_fut = self.index.bm25(q.tenant_id, &terms, q.k, q.filter.as_ref());
                 let (vec_hits, bm_hits) = tokio::try_join!(knn_fut, bm_fut)?;
-                rrf(&[&vec_hits, &bm_hits], q.rrf_k)
+                rrf_with_sources(
+                    &[&vec_hits, &bm_hits],
+                    &[HitSource::Vector, HitSource::Bm25],
+                    q.rrf_k,
+                )
             }
             (Some(v), true) => {
                 self.index
@@ -121,5 +168,75 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
         }
 
         Ok(fused)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn h(rid: u64, score: f32, src: HitSource) -> Hit {
+        Hit {
+            tenant_id: 1,
+            record_id: rid,
+            score,
+            source: src,
+            vector_score: None,
+            bm25_score: None,
+            vector_rank: None,
+            bm25_rank: None,
+        }
+    }
+
+    #[test]
+    fn rrf_with_sources_populates_breakdown_for_overlap() {
+        let vec_hits = vec![
+            h(10, 0.9, HitSource::Vector),
+            h(20, 0.8, HitSource::Vector),
+        ];
+        let bm_hits = vec![
+            h(20, 4.5, HitSource::Bm25),
+            h(30, 4.0, HitSource::Bm25),
+        ];
+        let fused = rrf_with_sources(
+            &[&vec_hits, &bm_hits],
+            &[HitSource::Vector, HitSource::Bm25],
+            60,
+        );
+        // Doc 20 is in both rankings — must carry both contributions and ranks.
+        let twenty = fused.iter().find(|h| h.record_id == 20).unwrap();
+        assert!(twenty.vector_score.is_some(), "vec_score should be set on overlapping doc");
+        assert!(twenty.bm25_score.is_some(), "bm_score should be set on overlapping doc");
+        assert_eq!(twenty.vector_rank, Some(2));
+        assert_eq!(twenty.bm25_rank, Some(1));
+        // Score equals the sum of components.
+        let expected = twenty.vector_score.unwrap() + twenty.bm25_score.unwrap();
+        assert!((twenty.score - expected).abs() < 1e-6);
+        // Doc 10 was only in vector → bm25 fields stay None.
+        let ten = fused.iter().find(|h| h.record_id == 10).unwrap();
+        assert!(ten.vector_score.is_some());
+        assert!(ten.bm25_score.is_none());
+        // Source is always Fused for rrf output.
+        for hit in &fused {
+            assert_eq!(hit.source, HitSource::Fused);
+        }
+    }
+
+    #[test]
+    fn rrf_legacy_is_equivalent_to_with_sources_total() {
+        let vec_hits = vec![h(10, 0.9, HitSource::Vector), h(20, 0.8, HitSource::Vector)];
+        let bm_hits = vec![h(20, 4.5, HitSource::Bm25), h(30, 4.0, HitSource::Bm25)];
+        let legacy = rrf(&[&vec_hits, &bm_hits], 60);
+        let with_src = rrf_with_sources(
+            &[&vec_hits, &bm_hits],
+            &[HitSource::Vector, HitSource::Bm25],
+            60,
+        );
+        assert_eq!(legacy.len(), with_src.len());
+        // Order should match (sorted by total score).
+        for (a, b) in legacy.iter().zip(with_src.iter()) {
+            assert_eq!(a.record_id, b.record_id);
+            assert!((a.score - b.score).abs() < 1e-6);
+        }
     }
 }

@@ -1170,6 +1170,16 @@
                   max_dimension: optMaxDimension, min_dimension: optMinDimension, max_input_bytes: optMaxInputBytes,
                   ...extraOpts,
                 }} />
+              {#if modality === 'audio' && cachedInputIdA != null}
+                {@const algoTag = (algorithm === 'panako' ? 'panako' : 'wang')}
+                <p class="viz-deeplink">
+                  <a
+                    href={`/dashboard/playground/viewer/spectrogram?input_id=${cachedInputIdA}&algorithm=${algoTag}&sample_rate=8000`}
+                    target="_blank"
+                    rel="noopener"
+                  >Open spectrogram fullbleed →</a>
+                </p>
+              {/if}
             </div>
           {:else}
             <div class="result-empty">
@@ -1861,6 +1871,19 @@
     font-family: var(--mono); font-size: 0.62rem;
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2);
   }
+  .viz-deeplink {
+    margin: 0.4rem 0 0;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .viz-deeplink a {
+    color: var(--accent-ink);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .viz-deeplink a:hover { color: var(--ink); }
   .bit-diff-section {
     display: flex; flex-direction: column; gap: 0.4rem;
     padding: 0.75rem; background: var(--bg-2);
