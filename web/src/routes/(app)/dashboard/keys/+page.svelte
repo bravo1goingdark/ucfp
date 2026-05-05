@@ -5,6 +5,7 @@
   import Modal from '$components/Modal.svelte';
   import { pushToast } from '$lib/stores/toasts.svelte';
   import type { KeyRow, CreatedKey } from '$lib/types/api';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
   let { data } = $props();
 
@@ -32,7 +33,7 @@
     creating = true;
     createError = null;
     try {
-      const res = await fetch('/api/keys', {
+      const res = await apiFetch('/api/keys', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: newName.trim() })
@@ -71,7 +72,7 @@
     }
     revoking = row.id;
     try {
-      const res = await fetch(`/api/keys/${row.id}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/keys/${row.id}`, { method: 'DELETE' });
       if (!res.ok) {
         pushToast({ kind: 'error', message: `Could not revoke "${row.name}".` });
         return;

@@ -4,17 +4,22 @@
   import Seo from '$lib/components/Seo.svelte';
   import DocsSidebar from '$lib/components/DocsSidebar.svelte';
   import DocsToc from '$lib/components/DocsToc.svelte';
-  import { breadcrumbJsonLd } from '$lib/seo';
+  import { breadcrumbJsonLd, techArticleJsonLd } from '$lib/seo';
   import { tweaks, setTweak } from '$lib/stores/tweaks.svelte';
 
   let { data }: { data: PageData } = $props();
 
-  const jsonLd = $derived(
+  const jsonLd = $derived([
     breadcrumbJsonLd([
       { name: 'Docs', url: '/docs' },
       { name: data.doc.title, url: `/docs/${data.doc.slug}` }
-    ])
-  );
+    ]),
+    techArticleJsonLd({
+      slug: data.doc.slug,
+      title: data.doc.title,
+      description: data.doc.description,
+    }),
+  ]);
 
   let article: HTMLElement | undefined = $state();
 

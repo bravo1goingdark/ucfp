@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
   type TunableKind = 'bool' | 'int' | 'float' | 'enum' | 'string' | 'secret';
   interface Tunable {
@@ -65,7 +66,7 @@
 
   onMount(async () => {
     try {
-      const res = await fetch('/api/algorithms');
+      const res = await apiFetch('/api/algorithms');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       manifest = (await res.json()) as AlgorithmsResponse;
     } catch (e) {

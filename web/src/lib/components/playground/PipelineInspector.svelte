@@ -12,6 +12,7 @@
 -->
 <script lang="ts">
   import { decodeResampleAudio } from '$lib/utils/audioResample';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
   type Props = {
     modality: 'text' | 'image' | 'audio';
@@ -164,7 +165,7 @@
           sp.set('sample_rate', String(sr));
         }
       }
-      const res = await fetch(`/api/pipeline/inspect?${sp.toString()}`, {
+      const res = await apiFetch(`/api/pipeline/inspect?${sp.toString()}`, {
         method: 'POST',
         headers: { 'content-type': contentType },
         body,

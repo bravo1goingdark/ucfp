@@ -5,6 +5,7 @@
   import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
   import { pushToast } from '$lib/stores/toasts.svelte';
   import EmptyState from '$components/EmptyState.svelte';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
   import type { FingerprintDescription, Modality, RecordHistoryEntry } from '$lib/types/api';
 
   const history = createRecordHistory();
@@ -34,7 +35,7 @@
   async function viewRecord(id: string) {
     viewing = null; viewingError = null; viewingBusy = true;
     try {
-      const res = await fetch(`/api/records/${encodeURIComponent(id)}`);
+      const res = await apiFetch(`/api/records/${encodeURIComponent(id)}`);
       if (res.status === 404) { viewingError = 'Record not found upstream'; return; }
       if (res.status === 401) { viewingError = 'Sign in to view records.'; return; }
       if (!res.ok) { viewingError = `Lookup failed: ${res.status}`; return; }
@@ -49,7 +50,7 @@
   async function confirmDelete(entry: RecordHistoryEntry) {
     pendingDeleteId = null;
     try {
-      const res = await fetch(`/api/records/${encodeURIComponent(entry.recordId)}`, { method: 'DELETE' });
+      const res = await apiFetch(`/api/records/${encodeURIComponent(entry.recordId)}`, { method: 'DELETE' });
       if (res.ok || res.status === 204 || res.status === 404) {
         history.remove(entry.recordId);
         if (viewing && String(viewing.record_id) === entry.recordId) viewing = null;

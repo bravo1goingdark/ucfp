@@ -78,6 +78,39 @@ export function faqPageJsonLd(items: { q: string; a: string }[]): Record<string,
   };
 }
 
+/** schema.org `TechArticle` — for individual /docs/* pages. The Google
+ *  rich-results parser specifically rewards `TechArticle` for technical
+ *  content (vs the generic `Article`), giving developer docs a small
+ *  ranking nudge for query intents like "how to <X>". */
+export function techArticleJsonLd(input: {
+  slug: string;
+  title: string;
+  description: string;
+  /** ISO date string. Optional but improves snippet quality. */
+  datePublished?: string;
+  dateModified?: string;
+}): Record<string, unknown> {
+  const url = `${SITE_URL}/docs/${input.slug}`;
+  const body: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'TechArticle',
+    headline: input.title,
+    description: input.description,
+    mainEntityOfPage: { '@type': 'WebPage', '@id': url },
+    url,
+    image: `${SITE_URL}/og-default.png`,
+    author: { '@type': 'Organization', name: SITE_NAME, url: SITE_URL },
+    publisher: {
+      '@type': 'Organization',
+      name: SITE_NAME,
+      logo: { '@type': 'ImageObject', url: `${SITE_URL}/og-default.png` },
+    },
+  };
+  if (input.datePublished) body.datePublished = input.datePublished;
+  if (input.dateModified) body.dateModified = input.dateModified;
+  return body;
+}
+
 /** schema.org `BreadcrumbList` — docs hierarchy. */
 export function breadcrumbJsonLd(crumbs: { name: string; url: string }[]): Record<string, unknown> {
   return {

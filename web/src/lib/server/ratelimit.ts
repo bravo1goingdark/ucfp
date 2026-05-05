@@ -91,6 +91,25 @@ export async function checkKeyMinuteLimit(
   return { ok: true, remaining: Math.max(limitPerMin - count, 0), retryAfter: 0 };
 }
 
+/** Per-session minute throttle. Default = 120 rpm — leaves comfortable
+ *  headroom for the playground while still capping a runaway tab from
+ *  hammering the upstream binary. */
+export const SESSION_LIMIT_PER_MIN = 120;
+export async function checkSessionMinuteLimit(
+  kv: KVNamespace,
+  userId: string,
+  limitPerMin = SESSION_LIMIT_PER_MIN
+): Promise<LimitDecision> {
+  const minute = currentMinute();
+  const key = `sess:${userId}:${minute}`;
+  const { count, allowed } = await bumpCounter(kv, key, limitPerMin, KV_MINUTE_TTL_SECONDS);
+  if (!allowed) {
+    const retryAfter = (minute + 1) * 60 - nowSeconds();
+    return { ok: false, remaining: 0, retryAfter: Math.max(retryAfter, 1) };
+  }
+  return { ok: true, remaining: Math.max(limitPerMin - count, 0), retryAfter: 0 };
+}
+
 /** Per-key daily quota (`daily_quota` from D1). UTC day buckets. */
 export async function checkKeyDailyQuota(
   kv: KVNamespace,

@@ -26,6 +26,16 @@
       title: 'Embedding bars',
       desc: 'Centred bars for each dimension of a dense embedding. Toolbar reports L2 + peak.',
     },
+    {
+      href: '/dashboard/playground/viewer/image-hash',
+      title: 'Image fingerprint',
+      desc: 'PHash / DHash / AHash global + 4×4 block-hash overview, side-by-side at viewport scale.',
+    },
+    {
+      href: '/dashboard/playground/viewer/diff',
+      title: 'A/B diff',
+      desc: 'Compare two cached inputs by input id; shows algorithm-aware diff plus the universal bit-XOR strip.',
+    },
   ];
 </script>
 

@@ -9,6 +9,7 @@
 
 import { json, type RequestEvent } from '@sveltejs/kit';
 import { authenticateApiKey, extractApiKey } from './apikeyAuth';
+import { checkSessionMinuteLimit } from './ratelimit';
 
 export interface AuthedIdentity {
   tenantId: number;
@@ -38,6 +39,21 @@ export async function requireAuth(event: RequestEvent): Promise<RequireAuthResul
     return { ok: true, identity: { tenantId: auth.user.tenantId, userId: auth.user.id, keyId: auth.keyId } };
   }
   if (event.locals.user) {
+    // Apply a per-session minute throttle when the KV binding is bound;
+    // missing binding (local dev) degrades to a no-op so DX doesn't suffer.
+    const kv = event.platform?.env?.RATE_LIMIT;
+    if (kv) {
+      const decision = await checkSessionMinuteLimit(kv, event.locals.user.id);
+      if (!decision.ok) {
+        return {
+          ok: false,
+          response: json(
+            { reason: 'rate limit exceeded', retryAfter: decision.retryAfter },
+            { status: 429, headers: { 'retry-after': String(decision.retryAfter) } }
+          )
+        };
+      }
+    }
     return {
       ok: true,
       identity: { tenantId: event.locals.user.tenantId, userId: event.locals.user.id, keyId: null }

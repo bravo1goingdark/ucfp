@@ -101,8 +101,34 @@ const handleSecurity: Handle = async ({ event, resolve }) => {
 
 export const handle: Handle = sequence(handleSession, handleAuthGuard, handleSecurity);
 
-export const handleError: HandleServerError = ({ error, event }) => {
+export const handleError: HandleServerError = ({ error, event, status }) => {
   const id = crypto.randomUUID();
   console.error(`[${id}] ${event.url.pathname}:`, error);
+
+  // Forward to the Workers Analytics Engine if the binding is present —
+  // gives us a queryable error stream without spinning up a dedicated
+  // error-monitoring SaaS. Failures here are best-effort (e.g. dataset
+  // limits, missing binding); never let monitoring crash the request.
+  try {
+    const analytics = event.platform?.env?.ANALYTICS;
+    if (analytics) {
+      const err = error as { name?: string; message?: string; stack?: string };
+      analytics.writeDataPoint({
+        blobs: [
+          'server-error',
+          err?.name ?? 'Error',
+          (err?.message ?? '').slice(0, 256),
+          event.url.pathname.slice(0, 256),
+          event.request.method,
+          (err?.stack ?? '').slice(0, 1024),
+          event.locals.user?.id ?? '',
+        ],
+        doubles: [status ?? 500],
+        indexes: [id.slice(0, 32)],
+      });
+    }
+  } catch {
+    /* swallow */
+  }
   return { message: 'Something went wrong on our end.', id };
 };

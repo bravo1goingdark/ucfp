@@ -82,6 +82,14 @@ export interface QueryHit {
   record_id: number | string;
   score: number;
   source: 'vector' | 'bm25' | 'filter' | 'reranker' | 'fused';
+  /** Hybrid-only: vector ranker contribution to the fused RRF score. */
+  vector_score?: number;
+  /** Hybrid-only: BM25 ranker contribution to the fused RRF score. */
+  bm25_score?: number;
+  /** Hybrid-only: 1-indexed rank from the vector ranker. */
+  vector_rank?: number;
+  /** Hybrid-only: 1-indexed rank from the BM25 ranker. */
+  bm25_rank?: number;
 }
 
 export interface SearchRequest {

@@ -13,6 +13,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import Spectrogram from '$components/charts/Spectrogram.svelte';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
   type AudioPeak = { t_ms: number; freq_hz: number; db: number };
   type AudioPair = { t1_ms: number; f1_hz: number; t2_ms: number; f2_hz: number };
@@ -60,7 +61,7 @@
     loading = true;
     err = null;
     try {
-      const res = await fetch(`/api/pipeline/inspect?modality=audio&${qs.toString()}`, {
+      const res = await apiFetch(`/api/pipeline/inspect?modality=audio&${qs.toString()}`, {
         method: 'POST',
         // body deliberately empty — input_id tells the upstream what to use.
         headers: { 'content-type': 'application/octet-stream' },

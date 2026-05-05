@@ -13,6 +13,7 @@
   import TuningForm from '$lib/components/playground/TuningForm.svelte';
   import PipelineInspector from '$lib/components/playground/PipelineInspector.svelte';
   import type { RecordHistoryEntry } from '$lib/types/api';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
   const history = createRecordHistory();
 
@@ -429,7 +430,7 @@
     const init: RequestInit = { method: 'POST', body };
     if (contentType) init.headers = { 'content-type': contentType };
 
-    const res = await fetch(url, init);
+    const res = await apiFetch(url, init);
     const elapsed = Math.round(performance.now() - t0);
 
     if (res.status === 429) {
@@ -646,7 +647,7 @@
     const sp = new URLSearchParams({ modality });
     let res: Response;
     try {
-      res = await fetch(`/api/inputs?${sp.toString()}`, {
+      res = await apiFetch(`/api/inputs?${sp.toString()}`, {
         method: 'POST',
         headers: { 'content-type': contentType },
         body,
@@ -712,7 +713,7 @@
     liveTuneInflight = true;
     const t0 = performance.now();
     try {
-      const res = await fetch(buildLiveTuneUrl(id), {
+      const res = await apiFetch(buildLiveTuneUrl(id), {
         method: 'POST',
         body: '',
         signal: liveTuneAbortA.signal,
@@ -829,17 +830,45 @@
   }
 
   // ── file drop ─────────────────────────────────────────────────────────────
+  // Mirrors the upstream `UCFP_BODY_LIMIT_MB` default (16 MiB). Anything past
+  // 8 MiB warns the user that latency will spike; 64 MiB is a hard refuse so
+  // the upstream doesn't have to spend a round-trip rejecting a request.
+  const SOFT_SIZE_WARN_BYTES = 8 * 1024 * 1024;
+  const HARD_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
+  function fmtBytes(n: number): string {
+    if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MiB`;
+    if (n >= 1024) return `${(n / 1024).toFixed(1)} KiB`;
+    return `${n} B`;
+  }
+  function checkFileSize(f: File, slot: 'A' | 'B'): boolean {
+    if (f.size > HARD_SIZE_LIMIT_BYTES) {
+      const msg = `File too large (${fmtBytes(f.size)}); cap is ${fmtBytes(HARD_SIZE_LIMIT_BYTES)}.`;
+      if (slot === 'A') errorMsg = msg; else errorMsgB = msg;
+      return false;
+    }
+    if (f.size > SOFT_SIZE_WARN_BYTES) {
+      const msg = `Large file (${fmtBytes(f.size)}) — fingerprinting may take several seconds.`;
+      // Soft: don't replace a real error, just inform.
+      if (slot === 'A' && !errorMsg) errorMsg = msg;
+      if (slot === 'B' && !errorMsgB) errorMsgB = msg;
+    }
+    return true;
+  }
   function attachFile(f: File) {
+    if (!checkFileSize(f, 'A')) return;
     file = f;
     if (filePreviewUrl) URL.revokeObjectURL(filePreviewUrl);
     filePreviewUrl = URL.createObjectURL(f);
-    errorMsg = null; hasResult = false; isWatermark = false; cells = []; hexBytesA = null;
+    if (f.size <= SOFT_SIZE_WARN_BYTES) errorMsg = null;
+    hasResult = false; isWatermark = false; cells = []; hexBytesA = null;
   }
   function attachFileB(f: File) {
+    if (!checkFileSize(f, 'B')) return;
     fileB = f;
     if (fileBPreviewUrl) URL.revokeObjectURL(fileBPreviewUrl);
     fileBPreviewUrl = URL.createObjectURL(f);
-    errorMsgB = null; hasResultB = false; cellsB = []; hexBytesB = null;
+    if (f.size <= SOFT_SIZE_WARN_BYTES) errorMsgB = null;
+    hasResultB = false; cellsB = []; hexBytesB = null;
   }
   function onDrop(e: DragEvent) {
     e.preventDefault(); dragActive = false;
@@ -1170,15 +1199,31 @@
                   max_dimension: optMaxDimension, min_dimension: optMinDimension, max_input_bytes: optMaxInputBytes,
                   ...extraOpts,
                 }} />
-              {#if modality === 'audio' && cachedInputIdA != null}
-                {@const algoTag = (algorithm === 'panako' ? 'panako' : 'wang')}
-                <p class="viz-deeplink">
-                  <a
-                    href={`/dashboard/playground/viewer/spectrogram?input_id=${cachedInputIdA}&algorithm=${algoTag}&sample_rate=8000`}
-                    target="_blank"
-                    rel="noopener"
-                  >Open spectrogram fullbleed →</a>
-                </p>
+              {#if cachedInputIdA != null}
+                {@const viewerKind = (
+                  modality === 'audio'
+                    ? 'spectrogram'
+                    : modality === 'image'
+                      ? 'image-hash'
+                      : algorithm.startsWith('simhash')
+                        ? 'wheel'
+                        : algorithm === 'minhash'
+                          ? 'heatmap'
+                          : algorithm.startsWith('semantic') || algorithm === 'neural'
+                            ? 'embedding'
+                            : null
+                )}
+                {#if viewerKind}
+                  {@const baseQs = `input_id=${cachedInputIdA}&algorithm=${encodeURIComponent(algorithm)}&modality=${modality}`}
+                  {@const fullQs = modality === 'audio' ? `${baseQs}&sample_rate=8000` : baseQs}
+                  <p class="viz-deeplink">
+                    <a
+                      href={`/dashboard/playground/viewer/${viewerKind}?${fullQs}`}
+                      target="_blank"
+                      rel="noopener"
+                    >Open {viewerKind} fullbleed →</a>
+                  </p>
+                {/if}
               {/if}
             </div>
           {:else}
@@ -1530,12 +1575,23 @@
   .mod-tab:hover { background: var(--bg-2); }
   .mod-tab.active { background: var(--ink); color: var(--bg); }
 
-  /* Two-column grid */
+  /* Dominant-pane layout — viz takes the larger column on desktop, the
+     ratio inverts above 1280 px so the visualization uses ~62 % of the
+     viewport. Below 700 px collapses to a single column.
+     The right (result) pane uses min-width:0 so its child SVGs can
+     actually shrink with the column instead of clipping. */
   .pg-grid {
-    display: grid; grid-template-columns: 1.1fr 0.9fr;
-    gap: 1.5rem; align-items: start;
+    display: grid;
+    grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.3fr);
+    gap: 1.5rem;
+    align-items: start;
   }
-  @media (max-width: 700px) { .pg-grid { grid-template-columns: 1fr; } }
+  @media (min-width: 1280px) {
+    .pg-grid { grid-template-columns: minmax(360px, 0.65fr) minmax(0, 1.6fr); }
+  }
+  @media (max-width: 700px) {
+    .pg-grid { grid-template-columns: 1fr; }
+  }
 
   .pg-pane { display: flex; flex-direction: column; gap: 0.75rem; }
   .pane-label {

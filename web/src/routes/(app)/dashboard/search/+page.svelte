@@ -4,6 +4,8 @@
   import type { Modality, QueryHit, RecordHistoryEntry } from '$lib/types/api';
   import { buildResampledAudioForm } from '$lib/utils/audioResample';
   import { createRecordHistory } from '$lib/stores/recordHistory.svelte';
+  import { apiFetch } from '$lib/utils/apiFetch.svelte';
+  import RrfBreakdown from '$components/charts/RrfBreakdown.svelte';
 
   const history = createRecordHistory();
   // Lookup table from record_id → saved bookmark, so hits with a known
@@ -138,7 +140,7 @@
       fd.set('file', file as File);
       body = fd;
     }
-    const res = await fetch(url, { method: 'POST', body, headers });
+    const res = await apiFetch(url, { method: 'POST', body, headers });
     if (!res.ok) {
       error = `Fingerprint failed: ${res.status} ${await res.text().catch(() => '')}`.slice(0, 240);
       return null;
@@ -170,7 +172,7 @@
       }
       lastVecLen = vec.length;
 
-      const res = await fetch('/api/search', {
+      const res = await apiFetch('/api/search', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ modality, k, vector: vec })
@@ -360,6 +362,18 @@
           <div class="hit-bar"><div class="hit-bar-fill"
             style="width:{Math.max(2, norm * 100)}%;
                    background:oklch(0.55 0.18 {Math.round(120 + norm * 120)})"></div></div>
+          {#if h.source === 'fused' && (h.vector_score != null || h.bm25_score != null)}
+            <div class="hit-rrf">
+              <RrfBreakdown
+                vectorScore={h.vector_score ?? null}
+                bm25Score={h.bm25_score ?? null}
+                vectorRank={h.vector_rank ?? null}
+                bm25Rank={h.bm25_rank ?? null}
+                fusedScore={h.score}
+                pageMax={top}
+              />
+            </div>
+          {/if}
         </li>
       {/each}
     </ol>
@@ -478,4 +492,8 @@
     height: 3px; background: var(--bg); border-radius: 2px; overflow: hidden;
   }
   .hit-bar-fill { height: 100%; transition: width 0.25s ease; }
+  .hit-rrf {
+    grid-column: 1 / -1;
+    margin-top: 0.35rem;
+  }
 </style>
