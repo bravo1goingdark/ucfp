@@ -7,6 +7,8 @@
   outer ring. Pure SVG — zero deps, sharp at any zoom.
 -->
 <script lang="ts">
+  import Tooltip from './_primitives/Tooltip.svelte';
+
   type Props = {
     /** 8 bytes of LE-encoded SimHash. */
     hashBytes: Uint8Array;
@@ -18,6 +20,9 @@
     label?: string;
   };
   let { hashBytes, diffAgainst, size = 200, label }: Props = $props();
+
+  let host: HTMLDivElement | null = $state(null);
+  let hover = $state<{ x: number; y: number; text: string } | null>(null);
 
   const ok = $derived(hashBytes.length === 8);
   const diffOk = $derived(!diffAgainst || diffAgainst.length === 8);
@@ -105,11 +110,23 @@
 </script>
 
 {#if ok}
-  <div class="wheel-wrap" style="width:{size}px">
+  <div class="wheel-wrap" bind:this={host} style="width:{size}px">
     <svg viewBox="0 0 {size} {size}" width={size} height={size} role="img"
-      aria-label={label ?? `SimHash 64-bit polarity wheel, ${popcount}/64 bits set`}>
+      aria-label={label ?? `SimHash 64-bit polarity wheel, ${popcount}/64 bits set`}
+      onmouseleave={() => (hover = null)}>
       {#each wedges as w (w.idx)}
-        <path d={w.d} class="wedge" class:on={w.on} class:flip={w.flip} />
+        <path d={w.d} class="wedge" class:on={w.on} class:flip={w.flip}
+          role="img"
+          aria-label={`bit ${w.idx} ${w.on ? '1' : '0'}${w.flip ? ' flipped' : ''}`}
+          onmousemove={(e: MouseEvent) => {
+            const byteIdx = Math.floor(w.idx / 8);
+            const bitIdx = 7 - (w.idx % 8);
+            hover = {
+              x: e.clientX,
+              y: e.clientY,
+              text: `bit ${w.idx} (byte ${byteIdx}, bit ${bitIdx}) — ${w.on ? '1' : '0'}${w.flip ? ' · flipped' : ''}`,
+            };
+          }} />
       {/each}
       <!-- byte-boundary ticks -->
       {#each ticks as t, i (i)}
@@ -127,6 +144,12 @@
       </g>
     </svg>
     {#if label}<div class="wheel-label">{label}</div>{/if}
+    {#if hover}
+      {@const h = hover}
+      <Tooltip x={h.x} y={h.y} container={host}>
+        {#snippet children()}{h.text}{/snippet}
+      </Tooltip>
+    {/if}
   </div>
 {/if}
 
@@ -137,6 +160,10 @@
     stroke: var(--ink, rgba(0,0,0,0.7));
     stroke-width: 0.5;
     transition: fill 0.12s;
+    cursor: crosshair;
+  }
+  .wedge:hover {
+    stroke-width: 1.5;
   }
   .wedge.on  { fill: var(--accent-ink, oklch(0.55 0.18 240)); }
   .wedge.flip {

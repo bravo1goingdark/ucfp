@@ -13,6 +13,8 @@
   banded-collision intuition made visible).
 -->
 <script lang="ts">
+  import Tooltip from './_primitives/Tooltip.svelte';
+
   type Props = {
     /** MinHash signature bytes — must be a positive multiple of 8. */
     bytes: Uint8Array;
@@ -26,6 +28,19 @@
     height?: number;
   };
   let { bytes, diffAgainst, label, width = null, height = 56 }: Props = $props();
+
+  let host: HTMLDivElement | null = $state(null);
+  let hover = $state<{ x: number; y: number; text: string } | null>(null);
+
+  function readSlotU64Hex(buf: Uint8Array, i: number): string {
+    const off = i * 8;
+    let s = '0x';
+    // High byte first for readable hex.
+    for (let k = 7; k >= 0; k--) {
+      s += buf[off + k].toString(16).padStart(2, '0');
+    }
+    return s;
+  }
 
   const slotCount = $derived(Math.floor(bytes.length / 8));
   const ok = $derived(slotCount > 0 && bytes.length % 8 === 0);
@@ -82,19 +97,36 @@
 </script>
 
 {#if ok}
-  <div class="mh-wrap" style:width={width != null ? `${width}px` : '100%'}>
+  <div class="mh-wrap" bind:this={host} style:width={width != null ? `${width}px` : '100%'}>
     {#if label}<div class="mh-label">{label}</div>{/if}
     <div class="mh-grid"
       style="--cols:{cols}; --rows:{rows}; height:{height}px"
-      role="img" aria-label="{slotCount}-slot MinHash heatmap">
+      role="img" aria-label="{slotCount}-slot MinHash heatmap"
+      onmouseleave={() => (hover = null)}>
       {#each cells as c, i (i)}
         <span class="mh-cell"
           class:match={c.match}
           style="background: oklch({c.light}% 0.18 {c.hue})"
-          title={c.match ? `slot ${i}: collision` : `slot ${i}: 0x${slotHue(bytes, i).toString(16).padStart(4, '0')}`}>
+          role="img"
+          aria-label={c.match ? `slot ${i}: collision` : `slot ${i}: ${readSlotU64Hex(bytes, i)}`}
+          onmousemove={(e: MouseEvent) => {
+            hover = {
+              x: e.clientX,
+              y: e.clientY,
+              text: c.match
+                ? `slot ${i}: COLLISION\n${readSlotU64Hex(bytes, i)}`
+                : `slot ${i}\n${readSlotU64Hex(bytes, i)}`,
+            };
+          }}>
         </span>
       {/each}
     </div>
+    {#if hover}
+      {@const h = hover}
+      <Tooltip x={h.x} y={h.y} container={host}>
+        {#snippet children()}{h.text}{/snippet}
+      </Tooltip>
+    {/if}
     <div class="mh-meta">
       {#if jaccardEst != null}
         <span><strong>Ĵ</strong> {jaccardEst.toFixed(3)}</span>

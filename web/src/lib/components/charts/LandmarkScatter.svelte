@@ -9,6 +9,8 @@
   // is converted to seconds using the algorithm's known frame rate (62.5
   // for wang-v1 / panako-v2).
 
+  import Tooltip from './_primitives/Tooltip.svelte';
+
   type Algo = 'wang' | 'panako';
 
   type Props = {
@@ -22,6 +24,9 @@
 
   const STRIDE = $derived(algo === 'wang' ? 8 : 16);
   const FREQ_BUCKETS = 512;
+
+  let host: HTMLDivElement | null = $state(null);
+  let hover = $state<{ x: number; y: number; text: string } | null>(null);
 
   // Read the 32-bit anchor-frequency field MSB-first from the packed hash.
   function freqOf(view: DataView, off: number): number {
@@ -53,22 +58,40 @@
 </script>
 
 {#if points.length > 0}
-  <div class="ls-wrap">
+  <div class="ls-wrap" bind:this={host}>
     <svg viewBox="0 0 100 {height}" preserveAspectRatio="none" class="ls-svg" role="img"
-         aria-label="{points.length} landmarks across {durationSec.toFixed(1)}s">
+         aria-label="{points.length} landmarks across {durationSec.toFixed(1)}s"
+         onmouseleave={() => (hover = null)}>
       <!-- horizontal grid lines for frequency quartiles -->
       {#each [0.25, 0.5, 0.75] as q}
         <line x1="0" y1={height * q} x2="100" y2={height * q}
               stroke="var(--ink)" stroke-width="0.1" opacity="0.2" />
       {/each}
-      {#each points as p}
+      {#each points as p, i (i)}
         {@const x = (p.t / tMax) * 100}
         {@const y = (1 - p.f / FREQ_BUCKETS) * height}
         <circle cx={x} cy={y} r="0.45"
                 fill="var(--accent-ink, oklch(0.55 0.18 240))"
-                opacity="0.65" />
+                opacity="0.65"
+                role="img"
+                aria-label="landmark {i}: t={(p.t / framesPerSec).toFixed(2)}s, f-bucket {p.f}"
+                onmousemove={(e: MouseEvent) => {
+                  const tSec = (p.t / framesPerSec).toFixed(2);
+                  const fHz = Math.round((p.f / FREQ_BUCKETS) * 4000);
+                  hover = {
+                    x: e.clientX,
+                    y: e.clientY,
+                    text: `t = ${tSec} s\nf-bucket = ${p.f} (~${fHz} Hz)\nframe = ${p.t}`,
+                  };
+                }} />
       {/each}
     </svg>
+    {#if hover}
+      {@const h = hover}
+      <Tooltip x={h.x} y={h.y} container={host}>
+        {#snippet children()}{h.text}{/snippet}
+      </Tooltip>
+    {/if}
     <div class="ls-meta">
       <span><strong>landmarks</strong> {points.length}</span>
       <span><strong>span</strong> {durationSec.toFixed(2)}s</span>
@@ -87,6 +110,14 @@
     background: var(--bg);
     border: 1px solid var(--ink); border-radius: 4px;
     /* Light grid lines visible in both themes. */
+  }
+  .ls-svg circle {
+    cursor: crosshair;
+    transition: r 0.1s ease;
+  }
+  .ls-svg circle:hover {
+    r: 1.2;
+    opacity: 1;
   }
   .ls-meta {
     display: flex; gap: 0.85rem; flex-wrap: wrap;

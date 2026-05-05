@@ -12,6 +12,11 @@
   import { hasAlgorithmView } from '$components/charts/algorithmView';
   import TuningForm from '$lib/components/playground/TuningForm.svelte';
   import PipelineInspector from '$lib/components/playground/PipelineInspector.svelte';
+  import MetricsCards from '$lib/components/playground/MetricsCards.svelte';
+  import WatermarkResult from '$lib/components/playground/WatermarkResult.svelte';
+  import HexCellGrid from '$lib/components/playground/HexCellGrid.svelte';
+  import AlgorithmPicker from '$lib/components/playground/AlgorithmPicker.svelte';
+  import ModalityTabs from '$lib/components/playground/ModalityTabs.svelte';
   import type { RecordHistoryEntry } from '$lib/types/api';
   import { apiFetch } from '$lib/utils/apiFetch.svelte';
 
@@ -920,15 +925,7 @@
   </div>
 
   <!-- ── modality tabs ─────────────────────────────────────────────────── -->
-  <div class="mod-tabs" role="tablist" aria-label="Modality">
-    {#each (['text','image','audio'] as const) as m}
-      <button role="tab" aria-selected={modality === m}
-        class="mod-tab" class:active={modality === m}
-        onclick={() => switchModality(m)}>
-        {m === 'text' ? '⟨T⟩ Text' : m === 'image' ? '⬡ Image' : '♪ Audio'}
-      </button>
-    {/each}
-  </div>
+  <ModalityTabs selected={modality} onSelect={switchModality} />
 
   {#if !compareMode}
     <!-- ── single mode ───────────────────────────────────────────────────── -->
@@ -972,22 +969,15 @@
           <input id="pg-file-input" type="file" accept={ACCEPT[modality]} class="sr-only" onchange={onFileInput} />
         {/if}
 
-        <div class="pane-label" id="algo-label">Algorithm</div>
-        <div class="algo-grid" role="group" aria-labelledby="algo-label">
-          {#each ALGORITHMS[modality] as alg}
-            <button class="algo-btn" class:selected={algorithm === alg}
-              class:needs-input={NEEDS_API_KEY.has(alg) || NEEDS_MODEL.has(alg)}
-              onclick={() => { algorithm = alg; }}
-              aria-pressed={algorithm === alg}
-              title={NEEDS_API_KEY.has(alg) ? 'Requires API key' : NEEDS_MODEL.has(alg) ? 'Requires model path' : ''}>
-              {ALG_LABELS[alg] ?? alg}
-            </button>
-          {/each}
-        </div>
-
-        {#if ALG_DESCRIPTIONS[algorithm]}
-          <p class="alg-desc">{ALG_DESCRIPTIONS[algorithm]}</p>
-        {/if}
+        <AlgorithmPicker
+          options={ALGORITHMS[modality]}
+          selected={algorithm}
+          labels={ALG_LABELS}
+          descriptions={ALG_DESCRIPTIONS}
+          needsApiKey={NEEDS_API_KEY}
+          needsModel={NEEDS_MODEL}
+          onSelect={(id) => { algorithm = id; }}
+        />
 
         {#if needsAdvanced}
           <details class="adv-opts" bind:open={advancedOpen}>
@@ -1133,41 +1123,16 @@
       <!-- Right: result -->
       <div class="pg-pane result-pane">
         {#if isWatermark && hasResult}
-          <div class="pane-label">Watermark detection result</div>
-          <div class="wm-result">
-            <span class="wm-pill" class:detected={wmDetected}>
-              {wmDetected ? '✓ Watermark detected' : '✗ No watermark detected'}
-            </span>
-            <div class="metrics-grid">
-              <div class="metric-card">
-                <span class="metric-k">Confidence</span>
-                <span class="metric-v">{(wmConfidence * 100).toFixed(1)}%</span>
-              </div>
-              <div class="metric-card">
-                <span class="metric-k">Latency</span>
-                <span class="metric-v">{latencyMs}</span>
-              </div>
-              {#if wmPayload}
-                <div class="metric-card" style="grid-column:1/-1">
-                  <span class="metric-k">Payload</span>
-                  <span class="metric-v mono">{wmPayload}</span>
-                </div>
-              {/if}
-            </div>
-          </div>
+          <WatermarkResult
+            detected={wmDetected}
+            confidence={wmConfidence}
+            {latencyMs}
+            payload={wmPayload}
+          />
         {:else}
           <div class="pane-label">Fingerprint visualization</div>
           {#if hasResult}
-            <div class="hex-grid" aria-label="Fingerprint byte visualization">
-              {#each cells as cell}
-                <div class="hex-cell" style="background:{cell.color}"></div>
-              {/each}
-            </div>
-            <button type="button" class="hex-str copyable"
-              title="Click to copy full hex ({hexStr.length} chars)"
-              onclick={() => copyHex(hexStr)}>
-              {hexStr.slice(0, 64)}{hexStr.length > 64 ? '…' : ''}
-            </button>
+            <HexCellGrid {cells} hex={hexStr} onCopy={copyHex} />
             {#if hexBytesA && hexBytesA.length > 0}
               <div class="viz-section">
                 <ByteHistogram bytes={hexBytesA} height={42} />
@@ -1239,13 +1204,13 @@
               (set <code>UCFP_API_URL</code> to enable real fingerprinting)
             </p>
           {/if}
-          <div class="metrics-grid">
-            <div class="metric-card"><span class="metric-k">Algorithm</span><span class="metric-v">{algLabel}</span></div>
-            <div class="metric-card"><span class="metric-k">Config hash</span><span class="metric-v mono">{cfgHash}</span></div>
-            <div class="metric-card"><span class="metric-k">Entropy</span><span class="metric-v">{entropy}</span></div>
-            <div class="metric-card"><span class="metric-k">FP size</span><span class="metric-v">{fpBytes}</span></div>
-            <div class="metric-card"><span class="metric-k">Latency</span><span class="metric-v">{latencyMs}</span></div>
-          </div>
+          <MetricsCards
+            algorithm={algLabel}
+            configHash={cfgHash}
+            {entropy}
+            {fpBytes}
+            {latencyMs}
+          />
           {#if hasResult && !isWatermark && lastRecordId && !isLocal}
             <div class="result-actions">
               <button class="action-btn" onclick={saveToRecords}>+ Save to records</button>
@@ -1564,17 +1529,7 @@
   .toggle-control:has(input:checked) .toggle-thumb { transform: translateX(16px); background: var(--bg); }
   .toggle-label { color: var(--ink); }
 
-  /* Modality tabs */
-  .mod-tabs { display: flex; gap: 0.5rem; }
-  .mod-tab {
-    font-family: var(--mono); font-size: 0.8rem;
-    padding: 0.35rem 0.9rem; border: 1px solid var(--ink);
-    background: transparent; color: var(--ink);
-    border-radius: 3px; cursor: pointer;
-    transition: background 0.1s, color 0.1s;
-  }
-  .mod-tab:hover { background: var(--bg-2); }
-  .mod-tab.active { background: var(--ink); color: var(--bg); }
+  /* Modality tabs are now inside ModalityTabs.svelte. */
 
   /* Dominant-pane layout — viz takes the larger column on desktop, the
      ratio inverts above 1280 px so the visualization uses ~62 % of the
@@ -1844,18 +1799,8 @@
   @keyframes pop-in { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   .hex-str { font-family: var(--mono); font-size: 0.6rem; color: var(--ink-2); word-break: break-all; margin-bottom: 0.75rem; }
 
-  /* Metrics */
-  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
-  .metric-card { display: flex; flex-direction: column; gap: 2px; padding: 0.4rem 0.6rem; background: var(--bg); border-radius: 4px; border: 1px solid var(--ink); }
-  .metric-card:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  .metric-k { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); }
-  .metric-v { font-family: var(--mono); font-size: 0.8rem; color: var(--ink); font-weight: 600; }
-  .mono { word-break: break-all; }
-
-  /* Watermark result */
-  .wm-result { display: flex; flex-direction: column; gap: 1rem; padding: 0.5rem 0; }
-  .wm-pill { display: inline-flex; align-items: center; font-family: var(--mono); font-size: 0.82rem; font-weight: 600; padding: 7px 16px; border-radius: 20px; background: color-mix(in oklch, var(--ink) 6%, transparent); color: var(--ink-2); border: 1px solid var(--ink); align-self: flex-start; }
-  .wm-pill.detected { background: color-mix(in oklch, oklch(0.58 0.18 145) 15%, transparent); color: oklch(0.38 0.15 145); border-color: oklch(0.58 0.18 145); }
+  /* Metrics + watermark + mono are styled inside the dedicated
+     playground/* components now (MetricsCards, WatermarkResult). */
 
   /* Local notice */
   .local-notice { font-family: var(--mono); font-size: 11px; padding: 6px 10px; border-radius: 4px; background: color-mix(in oklch, var(--accent-ink) 10%, var(--bg)); color: var(--ink-2); border: 1px solid color-mix(in oklch, var(--accent-ink) 30%, transparent); margin: 0 0 0.75rem; }
