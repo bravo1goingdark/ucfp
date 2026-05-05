@@ -4,6 +4,8 @@
   // colour tracking sign. Designed for ≤256 dims at a glance — for
   // larger vectors we sample uniformly to keep the SVG tractable.
 
+  import Tooltip from './_primitives/Tooltip.svelte';
+
   type Props = {
     vector: number[];
     /** Maximum bars to draw — over this we sample uniformly. */
@@ -45,21 +47,45 @@
 
   const halfH = $derived(height / 2);
   const barW = $derived(100 / sampled.length); // viewBox is 100 wide
+
+  // For sampled vectors we need to map back to the original dim index
+  // when the user hovers a bar.
+  const stepSize = $derived(vector.length / sampled.length);
+
+  let host: HTMLDivElement | null = $state(null);
+  let hover = $state<{ x: number; y: number; text: string } | null>(null);
 </script>
 
-<div class="emb-wrap" aria-label="Embedding visualization">
-  <svg viewBox="0 0 100 {height}" preserveAspectRatio="none" class="emb-svg" role="img">
+<div class="emb-wrap" bind:this={host} aria-label="Embedding visualization">
+  <svg viewBox="0 0 100 {height}" preserveAspectRatio="none" class="emb-svg" role="img"
+       onmouseleave={() => (hover = null)}>
     <line x1="0" y1={halfH} x2="100" y2={halfH}
           stroke="var(--ink)" stroke-width="0.15" opacity="0.4" />
-    {#each sampled as v, i}
+    {#each sampled as v, i (i)}
       {@const h = (Math.abs(v) / peak) * (halfH - 1)}
       {@const x = i * barW}
       {@const y = v >= 0 ? halfH - h : halfH}
+      {@const dimIdx = Math.floor(i * stepSize)}
       <rect x={x + barW * 0.08} y={y}
             width={barW * 0.84} height={Math.max(0.4, h)}
-            fill={v >= 0 ? posColor : negColor} />
+            fill={v >= 0 ? posColor : negColor}
+            role="img"
+            aria-label={`dim ${dimIdx}: ${v.toFixed(4)}`}
+            onmousemove={(e: MouseEvent) => {
+              hover = {
+                x: e.clientX,
+                y: e.clientY,
+                text: `dim ${dimIdx}\nvalue ${v.toFixed(4)}\n|v| / peak: ${(Math.abs(v) / peak).toFixed(2)}`,
+              };
+            }} />
     {/each}
   </svg>
+  {#if hover}
+    {@const ho = hover}
+    <Tooltip x={ho.x} y={ho.y} container={host}>
+      {#snippet children()}{ho.text}{/snippet}
+    </Tooltip>
+  {/if}
   <div class="emb-meta">
     <span><strong>dim</strong> {vector.length}{sampled.length < vector.length ? ` (sampled to ${sampled.length})` : ''}</span>
     <span><strong>peak</strong> {peak.toFixed(3)}</span>
@@ -73,6 +99,13 @@
     width: 100%; display: block;
     background: var(--bg);
     border: 1px solid var(--ink); border-radius: 4px;
+  }
+  .emb-svg rect {
+    cursor: crosshair;
+    transition: filter 0.1s;
+  }
+  .emb-svg rect:hover {
+    filter: brightness(1.2);
   }
   .emb-meta {
     display: flex; gap: 0.75rem; flex-wrap: wrap;

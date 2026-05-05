@@ -4,6 +4,8 @@
   // diff-shaded against a second hash so MultiHash compare mode can
   // highlight which bits flipped.
 
+  import Tooltip from './_primitives/Tooltip.svelte';
+
   type Props = {
     /** 8 bytes of LE-encoded u64 hash data. Anything else is rejected. */
     hashBytes: Uint8Array;
@@ -45,15 +47,30 @@
 
   const popcount = $derived(bits.filter(Boolean).length);
   const flipCount = $derived(diffBits ? diffBits.filter(Boolean).length : 0);
+
+  let host: HTMLDivElement | null = $state(null);
+  let hover = $state<{ x: number; y: number; text: string } | null>(null);
 </script>
 
 {#if ok}
-  <div class="bg-wrap" style="width:{size}px">
-    <div class="bg-grid" role="img" aria-label={label ?? `${popcount} bits set`}>
-      {#each bits as on, i}
+  <div class="bg-wrap" bind:this={host} style="width:{size}px">
+    <div class="bg-grid" role="img" aria-label={label ?? `${popcount} bits set`}
+      onmouseleave={() => (hover = null)}>
+      {#each bits as on, i (i)}
+        {@const byteIdx = Math.floor(i / 8)}
+        {@const bitIdx = 7 - (i % 8)}
         <span class="bg-cell"
           class:on
-          class:flip={diffBits && diffBits[i]}></span>
+          class:flip={diffBits && diffBits[i]}
+          role="img"
+          aria-label={`bit ${i} (byte ${byteIdx}, bit ${bitIdx}) ${on ? '1' : '0'}${diffBits && diffBits[i] ? ' flipped' : ''}`}
+          onmousemove={(e: MouseEvent) => {
+            hover = {
+              x: e.clientX,
+              y: e.clientY,
+              text: `bit ${i}\nbyte ${byteIdx} · bit ${bitIdx}\nvalue ${on ? '1' : '0'}${diffBits && diffBits[i] ? '\nflipped' : ''}`,
+            };
+          }}></span>
       {/each}
     </div>
     {#if label}<div class="bg-label">{label}</div>{/if}
@@ -64,6 +81,12 @@
         <span><strong>set</strong> {popcount}/64</span>
       {/if}
     </div>
+    {#if hover}
+      {@const h = hover}
+      <Tooltip x={h.x} y={h.y} container={host}>
+        {#snippet children()}{h.text}{/snippet}
+      </Tooltip>
+    {/if}
   </div>
 {/if}
 
@@ -79,7 +102,13 @@
   .bg-cell {
     background: var(--bg);
     border-radius: 1px;
-    transition: background 0.12s;
+    transition: background 0.12s, transform 0.1s;
+    cursor: crosshair;
+  }
+  .bg-cell:hover {
+    transform: scale(1.18);
+    z-index: 1;
+    position: relative;
   }
   .bg-cell.on { background: var(--accent-ink, oklch(0.55 0.18 240)); }
   /* Diff overrides plain colour — bright red ring around bits that flipped. */
