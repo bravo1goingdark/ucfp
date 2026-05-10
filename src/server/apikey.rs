@@ -109,12 +109,31 @@ impl ApiKeyLookup for StaticSingleKey {
 
 // ── StaticMapKey ────────────────────────────────────────────────────────
 
+#[derive(Clone, Debug, Eq)]
+pub struct CtString(pub String);
+
+impl PartialEq for CtString {
+    fn eq(&self, other: &Self) -> bool {
+        if self.0.len() != other.0.len() {
+            false
+        } else {
+            self.0.as_bytes().ct_eq(other.0.as_bytes()).into()
+        }
+    }
+}
+
+impl std::hash::Hash for CtString {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
 /// In-memory map of `token → ApiKeyContext`. Loaded from TOML once at
 /// startup. The map is keyed by token bytes (so unknown tokens cost
 /// one hash + one constant-time compare per matched bucket).
 #[derive(Clone, Debug, Default)]
 pub struct StaticMapKey {
-    keys: HashMap<String, ApiKeyContext>,
+    keys: HashMap<CtString, ApiKeyContext>,
 }
 
 /// One row of the TOML config consumed by [`StaticMapKey::from_toml`].
@@ -140,7 +159,7 @@ impl StaticMapKey {
     /// that already parsed the config some other way.
     pub fn from_entries(entries: impl IntoIterator<Item = (String, ApiKeyContext)>) -> Self {
         Self {
-            keys: entries.into_iter().collect(),
+            keys: entries.into_iter().map(|(k, v)| (CtString(k), v)).collect(),
         }
     }
 
@@ -178,7 +197,7 @@ impl StaticMapKey {
             .into_iter()
             .map(|r| {
                 (
-                    r.token,
+                    CtString(r.token),
                     ApiKeyContext {
                         tenant_id: r.tenant_id,
                         key_id: r.key_id,
@@ -195,7 +214,7 @@ impl StaticMapKey {
 #[async_trait::async_trait]
 impl ApiKeyLookup for StaticMapKey {
     async fn lookup(&self, presented: &str) -> crate::error::Result<Option<ApiKeyContext>> {
-        Ok(self.keys.get(presented).cloned())
+        Ok(self.keys.get(&CtString(presented.to_string())).cloned())
     }
 }
 

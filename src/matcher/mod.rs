@@ -28,12 +28,19 @@ pub fn rrf(rankings: &[&[Hit]], rrf_k: u32) -> Vec<Hit> {
 /// explainability. `sources[i]` corresponds to `rankings[i]`. Sources
 /// for indices past `sources.len()` default to the first hit's reported
 /// source (best-effort backward compatibility for older callers).
+#[allow(clippy::type_complexity)]
 pub fn rrf_with_sources(rankings: &[&[Hit]], sources: &[HitSource], rrf_k: u32) -> Vec<Hit> {
     let denom = rrf_k as f32;
     // Per-doc accumulator: (vec_score, bm25_score, vec_rank, bm25_rank, fallback_source).
     let mut acc: HashMap<
         (u32, u64),
-        (Option<f32>, Option<f32>, Option<u32>, Option<u32>, HitSource),
+        (
+            Option<f32>,
+            Option<f32>,
+            Option<u32>,
+            Option<u32>,
+            HitSource,
+        ),
     > = HashMap::new();
     for (i, ranking) in rankings.iter().enumerate() {
         let src = sources
@@ -67,22 +74,20 @@ pub fn rrf_with_sources(rankings: &[&[Hit]], sources: &[HitSource], rrf_k: u32) 
     }
     let mut out: Vec<Hit> = acc
         .into_iter()
-        .map(
-            |((tenant_id, record_id), (vs, bs, vr, br, _))| {
-                let total = vs.unwrap_or(0.0) + bs.unwrap_or(0.0);
-                Hit {
-                    tenant_id,
-                    record_id,
-                    score: total,
-                    source: HitSource::Fused,
-                    vector_score: vs,
-                    bm25_score: bs,
-                    vector_rank: vr,
-                    bm25_rank: br,
-                    term_hits: Vec::new(),
-                }
-            },
-        )
+        .map(|((tenant_id, record_id), (vs, bs, vr, br, _))| {
+            let total = vs.unwrap_or(0.0) + bs.unwrap_or(0.0);
+            Hit {
+                tenant_id,
+                record_id,
+                score: total,
+                source: HitSource::Fused,
+                vector_score: vs,
+                bm25_score: bs,
+                vector_rank: vr,
+                bm25_rank: br,
+                term_hits: Vec::new(),
+            }
+        })
         .collect();
     out.sort_by(|a, b| {
         b.score
@@ -142,7 +147,8 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
                 let knn_fut = self.index.knn(q.tenant_id, v, q.k, q.filter.as_ref());
                 let (vec_hits, bm_hits) = if q.explain {
                     let bm_fut =
-                        self.index.bm25_explain(q.tenant_id, &terms, q.k, q.filter.as_ref());
+                        self.index
+                            .bm25_explain(q.tenant_id, &terms, q.k, q.filter.as_ref());
                     tokio::try_join!(knn_fut, bm_fut)?
                 } else {
                     let bm_fut = self.index.bm25(q.tenant_id, &terms, q.k, q.filter.as_ref());
@@ -157,8 +163,7 @@ impl<'a, I: IndexBackend, R: Reranker> Matcher<'a, I, R> {
                 // fused output (RRF doesn't see them otherwise).
                 if q.explain {
                     use std::collections::HashMap;
-                    let mut by_id: HashMap<(u32, u64), Vec<crate::core::TermHit>> =
-                        HashMap::new();
+                    let mut by_id: HashMap<(u32, u64), Vec<crate::core::TermHit>> = HashMap::new();
                     for h in bm_hits {
                         if !h.term_hits.is_empty() {
                             by_id.insert((h.tenant_id, h.record_id), h.term_hits);
@@ -222,14 +227,8 @@ mod tests {
 
     #[test]
     fn rrf_with_sources_populates_breakdown_for_overlap() {
-        let vec_hits = vec![
-            h(10, 0.9, HitSource::Vector),
-            h(20, 0.8, HitSource::Vector),
-        ];
-        let bm_hits = vec![
-            h(20, 4.5, HitSource::Bm25),
-            h(30, 4.0, HitSource::Bm25),
-        ];
+        let vec_hits = vec![h(10, 0.9, HitSource::Vector), h(20, 0.8, HitSource::Vector)];
+        let bm_hits = vec![h(20, 4.5, HitSource::Bm25), h(30, 4.0, HitSource::Bm25)];
         let fused = rrf_with_sources(
             &[&vec_hits, &bm_hits],
             &[HitSource::Vector, HitSource::Bm25],
@@ -237,8 +236,14 @@ mod tests {
         );
         // Doc 20 is in both rankings — must carry both contributions and ranks.
         let twenty = fused.iter().find(|h| h.record_id == 20).unwrap();
-        assert!(twenty.vector_score.is_some(), "vec_score should be set on overlapping doc");
-        assert!(twenty.bm25_score.is_some(), "bm_score should be set on overlapping doc");
+        assert!(
+            twenty.vector_score.is_some(),
+            "vec_score should be set on overlapping doc"
+        );
+        assert!(
+            twenty.bm25_score.is_some(),
+            "bm_score should be set on overlapping doc"
+        );
         assert_eq!(twenty.vector_rank, Some(2));
         assert_eq!(twenty.bm25_rank, Some(1));
         // Score equals the sum of components.

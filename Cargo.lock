@@ -5323,6 +5323,7 @@ dependencies = [
  "http-body-util",
  "image",
  "imgfprint",
+ "memmap2",
  "metrics",
  "metrics-exporter-prometheus",
  "mimalloc",

@@ -6,7 +6,10 @@ import type { UsageResponse } from '$lib/types/api';
 export const load: LayoutServerLoad = async ({ locals, fetch }) => {
   let summary: UsageResponse | null = null;
   try {
-    const res = await fetch('/api/usage?days=7');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8_000);
+    const res = await fetch('/api/usage?days=7', { signal: ctrl.signal });
+    clearTimeout(timer);
     if (res.ok) summary = (await res.json()) as UsageResponse;
   } catch {
     summary = null;

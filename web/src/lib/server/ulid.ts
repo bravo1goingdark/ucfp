@@ -35,11 +35,17 @@ export function ulid(): string {
   return encodeCrockford(ts, 10) + encodeCrockford(r, 16);
 }
 
-/** u64-safe decimal id — 48-bit ms time + 16-bit randomness. */
+const CUSTOM_EPOCH = 1704067200000n; // 2024-01-01
+
+/** u64-safe decimal id — 42-bit ms time (custom epoch) + 22-bit randomness. */
 export function ulidU64(): string {
-  const ts = BigInt(Date.now()) & ((1n << 48n) - 1n);
-  const rnd = new Uint8Array(2);
+  let ts = BigInt(Date.now()) - CUSTOM_EPOCH;
+  if (ts < 0n) ts = 0n;
+  ts &= (1n << 42n) - 1n;
+  
+  const rnd = new Uint8Array(3);
   crypto.getRandomValues(rnd);
-  const r = (BigInt(rnd[0]) << 8n) | BigInt(rnd[1]);
-  return ((ts << 16n) | r).toString();
+  const r = ((BigInt(rnd[0]) << 16n) | (BigInt(rnd[1]) << 8n) | BigInt(rnd[2])) & ((1n << 22n) - 1n);
+  
+  return ((ts << 22n) | r).toString();
 }

@@ -704,12 +704,20 @@ pub fn inspect_audio_with(
     // the envelope / spectrogram / peaks / landmarks panes.
     let (fingerprint_hex, fingerprint_bytes, algo_tag) = match algorithm {
         InspectAudioAlgorithm::Wang => match fingerprint_wang(samples, sample_rate, 0, 0) {
-            Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len(), ALGORITHM_WANG),
+            Ok(rec) => (
+                hex_lower_audio(&rec.fingerprint),
+                rec.fingerprint.len(),
+                ALGORITHM_WANG,
+            ),
             Err(_) => (String::new(), 0, ALGORITHM_WANG),
         },
         #[cfg(feature = "audio-panako")]
         InspectAudioAlgorithm::Panako => match fingerprint_panako(samples, sample_rate, 0, 0) {
-            Ok(rec) => (hex_lower_audio(&rec.fingerprint), rec.fingerprint.len(), ALGORITHM_PANAKO),
+            Ok(rec) => (
+                hex_lower_audio(&rec.fingerprint),
+                rec.fingerprint.len(),
+                ALGORITHM_PANAKO,
+            ),
             Err(_) => (String::new(), 0, ALGORITHM_PANAKO),
         },
         #[cfg(feature = "audio-haitsma")]

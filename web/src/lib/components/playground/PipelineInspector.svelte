@@ -233,14 +233,30 @@
   function toggle(stage: string) {
     openStage = openStage === stage ? null : stage;
   }
+
+  let allExpanded = $state(false);
+  function toggleAll() {
+    allExpanded = !allExpanded;
+    openStage = allExpanded ? '__all__' : null;
+  }
+  function isOpen(stage: string): boolean {
+    return openStage === '__all__' || openStage === stage;
+  }
 </script>
 
 <div class="inspector">
   <header class="inspector-head">
     <span class="inspector-title">Pipeline inspector</span>
-    <button type="button" class="inspect-btn" onclick={run} disabled={loading}>
-      {loading ? 'Inspecting…' : (result ? 'Re-inspect' : 'Inspect pipeline')}
-    </button>
+    <div class="head-actions">
+      {#if result}
+        <button type="button" class="expand-btn" onclick={toggleAll}>
+          {allExpanded ? 'Collapse all' : 'Expand all'}
+        </button>
+      {/if}
+      <button type="button" class="inspect-btn" onclick={run} disabled={loading}>
+        {loading ? 'Inspecting…' : (result ? 'Re-inspect' : 'Inspect pipeline')}
+      </button>
+    </div>
   </header>
 
   {#if errMsg}
@@ -248,39 +264,40 @@
   {/if}
 
   {#if result && result.kind === 'image'}
-    <section class="stage" class:open={openStage === 'original'}>
+    <div class="pipeline">
+    <section class="stage" class:open={isOpen('original')}>
       <button type="button" class="stage-head" onclick={() => toggle('original')}>
         <span class="step-num">1</span>
         <span class="stage-label">Original</span>
-        <span class="stage-meta">{result.width} × {result.height} px</span>
+        <span class="stage-meta">{result.width} × {result.height} px <span class="stage-chevron">▶</span></span>
       </button>
-      {#if openStage === 'original'}
+      {#if isOpen('original')}
         <div class="stage-body img-stage">
           <img class="img-original" src="data:image/png;base64,{result.original_png_b64}" alt="original (thumbnail)" />
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'gray32'}>
+    <section class="stage" class:open={isOpen('gray32')}>
       <button type="button" class="stage-head" onclick={() => toggle('gray32')}>
         <span class="step-num">2</span>
         <span class="stage-label">32 × 32 grayscale</span>
-        <span class="stage-meta">PHash DCT input</span>
+        <span class="stage-meta">PHash DCT input <span class="stage-chevron">▶</span></span>
       </button>
-      {#if openStage === 'gray32'}
+      {#if isOpen('gray32')}
         <div class="stage-body img-stage">
           <img class="img-pixel img-32" src="data:image/png;base64,{result.gray32_png_b64}" alt="32×32 grayscale" />
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'gray8'}>
+    <section class="stage" class:open={isOpen('gray8')}>
       <button type="button" class="stage-head" onclick={() => toggle('gray8')}>
         <span class="step-num">3</span>
         <span class="stage-label">8 × 8 grayscale</span>
-        <span class="stage-meta">AHash input · mean = {result.ahash_mean}</span>
+        <span class="stage-meta">AHash · mean = {result.ahash_mean} <span class="stage-chevron">▶</span></span>
       </button>
-      {#if openStage === 'gray8'}
+      {#if isOpen('gray8')}
         <div class="stage-body img-stage">
           <img class="img-pixel img-8" src="data:image/png;base64,{result.gray8_png_b64}" alt="8×8 grayscale" />
           <p class="caption">Each cell is one input pixel for AHash. Pixels above the mean ({result.ahash_mean}) become a 1 bit; below, a 0.</p>
@@ -288,55 +305,55 @@
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'fingerprint'}>
+    <section class="stage" class:open={isOpen('fingerprint')}>
       <button type="button" class="stage-head" onclick={() => toggle('fingerprint')}>
         <span class="step-num">4</span>
         <span class="stage-label">Fingerprint</span>
         <span class="stage-meta">
-          {result.algorithm} · {result.fingerprint_bytes} bytes
+          {result.algorithm} · {result.fingerprint_bytes} B <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'fingerprint'}
+      {#if isOpen('fingerprint')}
         <div class="stage-body">
           <div class="fp-meta mono">config_hash 0x{result.config_hash.toString(16)}</div>
           <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
         </div>
       {/if}
     </section>
+    </div>
 
   {:else if result && result.kind === 'audio'}
     {@const env = result.envelope}
     {@const envMax = Math.max(0.001, ...env)}
     {@const envPolyline = env.map((v, i) => `${i},${(50 - (v / envMax) * 48).toFixed(2)}`).join(' ')}
 
-    <section class="stage" class:open={openStage === 'envelope'}>
+    <div class="pipeline">
+    <section class="stage" class:open={isOpen('envelope')}>
       <button type="button" class="stage-head" onclick={() => toggle('envelope')}>
         <span class="step-num">1</span>
         <span class="stage-label">Waveform envelope</span>
-        <span class="stage-meta">{result.duration_secs.toFixed(2)} s · {result.sample_rate.toLocaleString()} Hz</span>
+        <span class="stage-meta">{result.duration_secs.toFixed(2)} s · {result.sample_rate.toLocaleString()} Hz <span class="stage-chevron">▶</span></span>
       </button>
-      {#if openStage === 'envelope'}
+      {#if isOpen('envelope')}
         <div class="stage-body">
           <svg viewBox="0 0 {env.length} 50" preserveAspectRatio="none" class="env-svg" role="img" aria-label="amplitude envelope">
             <polyline points={envPolyline} class="env-line" />
             <line x1="0" y1="50" x2={env.length} y2="50" class="env-axis" />
           </svg>
-          <p class="caption">Max-abs sample magnitude per bucket — a quick read on overall loudness shape.</p>
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'spectrogram'}>
+    <section class="stage" class:open={isOpen('spectrogram')}>
       <button type="button" class="stage-head" onclick={() => toggle('spectrogram')}>
         <span class="step-num">2</span>
         <span class="stage-label">Linear spectrogram + landmarks</span>
         <span class="stage-meta">
-          {result.spec_width}×{result.spec_height} ·
           {result.peaks.length}/{result.total_peaks} peaks ·
-          {result.landmark_pairs.length}/{result.total_landmarks} pairs
+          {result.landmark_pairs.length}/{result.total_landmarks} pairs <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'spectrogram'}
+      {#if isOpen('spectrogram')}
         {@const fMaxHz = result.sample_rate / 2}
         {@const tMaxMs = result.duration_secs * 1000}
         <div class="stage-body">
@@ -372,118 +389,125 @@
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'mel'}>
+    <section class="stage" class:open={isOpen('mel')}>
       <button type="button" class="stage-head" onclick={() => toggle('mel')}>
         <span class="step-num">3</span>
         <span class="stage-label">Mel spectrogram</span>
         <span class="stage-meta">
           {result.mel_spec_width}×{result.mel_spec_height} mel ·
-          {Math.round(result.mel_fmin_hz)}–{Math.round(result.mel_fmax_hz)} Hz
+          {Math.round(result.mel_fmin_hz)}–{Math.round(result.mel_fmax_hz)} Hz <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'mel'}
+      {#if isOpen('mel')}
         <div class="stage-body">
           <img class="spec-layer mel-img" src="data:image/png;base64,{result.mel_spec_png_b64}" alt="mel-scale log-power spectrogram" style="aspect-ratio: {result.mel_spec_width} / {result.mel_spec_height}" />
-          <p class="caption">Same audio reweighted onto a mel scale — low frequencies (where most spectral structure lives) get more vertical resolution; the upper octaves are compressed. Useful for spotting timbre, voicing, and percussion that the linear view smears.</p>
+          <p class="caption">Same audio reweighted onto a mel scale — low frequencies get more vertical resolution; upper octaves are compressed.</p>
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'fingerprint'}>
+    <section class="stage" class:open={isOpen('fingerprint')}>
       <button type="button" class="stage-head" onclick={() => toggle('fingerprint')}>
         <span class="step-num">4</span>
         <span class="stage-label">Fingerprint</span>
         <span class="stage-meta">
-          {result.algorithm} · {result.fingerprint_bytes} bytes
+          {result.algorithm} · {result.fingerprint_bytes} B <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'fingerprint'}
+      {#if isOpen('fingerprint')}
         <div class="stage-body">
           {#if result.fingerprint_bytes === 0}
             <p class="caption">Wang produced no hashes — typical when the clip is below ~2 s or has no spectral peaks.</p>
           {:else}
             <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
-            <p class="caption">Each Wang hash packs (anchor freq, target freq, Δt) into a 32-bit int — every line you saw on the spectrogram contributes one hash.</p>
+            <p class="caption">Each Wang hash packs (anchor freq, target freq, Δt) into a 32-bit int.</p>
           {/if}
         </div>
       {/if}
     </section>
+    </div>
 
   {:else if result && result.kind === 'text'}
     {@const spans = diffSpans(result.raw, result.canonicalized)}
     {@const changedCount = spans.filter(s => s.changed).reduce((a, s) => a + s.text.length, 0)}
 
-    <section class="stage" class:open={openStage === 'raw'}>
+    <div class="pipeline">
+    <section class="stage" class:open={isOpen('raw')}>
       <button type="button" class="stage-head" onclick={() => toggle('raw')}>
         <span class="step-num">1</span>
         <span class="stage-label">Raw input</span>
-        <span class="stage-meta">{result.raw.length} chars</span>
+        <span class="stage-meta">{result.raw.length} chars <span class="stage-chevron">▶</span></span>
       </button>
-      {#if openStage === 'raw'}
+      {#if isOpen('raw')}
         <pre class="stage-body mono">{result.raw}</pre>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'canonicalized'}>
+    <section class="stage" class:open={isOpen('canonicalized')}>
       <button type="button" class="stage-head" onclick={() => toggle('canonicalized')}>
         <span class="step-num">2</span>
         <span class="stage-label">Canonicalized</span>
         <span class="stage-meta">
-          {result.canonicalized.length} chars · {changedCount} changed
+          {result.canonicalized.length} chars · {changedCount} changed <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'canonicalized'}
+      {#if isOpen('canonicalized')}
         <pre class="stage-body mono">{#each spans as s, i (i)}<span class:diff={s.changed}>{s.text}</span>{/each}</pre>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'tokens'}>
+    <section class="stage" class:open={isOpen('tokens')}>
       <button type="button" class="stage-head" onclick={() => toggle('tokens')}>
         <span class="step-num">3</span>
         <span class="stage-label">Tokens</span>
         <span class="stage-meta">
-          {result.tokens.length} of {result.total_tokens}
-          {result.tokens.length < result.total_tokens ? '(truncated)' : ''}
+          {result.tokens.length}{result.tokens.length < result.total_tokens ? ` of ${result.total_tokens}` : ''} <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'tokens'}
+      {#if isOpen('tokens')}
         <div class="stage-body chips">
           {#each result.tokens as t, i (i)}<span class="chip mono">{t}</span>{/each}
+          {#if result.tokens.length < result.total_tokens}
+            <span class="chip-count">+{result.total_tokens - result.tokens.length} more</span>
+          {/if}
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'shingles'}>
+    <section class="stage" class:open={isOpen('shingles')}>
       <button type="button" class="stage-head" onclick={() => toggle('shingles')}>
         <span class="step-num">4</span>
         <span class="stage-label">k-shingles</span>
         <span class="stage-meta">
-          {result.shingles.length} of {result.total_shingles}
-          {result.shingles.length < result.total_shingles ? '(truncated)' : ''}
+          {result.shingles.length}{result.shingles.length < result.total_shingles ? ` of ${result.total_shingles}` : ''} <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'shingles'}
+      {#if isOpen('shingles')}
         <div class="stage-body chips">
           {#each result.shingles as s, i (i)}<span class="chip mono shingle">{s}</span>{/each}
+          {#if result.shingles.length < result.total_shingles}
+            <span class="chip-count">+{result.total_shingles - result.shingles.length} more</span>
+          {/if}
         </div>
       {/if}
     </section>
 
-    <section class="stage" class:open={openStage === 'fingerprint'}>
+    <section class="stage" class:open={isOpen('fingerprint')}>
       <button type="button" class="stage-head" onclick={() => toggle('fingerprint')}>
         <span class="step-num">5</span>
         <span class="stage-label">Fingerprint</span>
         <span class="stage-meta">
-          {result.algorithm} · {result.fingerprint_bytes} bytes
+          {result.algorithm} · {result.fingerprint_bytes} B <span class="stage-chevron">▶</span>
         </span>
       </button>
-      {#if openStage === 'fingerprint'}
+      {#if isOpen('fingerprint')}
         <div class="stage-body">
           <div class="fp-meta mono">config_hash 0x{result.config_hash.toString(16)}</div>
           <pre class="fp-hex mono">{result.fingerprint_hex.slice(0, 256)}{result.fingerprint_hex.length > 256 ? '…' : ''}</pre>
         </div>
       {/if}
     </section>
+    </div>
   {:else if !loading && !errMsg}
     <p class="hint">
       {#if modality === 'text'}
@@ -503,164 +527,223 @@
 
 <style>
   .inspector {
-    display: flex; flex-direction: column; gap: 0.4rem;
-    padding: 0.75rem 0.85rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+    padding: 0.65rem 0.75rem;
     background: var(--bg-2, rgba(255,255,255,0.03));
-    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border: 1px solid var(--ink, rgba(255,255,255,0.08));
     border-radius: 0.55rem;
   }
   .inspector-head {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 0.6rem;
+    gap: 0.5rem;
   }
   .inspector-title {
-    font-size: 0.78rem; opacity: 0.85;
-    text-transform: uppercase; letter-spacing: 0.06em;
+    font-family: var(--mono, monospace);
+    font-size: 0.72rem; opacity: 0.85;
+    text-transform: uppercase; letter-spacing: 0.08em;
   }
+  .head-actions { display: flex; gap: 0.35rem; align-items: center; }
   .inspect-btn {
     appearance: none; cursor: pointer;
-    border: 1px solid var(--border, rgba(255,255,255,0.18));
-    background: var(--surface, rgba(255,255,255,0.04));
-    color: inherit;
-    padding: 0.32rem 0.7rem; border-radius: 0.4rem;
-    font: inherit; font-size: 0.8rem;
+    border: 1px solid var(--ink, rgba(255,255,255,0.18));
+    background: var(--ink, #141414);
+    color: var(--bg, #F4F1EA);
+    padding: 0.3rem 0.65rem; border-radius: 0.35rem;
+    font: inherit; font-size: 0.75rem;
+    font-family: var(--mono, monospace);
+    letter-spacing: 0.04em;
+    transition: opacity 0.12s;
   }
-  .inspect-btn:hover:not(:disabled) { background: var(--surface-hover, rgba(255,255,255,0.08)); }
-  .inspect-btn:disabled { opacity: 0.55; cursor: progress; }
+  .inspect-btn:hover:not(:disabled) { opacity: 0.8; }
+  .inspect-btn:disabled { opacity: 0.45; cursor: progress; }
+  .expand-btn {
+    appearance: none; cursor: pointer;
+    border: 1px solid var(--line-strong, rgba(255,255,255,0.12));
+    background: transparent; color: inherit;
+    padding: 0.25rem 0.5rem; border-radius: 0.3rem;
+    font: inherit; font-size: 0.65rem;
+    font-family: var(--mono, monospace);
+    opacity: 0.7;
+  }
+  .expand-btn:hover { opacity: 1; background: var(--bg-2, rgba(0,0,0,0.04)); }
   .err {
     margin: 0; padding: 0.4rem 0.55rem; border-radius: 0.35rem;
-    background: oklch(0.32 0.18 30 / 0.18);
-    color: oklch(0.85 0.18 30);
-    font-size: 0.78rem;
+    background: color-mix(in srgb, #b03030 10%, transparent);
+    border: 1px solid #b03030;
+    color: #b03030;
+    font-size: 0.75rem; font-family: var(--mono, monospace);
   }
   .hint {
     margin: 0.25rem 0 0;
-    font-size: 0.78rem; opacity: 0.7;
-    line-height: 1.4;
+    font-size: 0.75rem; opacity: 0.6;
+    line-height: 1.5;
   }
+
+  /* ── Pipeline flow — vertical connector line between stages ─────── */
+  .pipeline {
+    display: flex; flex-direction: column;
+    position: relative;
+    padding-left: 1.4rem;
+  }
+  .pipeline::before {
+    content: '';
+    position: absolute;
+    left: 0.65rem;
+    top: 1rem;
+    bottom: 1rem;
+    width: 2px;
+    background: var(--line-strong, rgba(20,20,20,0.15));
+    border-radius: 1px;
+  }
+
   .stage {
-    border: 1px solid var(--border, rgba(255,255,255,0.06));
+    position: relative;
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
     border-radius: 0.4rem;
-    background: var(--bg, rgba(255,255,255,0.02));
+    background: rgba(255, 255, 255, 0.15);
     overflow: hidden;
+    margin-bottom: 0.35rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .stage.open { background: var(--bg-3, rgba(255,255,255,0.045)); }
+  .stage.open {
+    border-color: var(--accent-ink, oklch(0.28 0.08 130));
+    box-shadow: 0 2px 8px rgba(20,20,20,0.06);
+  }
   .stage-head {
     display: grid;
     grid-template-columns: auto 1fr auto;
-    gap: 0.6rem; align-items: center;
+    gap: 0.5rem; align-items: center;
     width: 100%;
     appearance: none; border: 0; background: transparent; color: inherit;
-    padding: 0.45rem 0.7rem; cursor: pointer;
+    padding: 0.4rem 0.6rem; cursor: pointer;
     font: inherit; text-align: left;
+    transition: background 0.1s;
   }
-  .stage-head:hover { background: var(--surface-hover, rgba(255,255,255,0.04)); }
+  .stage-head:hover { background: rgba(20,20,20,0.03); }
   .step-num {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 1.4rem; height: 1.4rem;
-    font-family: var(--mono, monospace); font-size: 0.7rem;
+    width: 1.3rem; height: 1.3rem;
+    font-family: var(--mono, monospace); font-size: 0.65rem; font-weight: 600;
     border-radius: 999px;
-    background: var(--accent, oklch(0.55 0.18 240));
-    color: var(--accent-ink, #fff);
+    background: var(--ink, #141414);
+    color: var(--bg, #F4F1EA);
+    position: relative;
+    z-index: 1;
   }
-  .stage-label { font-size: 0.85rem; }
+  .stage.open .step-num {
+    background: var(--accent-ink, oklch(0.28 0.08 130));
+  }
+  .stage-label { font-size: 0.8rem; font-weight: 500; }
   .stage-meta {
-    font-family: var(--mono, monospace); font-size: 0.7rem;
-    opacity: 0.65;
+    font-family: var(--mono, monospace); font-size: 0.65rem;
+    opacity: 0.55; white-space: nowrap;
   }
+  .stage-chevron {
+    font-size: 0.6rem; opacity: 0.5;
+    transition: transform 0.15s;
+    margin-left: 0.25rem;
+  }
+  .stage.open .stage-chevron { transform: rotate(90deg); }
   .stage-body {
-    padding: 0.6rem 0.7rem 0.7rem;
-    border-top: 1px dashed var(--border, rgba(255,255,255,0.06));
+    padding: 0.5rem 0.6rem 0.6rem;
+    border-top: 1px solid var(--line, rgba(20,20,20,0.08));
+    animation: stage-reveal 0.15s ease-out;
   }
-  .mono { font-family: var(--mono, monospace); font-size: 0.78rem; }
+  @keyframes stage-reveal {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .mono { font-family: var(--mono, monospace); font-size: 0.75rem; }
   pre.stage-body, pre.fp-hex {
     margin: 0; white-space: pre-wrap; word-break: break-word;
-    max-height: 180px; overflow-y: auto;
+    max-height: 160px; overflow-y: auto;
+    line-height: 1.5;
   }
   pre.fp-hex {
-    background: var(--bg, rgba(0,0,0,0.25));
-    padding: 0.5rem 0.6rem; border-radius: 0.3rem;
-    color: oklch(0.85 0.04 240);
+    background: var(--ink, #141414);
+    padding: 0.45rem 0.55rem; border-radius: 0.3rem;
+    color: var(--bg, #F4F1EA);
+    font-size: 0.7rem;
+    letter-spacing: 0.02em;
   }
-  .fp-meta { margin-bottom: 0.4rem; opacity: 0.7; }
+  .fp-meta { margin-bottom: 0.35rem; opacity: 0.6; font-size: 0.68rem; }
   .diff {
-    background: oklch(0.55 0.18 90 / 0.32);
+    background: oklch(0.62 0.06 130 / 0.35);
     border-radius: 2px;
-    padding: 0 1px;
+    padding: 0 2px;
+    font-weight: 600;
   }
   .chips {
-    display: flex; flex-wrap: wrap; gap: 0.25rem;
-    max-height: 180px; overflow-y: auto;
+    display: flex; flex-wrap: wrap; gap: 0.2rem;
+    max-height: 160px; overflow-y: auto;
   }
   .chip {
     display: inline-block;
-    padding: 0.1rem 0.45rem;
-    background: var(--bg, rgba(255,255,255,0.04));
-    border: 1px solid var(--border, rgba(255,255,255,0.08));
-    border-radius: 0.4rem;
-    font-size: 0.72rem;
+    padding: 0.12rem 0.4rem;
+    background: rgba(255, 255, 255, 0.3);
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
+    border-radius: 0.3rem;
+    font-size: 0.68rem;
+    transition: background 0.1s;
   }
+  .chip:hover { background: rgba(255, 255, 255, 0.5); }
   .chip.shingle {
-    background: oklch(0.5 0.12 240 / 0.16);
-    border-color: oklch(0.5 0.12 240 / 0.3);
+    background: color-mix(in oklch, var(--accent-ink) 12%, transparent);
+    border-color: color-mix(in oklch, var(--accent-ink) 30%, transparent);
   }
-  /* Image-stage rendering — pixelated upscale for the 8×8 / 32×32 panes
-     so users can see the discrete bit cells without antialiasing fuzz. */
-  .img-stage { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .chip-count {
+    font-family: var(--mono, monospace);
+    font-size: 0.62rem;
+    opacity: 0.6;
+    margin-left: 0.3rem;
+  }
+  /* Image-stage rendering */
+  .img-stage { display: flex; flex-direction: column; align-items: flex-start; gap: 0.4rem; }
   .img-original {
     max-width: 100%;
-    max-height: 256px;
+    max-height: 220px;
     border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
   }
   .img-pixel {
     image-rendering: pixelated;
     border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
   }
-  /* `aspect-ratio` keeps the pixel-stage image square at any width;
-     `width: min(192px, 100%)` lets it shrink below 192 px on phones
-     instead of forcing the inspector card past the viewport. */
-  .img-32, .img-8 { width: min(192px, 100%); aspect-ratio: 1 / 1; height: auto; }
+  .img-32, .img-8 { width: min(180px, 100%); aspect-ratio: 1 / 1; height: auto; }
   .caption {
     margin: 0;
-    font-size: 0.74rem;
-    opacity: 0.7;
-    line-height: 1.4;
-    max-width: 480px;
+    font-size: 0.7rem;
+    opacity: 0.6;
+    line-height: 1.45;
+    max-width: 440px;
   }
-  /* Audio-stage rendering. */
+  /* Audio-stage rendering */
   .env-svg {
     width: 100%;
-    height: 50px;
-    background: var(--bg, rgba(0,0,0,0.25));
+    height: 48px;
+    background: var(--ink, #141414);
     border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
   }
   .env-line {
     fill: none;
-    stroke: oklch(0.7 0.15 150);
-    stroke-width: 0.6;
+    stroke: oklch(0.62 0.06 130);
+    stroke-width: 0.7;
     vector-effect: non-scaling-stroke;
   }
   .env-axis {
-    stroke: var(--ink-2, rgba(255,255,255,0.15));
-    stroke-width: 0.4;
+    stroke: var(--muted, rgba(255,255,255,0.15));
+    stroke-width: 0.3;
     vector-effect: non-scaling-stroke;
   }
-  /* Layered spectrogram + overlay. The PNG goes in as the bottom
-     layer (image-rendering: pixelated keeps the per-cell colour
-     crisp); the SVG covers the same area absolute-positioned and
-     hosts the peak dots + landmark pair lines. The wrapper carries
-     the aspect ratio inline (set per-render from the actual PNG dims)
-     so the overlay scales 1:1 with the background. */
   .spec-stack {
     position: relative;
     width: 100%;
-    max-width: 560px;
+    max-width: 520px;
     border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.1));
-    background: var(--bg, #000);
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
+    background: #000;
     overflow: hidden;
   }
   .spec-layer {
@@ -676,43 +759,41 @@
   .mel-img {
     position: relative;
     width: 100%;
-    max-width: 560px;
+    max-width: 520px;
     image-rendering: pixelated;
     border-radius: 0.3rem;
-    border: 1px solid var(--border, rgba(255,255,255,0.1));
-    background: var(--bg, #000);
+    border: 1px solid var(--line-strong, rgba(20,20,20,0.12));
+    background: #000;
   }
   .peak-dot {
     fill: oklch(0.95 0.13 95);
-    opacity: 0.92;
+    opacity: 0.9;
   }
   .landmark-line {
     stroke: oklch(0.85 0.16 50);
     stroke-width: 0.4;
-    opacity: 0.55;
+    opacity: 0.5;
     vector-effect: non-scaling-stroke;
   }
-  /* Tiny legend below the spectrogram showing which colour means what. */
   .legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.6rem;
-    margin-top: 0.5rem;
-    font-size: 0.7rem;
-    color: var(--ink-2, #888);
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    font-size: 0.65rem;
+    color: var(--muted, #6E6A60);
   }
   .lg {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.3rem;
   }
   .lg::before {
     content: '';
     display: inline-block;
-    width: 0.7rem;
-    height: 0.7rem;
+    width: 0.6rem;
+    height: 0.6rem;
     border-radius: 2px;
-    background: oklch(0.5 0.18 250);
   }
   .lg-spec::before { background: linear-gradient(90deg, oklch(0.25 0.15 290), oklch(0.55 0.18 240), oklch(0.85 0.2 90)); }
   .lg-peak::before { background: oklch(0.95 0.13 95); border-radius: 999px; }

@@ -260,7 +260,7 @@ async function sleepWithJitter(baseMs: number): Promise<void> {
   await new Promise((r) => setTimeout(r, baseMs + jitter));
 }
 
-function buildHeaders(cfg: UpstreamConfig, contentType: string): HeadersInit {
+function buildHeaders(cfg: UpstreamConfig, contentType: string): Record<string, string> {
   return {
     'content-type': contentType,
     authorization: `Bearer ${cfg.apiToken}`,
@@ -285,7 +285,6 @@ export async function ingest(cfg: UpstreamConfig, args: IngestArgs): Promise<Ing
   if (args.modality === 'audio') qs.set('sample_rate', String(args.sampleRate ?? 8000));
   if (args.algorithm) qs.set('algorithm', args.algorithm);
   if (args.modelId)   qs.set('model_id',  args.modelId);
-  if (args.apiKey)    qs.set('api_key',   args.apiKey);
   appendParams(qs, args.params);
   const qstr = qs.toString();
   if (qstr) path += '?' + qstr;
@@ -293,9 +292,12 @@ export async function ingest(cfg: UpstreamConfig, args: IngestArgs): Promise<Ing
   const url = joinUrl(cfg.apiUrl, path);
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
+  const headers = buildHeaders(cfg, args.contentType);
+  if (args.apiKey) headers['x-provider-key'] = args.apiKey;
+
   const res = await upstreamFetch(url, {
     method: 'POST',
-    headers: buildHeaders(cfg, args.contentType),
+    headers,
     body: args.body,
     signal: args.signal
   });

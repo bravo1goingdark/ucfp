@@ -52,6 +52,29 @@ pub(super) const BM25_DOC_LENS: TableDefinition<'_, (u32, u64), u32> =
 pub(super) const BM25_CORPUS: TableDefinition<'_, u32, &[u8]> =
     TableDefinition::new("ucfp/bm25/corpus/v1");
 
+pub(super) const BM25_DOC_TERMS: TableDefinition<'_, (u32, u64), &[u8]> =
+    TableDefinition::new("ucfp/bm25/doc_terms/v1");
+
+fn pack_term_ids(tids: &[u64]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(tids.len() * 8);
+    for t in tids {
+        out.extend_from_slice(&t.to_le_bytes());
+    }
+    out
+}
+
+fn unpack_term_ids(b: &[u8]) -> Vec<u64> {
+    let mut out = Vec::with_capacity(b.len() / 8);
+    let mut i = 0;
+    while i + 8 <= b.len() {
+        let mut t = [0u8; 8];
+        t.copy_from_slice(&b[i..i + 8]);
+        out.push(u64::from_le_bytes(t));
+        i += 8;
+    }
+    out
+}
+
 // BM25 hyper-params (Robertson/Spärck Jones 1995 defaults).
 const K1: f32 = 1.2;
 const B: f32 = 0.75;
@@ -340,8 +363,10 @@ pub(super) fn upsert_one(
         }
     }
 
+    let mut term_ids = Vec::with_capacity(tf.len());
     for (term, tf_in_doc) in &tf {
         let tid = term_to_id[term];
+        term_ids.push(tid);
         let mut bm = read_postings(txn, tenant_id, tid)?;
         bm.insert(record_id);
         write_postings(txn, tenant_id, tid, &bm)?;
@@ -349,6 +374,14 @@ pub(super) fn upsert_one(
         entries.push((record_id, *tf_in_doc));
         write_scoring(txn, tenant_id, tid, &entries)?;
     }
+
+    let mut doc_terms_table = txn
+        .open_table(BM25_DOC_TERMS)
+        .map_err(|e| Error::Index(e.to_string()))?;
+    doc_terms_table
+        .insert((tenant_id, record_id), pack_term_ids(&term_ids).as_slice())
+        .map_err(|e| Error::Index(e.to_string()))?;
+    drop(doc_terms_table);
 
     write_doc_len(txn, tenant_id, record_id, doc_len)?;
 
@@ -379,20 +412,36 @@ pub(super) fn clear_one(
         return Ok(None);
     };
 
-    let term_to_id = read_term_dict(txn, tenant_id)?;
-    // Walk every term — for a v1 with hundreds of terms per tenant this
-    // is fine; an inverse-doc-id index would tighten this hot path.
-    for tid in term_to_id.values() {
-        let mut entries = read_scoring(txn, tenant_id, *tid)?;
+    let mut doc_terms_table = txn
+        .open_table(BM25_DOC_TERMS)
+        .map_err(|e| Error::Index(e.to_string()))?;
+
+    let tids = if let Some(v) = doc_terms_table
+        .get((tenant_id, record_id))
+        .map_err(|e| Error::Index(e.to_string()))?
+    {
+        unpack_term_ids(v.value())
+    } else {
+        let term_to_id = read_term_dict(txn, tenant_id)?;
+        term_to_id.values().copied().collect()
+    };
+
+    for tid in tids {
+        let mut entries = read_scoring(txn, tenant_id, tid)?;
         let before = entries.len();
         entries.retain(|(d, _)| *d != record_id);
         if entries.len() != before {
-            write_scoring(txn, tenant_id, *tid, &entries)?;
-            let mut bm = read_postings(txn, tenant_id, *tid)?;
+            write_scoring(txn, tenant_id, tid, &entries)?;
+            let mut bm = read_postings(txn, tenant_id, tid)?;
             bm.remove(record_id);
-            write_postings(txn, tenant_id, *tid, &bm)?;
+            write_postings(txn, tenant_id, tid, &bm)?;
         }
     }
+
+    doc_terms_table
+        .remove((tenant_id, record_id))
+        .map_err(|e| Error::Index(e.to_string()))?;
+    drop(doc_terms_table);
 
     let mut doc_lens = txn
         .open_table(BM25_DOC_LENS)
@@ -592,6 +641,9 @@ pub(super) fn bootstrap_tables(txn: &WriteTransaction) -> Result<()> {
         .map_err(|e| Error::Index(e.to_string()))?;
     let _ = txn
         .open_table(BM25_CORPUS)
+        .map_err(|e| Error::Index(e.to_string()))?;
+    let _ = txn
+        .open_table(BM25_DOC_TERMS)
         .map_err(|e| Error::Index(e.to_string()))?;
     Ok(())
 }

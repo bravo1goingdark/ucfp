@@ -31,7 +31,7 @@ export async function requireAuth(event: RequestEvent): Promise<RequireAuthResul
       return {
         ok: false,
         response: json(
-          { reason: auth.message, retryAfter: auth.retryAfter },
+          { error: auth.status === 429 ? 'rate_limited' : 'unauthorized', message: auth.message },
           { status: auth.status, headers }
         )
       };
@@ -39,8 +39,6 @@ export async function requireAuth(event: RequestEvent): Promise<RequireAuthResul
     return { ok: true, identity: { tenantId: auth.user.tenantId, userId: auth.user.id, keyId: auth.keyId } };
   }
   if (event.locals.user) {
-    // Apply a per-session minute throttle when the KV binding is bound;
-    // missing binding (local dev) degrades to a no-op so DX doesn't suffer.
     const kv = event.platform?.env?.RATE_LIMIT;
     if (kv) {
       const decision = await checkSessionMinuteLimit(kv, event.locals.user.id);
@@ -48,7 +46,7 @@ export async function requireAuth(event: RequestEvent): Promise<RequireAuthResul
         return {
           ok: false,
           response: json(
-            { reason: 'rate limit exceeded', retryAfter: decision.retryAfter },
+            { error: 'rate_limited', message: 'rate limit exceeded' },
             { status: 429, headers: { 'retry-after': String(decision.retryAfter) } }
           )
         };
@@ -61,6 +59,6 @@ export async function requireAuth(event: RequestEvent): Promise<RequireAuthResul
   }
   return {
     ok: false,
-    response: json({ reason: 'authentication required' }, { status: 401 })
+    response: json({ error: 'unauthorized', message: 'authentication required' }, { status: 401 })
   };
 }

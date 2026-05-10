@@ -52,6 +52,18 @@
   // inside it without smearing click handlers across the wrapper div).
   afterNavigate(() => { navOpen = false; });
 
+  // Desktop sidebar collapse — persisted to localStorage.
+  let sidebarCollapsed = $state(false);
+  if (typeof localStorage !== 'undefined') {
+    sidebarCollapsed = localStorage.getItem('ucfp:sidebar-collapsed') === '1';
+  }
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('ucfp:sidebar-collapsed', sidebarCollapsed ? '1' : '0');
+    }
+  }
+
   let loggingOut = $state(false);
   async function logout() {
     if (loggingOut) return;
@@ -81,7 +93,7 @@
   noindex
 />
 
-<div class="dashboard-shell" class:nav-open={navOpen}>
+<div class="dashboard-shell" class:nav-open={navOpen} class:sidebar-collapsed={sidebarCollapsed}>
   <header class="dash-top">
     <button
       type="button"
@@ -129,6 +141,20 @@
       <button type="button" class="dash-nav-backdrop" aria-label="Close navigation" onclick={closeNav}></button>
     {/if}
     <div id="dash-nav-drawer" class="dash-nav-drawer">
+      <button
+        type="button"
+        class="sidebar-collapse-btn"
+        aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        onclick={toggleSidebar}
+      >
+        <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+          {#if sidebarCollapsed}
+            <path d="M6 3l5 5-5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          {:else}
+            <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+          {/if}
+        </svg>
+      </button>
       <Sidebar items={navItems} />
     </div>
     <main class="dash-main" id="main">
@@ -157,9 +183,45 @@
   .dash-burger:hover { background: var(--bg-2, rgba(0,0,0,0.04)); }
   .dash-burger:focus-visible { outline: 2px solid var(--accent, #6ad); outline-offset: 1px; }
 
-  /* Below the existing 820 px breakpoint, the sidebar slides in as a
-     fixed-position drawer instead of horizontally scrunching. */
+  /* ── Desktop sidebar collapse toggle ─────────────────────────────── */
+  .sidebar-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--line-strong);
+    border-radius: 4px;
+    background: var(--bg);
+    color: var(--ink-2);
+    cursor: pointer;
+    margin-bottom: 8px;
+    margin-left: auto;
+    transition: background 0.12s;
+  }
+  .sidebar-collapse-btn:hover { background: var(--bg-2); color: var(--ink); }
+
+  /* When collapsed on desktop: hide sidebar labels, shrink column */
+  :global(.dashboard-shell.sidebar-collapsed .dash-body) {
+    grid-template-columns: 36px 1fr;
+  }
+  :global(.dashboard-shell.sidebar-collapsed .dash-nav-drawer .sidebar a) {
+    font-size: 0;
+    padding: 8px 6px;
+    text-align: center;
+  }
+  :global(.dashboard-shell.sidebar-collapsed .dash-nav-drawer .sidebar a)::first-letter {
+    font-size: 11px;
+  }
+  :global(.dashboard-shell.sidebar-collapsed .dash-nav-drawer .nav-section) {
+    display: none;
+  }
+  :global(.dashboard-shell.sidebar-collapsed .dash-nav-drawer .sidebar a::after) {
+    content: attr(href);
+  }
+
   @media (max-width: 820px) {
+    .sidebar-collapse-btn { display: none; }
     .dash-burger { display: inline-flex; }
 
     .dash-nav-drawer {
@@ -190,6 +252,7 @@
       border-left: 2px solid transparent;
       border-bottom: 0;
       padding: 0.65rem 0.85rem;
+      font-size: 12px;
     }
     :global(.dash-nav-drawer .sidebar a.active) {
       border-left-color: var(--accent-ink);
@@ -214,6 +277,10 @@
 
     /* Reclaim the grid column the sidebar used to occupy. */
     :global(.dashboard-shell .dash-body) {
+      grid-template-columns: 1fr;
+    }
+    /* Override collapsed state on mobile — always full width */
+    :global(.dashboard-shell.sidebar-collapsed .dash-body) {
       grid-template-columns: 1fr;
     }
   }

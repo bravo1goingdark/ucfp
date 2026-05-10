@@ -361,10 +361,19 @@ pub(super) async fn ingest_text<I: IndexBackend>(
     State(index): State<Arc<I>>,
     ctx: Option<Extension<ApiKeyContext>>,
     Path((tenant_id, record_id)): Path<(u32, u64)>,
-    Qs(params): Qs<TextParams>,
+    headers: axum::http::HeaderMap,
+    Qs(mut params): Qs<TextParams>,
     body: Bytes,
 ) -> Result<(StatusCode, Json<IngestResponse>), ApiError> {
     tenant_guard(ctx, tenant_id)?;
+    // Prefer X-Provider-Key header over query param for security.
+    if let Some(hv) = headers
+        .get("x-provider-key")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+    {
+        params.api_key = Some(hv.to_owned());
+    }
     #[cfg(feature = "inspect")]
     let body = if let Some(input_id) = params.input_id {
         crate::server::inputs_cache::cache()

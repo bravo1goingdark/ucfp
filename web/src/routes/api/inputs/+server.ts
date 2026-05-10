@@ -16,7 +16,7 @@ export const POST: RequestHandler = async (event) => {
   const env = platform?.env;
   if (!env || !env.UCFP_API_URL || !env.UCFP_API_TOKEN) {
     return json(
-      { proxied: false, reason: 'UCFP_API_URL or UCFP_API_TOKEN not configured.' },
+      { error: 'not_configured', message: 'UCFP_API_URL or UCFP_API_TOKEN not configured.' },
       { status: 503 }
     );
   }
@@ -30,7 +30,7 @@ export const POST: RequestHandler = async (event) => {
       const headers: Record<string, string> = {};
       if (auth.retryAfter) headers['retry-after'] = String(auth.retryAfter);
       return json(
-        { proxied: false, reason: auth.message },
+        { error: auth.status === 429 ? 'rate_limited' : 'unauthorized', message: auth.message },
         { status: auth.status, headers }
       );
     }

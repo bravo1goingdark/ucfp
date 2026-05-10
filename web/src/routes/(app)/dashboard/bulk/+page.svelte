@@ -271,38 +271,38 @@
 </div>
 
 <style>
-  .bulk-wrap { display: flex; flex-direction: column; gap: 1rem; }
-  .bulk-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.25rem; }
+  .bulk-wrap { display: flex; flex-direction: column; gap: 0.75rem; }
+  .bulk-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.15rem; }
   .bulk-sub   { margin: 0; color: var(--ink-2); font-size: 0.85rem; }
 
   .drop-zone {
     border: 1px dashed var(--ink); border-radius: 6px;
-    background: var(--bg-2); min-height: 130px;
+    background: var(--bg-2); min-height: 90px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 0.4rem; cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    gap: 0.3rem; cursor: pointer; transition: border-color 0.15s, background 0.15s;
     color: var(--ink-2); font-size: 0.85rem;
   }
   .drop-zone.drag-over { border-color: var(--accent-ink); background: var(--bg); }
   .drop-zone:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
-  .drop-icon { font-size: 2rem; }
+  .drop-icon { font-size: 1.6rem; }
   .drop-sub { font-size: 0.7rem; opacity: 0.7; }
   .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
 
   .adv-opts { border: 1px solid var(--ink); border-radius: 4px; }
-  .adv-opts summary { font-family: var(--mono); font-size: 0.72rem; padding: 0.4rem 0.65rem; cursor: pointer; color: var(--ink-2); }
-  .adv-body { padding: 0.6rem 0.65rem; display: flex; flex-direction: column; gap: 0.5rem; background: var(--bg-2); }
+  .adv-opts summary { font-family: var(--mono); font-size: 0.72rem; padding: 0.35rem 0.6rem; cursor: pointer; color: var(--ink-2); }
+  .adv-body { padding: 0.5rem 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; background: var(--bg-2); }
 
   .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); }
   .ctrl input {
     font-family: var(--mono); font-size: 0.78rem;
-    padding: 5px 8px; border: 1px solid var(--ink);
+    padding: 4px 7px; border: 1px solid var(--ink);
     background: var(--bg); color: var(--ink); border-radius: 3px;
   }
 
-  .bulk-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  .bulk-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
   .btn {
     font-family: var(--mono); font-size: 0.78rem;
-    padding: 0.45rem 0.9rem; border: 1px solid var(--ink);
+    padding: 0.4rem 0.8rem; border: 1px solid var(--ink);
     background: transparent; color: var(--ink); border-radius: 3px; cursor: pointer;
   }
   .btn.primary { background: var(--ink); color: var(--bg); }
@@ -310,25 +310,25 @@
   .bulk-counts { color: var(--ink-2); font-size: 0.72rem; margin-left: auto; }
   .mono { font-family: var(--mono); }
 
-  .queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .queue { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
   .qitem {
     display: grid;
-    grid-template-columns: 1fr 110px 130px 90px 110px 1fr 24px;
-    gap: 0.4rem; align-items: center;
-    padding: 0.35rem 0.6rem;
+    grid-template-columns: 1fr 100px 120px 80px 100px 1fr 22px;
+    gap: 0.35rem; align-items: center;
+    padding: 0.3rem 0.5rem;
     background: var(--bg-2); border: 1px solid var(--ink); border-radius: 3px;
-    font-family: var(--mono); font-size: 0.72rem;
+    font-family: var(--mono); font-size: 0.7rem;
   }
   .qitem.status-running { border-color: var(--accent-ink); }
   .qitem.status-done    { background: color-mix(in oklch, oklch(0.55 0.15 145) 8%, var(--bg-2)); }
   .qitem.status-error,
   .qitem.status-rate-limited { background: color-mix(in srgb, #b03030 6%, var(--bg-2)); }
   .qname { word-break: break-all; }
-  .qsel  { font-family: var(--mono); font-size: 0.72rem; padding: 3px 6px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); border-radius: 3px; }
+  .qsel  { font-family: var(--mono); font-size: 0.7rem; padding: 2px 5px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); border-radius: 3px; }
   .qstatus { color: var(--ink-2); }
   .qrec, .qerr { color: var(--ink); text-decoration: none; }
   .qrec:hover { text-decoration: underline; }
   .qerr { color: #b03030; }
-  .qrm  { background: transparent; border: none; color: var(--ink-2); cursor: pointer; font-size: 1rem; }
+  .qrm  { background: transparent; border: none; color: var(--ink-2); cursor: pointer; font-size: 0.9rem; }
   .qrm:hover { color: var(--ink); }
 </style>

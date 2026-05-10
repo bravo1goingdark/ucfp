@@ -400,7 +400,6 @@
 
     let url = `/api/fingerprint?algorithm=${encodeURIComponent(algorithm)}`;
     if (modelId.trim()) url += `&model_id=${encodeURIComponent(modelId.trim())}`;
-    if (apiKey.trim())  url += `&api_key=${encodeURIComponent(apiKey.trim())}`;
 
     // Per-algorithm tunables — only forward fields meaningful for the
     // current modality so we don't push noise upstream.
@@ -436,6 +435,7 @@
 
     const headers: Record<string, string> = {};
     if (contentType) headers['content-type'] = contentType;
+    if (apiKey.trim()) headers['x-provider-key'] = apiKey.trim();
 
     // Image + audio are bytes-heavy; use the XHR uploader so the user
     // sees a percent during multi-MB uploads. Text is small enough that
@@ -641,7 +641,6 @@
   function buildLiveTuneUrl(inputId: number): string {
     let url = `/api/fingerprint?algorithm=${encodeURIComponent(algorithm)}&input_id=${inputId}`;
     if (modelId.trim()) url += `&model_id=${encodeURIComponent(modelId.trim())}`;
-    if (apiKey.trim())  url += `&api_key=${encodeURIComponent(apiKey.trim())}`;
     function appendNum(name: string, v: number | null): void {
       if (v != null && Number.isFinite(v)) url += `&${name}=${v}`;
     }
@@ -1541,13 +1540,13 @@
 
 <style>
   /* ── Layout ─────────────────────────────────────────────────────────── */
-  .pg-wrap { display: flex; flex-direction: column; gap: 1.5rem; }
+  .pg-wrap { display: flex; flex-direction: column; gap: 1rem; }
 
   .pg-head {
     display: flex; align-items: flex-start;
-    justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+    justify-content: space-between; gap: 0.75rem; flex-wrap: wrap;
   }
-  .pg-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.25rem; }
+  .pg-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.15rem; }
   .pg-sub { margin: 0; color: var(--ink-2); font-size: 0.85rem; }
 
   .pg-head-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 4px; }
@@ -1582,18 +1581,18 @@
      actually shrink with the column instead of clipping. */
   .pg-grid {
     display: grid;
-    grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.3fr);
-    gap: 1.5rem;
+    grid-template-columns: minmax(320px, 1fr) minmax(0, 1.4fr);
+    gap: 1rem;
     align-items: start;
   }
   @media (min-width: 1280px) {
-    .pg-grid { grid-template-columns: minmax(360px, 0.65fr) minmax(0, 1.6fr); }
+    .pg-grid { grid-template-columns: minmax(360px, 0.75fr) minmax(0, 1.5fr); }
   }
   @media (max-width: 700px) {
     .pg-grid { grid-template-columns: 1fr; }
   }
 
-  .pg-pane { display: flex; flex-direction: column; gap: 0.75rem; }
+  .pg-pane { display: flex; flex-direction: column; gap: 0.5rem; }
   .pane-label {
     font-family: var(--mono); font-size: 0.7rem;
     text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-2);
@@ -1845,7 +1844,7 @@
   }
 
   /* Result pane */
-  .result-pane { padding: 0.75rem; background: var(--bg-2); border-radius: 6px; border: 1px solid var(--ink); }
+  .result-pane { padding: 0.5rem; background: var(--bg-2); border-radius: 6px; border: 1px solid var(--ink); }
   .result-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; min-height: 100px; color: var(--ink-2); font-size: 0.8rem; }
   .empty-icon { font-size: 1.8rem; opacity: 0.4; }
 
@@ -1881,8 +1880,8 @@
 
   .compare-results {
     display: grid;
-    grid-template-columns: 1fr 160px 1fr;
-    gap: 1rem; align-items: start;
+    grid-template-columns: 1fr 140px 1fr;
+    gap: 0.75rem; align-items: start;
   }
   @media (max-width: 800px) {
     .compare-results { grid-template-columns: 1fr; }
@@ -1925,7 +1924,7 @@
   .pipeline-section { display: flex; flex-direction: column; gap: 0.5rem; }
 
   /* Inline visualization sections (embedding / histogram / bit-diff). */
-  .viz-section { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.6rem; }
+  .viz-section { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.4rem; }
   .viz-label {
     font-family: var(--mono); font-size: 0.62rem;
     text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2);

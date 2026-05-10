@@ -145,107 +145,126 @@
     <p class="rec-error" role="alert">{lookupError}</p>
   {/if}
 
-  <!-- ── list ────────────────────────────────────────────────────────── -->
-  {#if filtered.length === 0}
-    {#if labelQuery.trim() || modalityFilter !== 'all'}
-      <EmptyState heading="No matches" description="Try clearing the modality filter or label search." />
-    {:else}
-      <EmptyState heading="No saved records yet"
-        description="Open the Playground, run a fingerprint, then click 'Save to records' — the bookmark will appear here.">
-        {#snippet cta()}
-          <a href="/dashboard/playground" class="btn primary-btn">Open Playground</a>
-        {/snippet}
-      </EmptyState>
-    {/if}
-  {:else}
-    <ul class="rec-list">
-      {#each filtered as e (e.recordId)}
-        {@const tiles = hexTiles(e.fingerprintHex, 32)}
-        {@const pending = pendingDeleteId === e.recordId}
-        <li class="rec-item" class:pending>
-          <div class="rec-item-head">
-            <span class="rec-mod {e.modality}">{e.modality}</span>
-            <span class="rec-alg">{e.algorithm}</span>
-            <span class="rec-time">{formatTime(e.createdAt)}</span>
-          </div>
-          <div class="rec-body">
-            <!-- Mini hex thumbnail — 4 rows × 8 cols, derived from fingerprintHex bytes. -->
-            <div class="rec-thumb" aria-hidden="true">
-              {#each tiles as t}
-                <span class="rec-tile" style="background:{t}"></span>
-              {/each}
-            </div>
-            <div class="rec-text">
-              <div class="rec-label">{e.label || '(no label)'}</div>
-              <div class="rec-meta">
-                <span class="rec-id mono" title={e.recordId}>id: {e.recordId.slice(-12)}</span>
-                <span class="rec-hex mono" title={e.fingerprintHex}>{e.fingerprintHex.slice(0, 24)}…</span>
-                {#if e.hasEmbedding}<span class="rec-pill">embedding</span>{/if}
+  <div class="rec-layout">
+    <!-- Left: list -->
+    <div class="rec-list-col">
+      {#if filtered.length === 0}
+        {#if labelQuery.trim() || modalityFilter !== 'all'}
+          <EmptyState heading="No matches" description="Try clearing the modality filter or label search." />
+        {:else}
+          <EmptyState heading="No saved records yet"
+            description="Open the Playground, run a fingerprint, then click 'Save to records' — the bookmark will appear here.">
+            {#snippet cta()}
+              <a href="/dashboard/playground" class="btn primary-btn">Open Playground</a>
+            {/snippet}
+          </EmptyState>
+        {/if}
+      {:else}
+        <ul class="rec-list">
+          {#each filtered as e (e.recordId)}
+            {@const tiles = hexTiles(e.fingerprintHex, 32)}
+            {@const pending = pendingDeleteId === e.recordId}
+            <li class="rec-item" class:pending>
+              <div class="rec-item-head">
+                <span class="rec-mod {e.modality}">{e.modality}</span>
+                <span class="rec-alg">{e.algorithm}</span>
+                <span class="rec-time">{formatTime(e.createdAt)}</span>
               </div>
-            </div>
-          </div>
-          <div class="rec-actions">
-            {#if pending}
-              <span class="confirm-msg">Delete this record?</span>
-              <button class="action-btn danger" onclick={() => confirmDelete(e)}>Yes, delete</button>
-              <button class="action-btn" onclick={() => { pendingDeleteId = null; }}>Cancel</button>
-            {:else}
-              <button class="action-btn" onclick={() => viewRecord(e.recordId)}>View</button>
-              <button class="action-btn" onclick={() => { pendingDeleteId = e.recordId; }}>Delete</button>
-              {#if e.hasEmbedding}
-                <button class="action-btn" onclick={() => findSimilarFromEntry(e)}>Find similar</button>
-              {/if}
-            {/if}
-          </div>
-        </li>
-      {/each}
-    </ul>
-  {/if}
-
-  <!-- ── viewer ──────────────────────────────────────────────────────── -->
-  {#if viewingBusy || viewing || viewingError}
-    <section class="viewer">
-      <h2 class="viewer-title">Record detail</h2>
-      {#if viewingBusy}
-        <p class="hint">Loading…</p>
-      {:else if viewingError}
-        <p class="rec-error" role="alert">{viewingError}</p>
-      {:else if viewing}
-        <dl class="viewer-grid">
-          <dt>Tenant</dt><dd class="mono">{viewing.tenant_id}</dd>
-          <dt>Record ID</dt><dd class="mono">{viewing.record_id}</dd>
-          <dt>Modality</dt><dd>{viewing.modality}</dd>
-          <dt>Algorithm</dt><dd>{viewing.algorithm}</dd>
-          <dt>Format version</dt><dd>{viewing.format_version}</dd>
-          <dt>Config hash</dt><dd class="mono">0x{Number(viewing.config_hash).toString(16)}</dd>
-          <dt>Fingerprint bytes</dt><dd>{viewing.fingerprint_bytes}</dd>
-          <dt>Embedding</dt>
-          <dd>{viewing.has_embedding ? `${viewing.embedding_dim}-d` : 'none'}</dd>
-          {#if viewing.model_id}
-            <dt>Model</dt><dd class="mono">{viewing.model_id}</dd>
-          {/if}
-          <dt>Metadata bytes</dt><dd>{viewing.metadata_bytes}</dd>
-        </dl>
+              <div class="rec-body">
+                <div class="rec-thumb" aria-hidden="true">
+                  {#each tiles as t}
+                    <span class="rec-tile" style="background:{t}"></span>
+                  {/each}
+                </div>
+                <div class="rec-text">
+                  <div class="rec-label">{e.label || '(no label)'}</div>
+                  <div class="rec-meta">
+                    <span class="rec-id mono" title={e.recordId}>id: {e.recordId.slice(-12)}</span>
+                    <span class="rec-hex mono" title={e.fingerprintHex}>{e.fingerprintHex.slice(0, 24)}…</span>
+                    {#if e.hasEmbedding}<span class="rec-pill">embedding</span>{/if}
+                  </div>
+                </div>
+              </div>
+              <div class="rec-actions">
+                {#if pending}
+                  <span class="confirm-msg">Delete this record?</span>
+                  <button class="action-btn danger" onclick={() => confirmDelete(e)}>Yes, delete</button>
+                  <button class="action-btn" onclick={() => { pendingDeleteId = null; }}>Cancel</button>
+                {:else}
+                  <button class="action-btn" onclick={() => viewRecord(e.recordId)}>View</button>
+                  <button class="action-btn" onclick={() => { pendingDeleteId = e.recordId; }}>Delete</button>
+                  {#if e.hasEmbedding}
+                    <button class="action-btn" onclick={() => findSimilarFromEntry(e)}>Find similar</button>
+                  {/if}
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
       {/if}
-    </section>
-  {/if}
+    </div>
+
+    <!-- Right: viewer -->
+    <div class="rec-detail-col">
+      {#if viewingBusy || viewing || viewingError}
+        <section class="viewer">
+          <h2 class="viewer-title">Record detail</h2>
+          {#if viewingBusy}
+            <p class="hint">Loading…</p>
+          {:else if viewingError}
+            <p class="rec-error" role="alert">{viewingError}</p>
+          {:else if viewing}
+            <dl class="viewer-grid">
+              <dt>Tenant</dt><dd class="mono">{viewing.tenant_id}</dd>
+              <dt>Record ID</dt><dd class="mono">{viewing.record_id}</dd>
+              <dt>Modality</dt><dd>{viewing.modality}</dd>
+              <dt>Algorithm</dt><dd>{viewing.algorithm}</dd>
+              <dt>Format version</dt><dd>{viewing.format_version}</dd>
+              <dt>Config hash</dt><dd class="mono">0x{Number(viewing.config_hash).toString(16)}</dd>
+              <dt>Fingerprint bytes</dt><dd>{viewing.fingerprint_bytes}</dd>
+              <dt>Embedding</dt>
+              <dd>{viewing.has_embedding ? `${viewing.embedding_dim}-d` : 'none'}</dd>
+              {#if viewing.model_id}
+                <dt>Model</dt><dd class="mono">{viewing.model_id}</dd>
+              {/if}
+              <dt>Metadata bytes</dt><dd>{viewing.metadata_bytes}</dd>
+            </dl>
+          {/if}
+        </section>
+      {:else}
+        <div class="viewer-empty">
+          <span class="empty-icon">⬡</span>
+          <p>Select a record to view its details.</p>
+        </div>
+      {/if}
+    </div>
+  </div>
 </div>
 
 <style>
-  .rec-wrap { display: flex; flex-direction: column; gap: 1.25rem; }
-  .rec-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.25rem; }
+  .rec-wrap { display: flex; flex-direction: column; gap: 0.75rem; }
+  .rec-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.15rem; }
   .rec-sub   { margin: 0; color: var(--ink-2); font-size: 0.85rem; }
 
+  .rec-layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 1.2fr) minmax(280px, 0.8fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .rec-layout { grid-template-columns: 1fr; }
+  }
+  .rec-list-col { min-width: 0; }
+  .rec-detail-col { position: sticky; top: 24px; min-width: 0; }
+
   .rec-controls {
-    display: flex; gap: 0.6rem; align-items: end; flex-wrap: wrap;
-    padding: 0.75rem; background: var(--bg-2);
+    display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;
+    padding: 0.6rem; background: var(--bg-2);
     border: 1px solid var(--ink); border-radius: 6px;
   }
-  /* `flex-basis` over `min-width` so each control still prefers ~140 px
-     but can shrink below that when the row wraps onto a phone-narrow
-     line — without this the row punches the dash column past 320 px. */
-  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 140px; min-width: 0; }
-  .ctrl.grow { flex: 2 1 200px; }
+  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 120px; min-width: 0; }
+  .ctrl.grow { flex: 2 1 180px; }
   .ctrl input, .ctrl select {
     font-family: var(--mono); font-size: 0.78rem;
     padding: 5px 8px; border: 1px solid var(--ink);
@@ -253,47 +272,47 @@
   }
   .btn {
     font-family: var(--mono); font-size: 0.78rem;
-    padding: 0.45rem 0.9rem; border: 1px solid var(--ink);
+    padding: 0.4rem 0.8rem; border: 1px solid var(--ink);
     background: var(--ink); color: var(--bg); border-radius: 3px;
-    cursor: pointer; align-self: end; height: 32px;
+    cursor: pointer; align-self: end; height: 30px;
   }
   .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
   .hint { font-size: 0.78rem; margin: 0; }
 
-  .rec-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .rec-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.35rem; }
   .rec-item {
-    padding: 0.65rem 0.85rem; background: var(--bg-2);
+    padding: 0.5rem 0.7rem; background: var(--bg-2);
     border: 1px solid var(--ink); border-radius: 4px;
-    display: flex; flex-direction: column; gap: 0.4rem;
+    display: flex; flex-direction: column; gap: 0.3rem;
   }
-  .rec-item-head { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 0.7rem; }
-  .rec-mod { padding: 2px 6px; border-radius: 3px; background: var(--ink); color: var(--bg); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.05em; }
+  .rec-item-head { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; font-family: var(--mono); font-size: 0.68rem; }
+  .rec-mod { padding: 2px 5px; border-radius: 3px; background: var(--ink); color: var(--bg); text-transform: uppercase; font-size: 0.6rem; letter-spacing: 0.05em; }
   .rec-mod.text  { background: oklch(0.55 0.15 240); }
   .rec-mod.image { background: oklch(0.55 0.15 290); }
   .rec-mod.audio { background: oklch(0.55 0.15 145); }
   .rec-alg { color: var(--ink-2); }
-  .rec-time { margin-left: auto; color: var(--ink-2); font-size: 0.65rem; }
-  .rec-label { font-size: 0.85rem; color: var(--ink); }
-  .rec-meta { display: flex; gap: 0.5rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.65rem; color: var(--ink-2); }
+  .rec-time { margin-left: auto; color: var(--ink-2); font-size: 0.62rem; }
+  .rec-label { font-size: 0.82rem; color: var(--ink); }
+  .rec-meta { display: flex; gap: 0.4rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.62rem; color: var(--ink-2); }
   .rec-pill { padding: 1px 5px; background: var(--bg); border: 1px solid var(--ink); border-radius: 3px; }
-  .rec-body { display: flex; gap: 0.7rem; align-items: center; }
+  .rec-body { display: flex; gap: 0.6rem; align-items: center; }
   .rec-thumb {
     flex-shrink: 0;
-    display: grid; grid-template-columns: repeat(8, 8px); grid-auto-rows: 8px; gap: 1px;
-    padding: 3px; background: var(--ink); border-radius: 3px;
+    display: grid; grid-template-columns: repeat(8, 7px); grid-auto-rows: 7px; gap: 1px;
+    padding: 2px; background: var(--ink); border-radius: 3px;
   }
-  .rec-tile { display: block; width: 8px; height: 8px; border-radius: 1px; }
-  .rec-text { display: flex; flex-direction: column; gap: 0.25rem; min-width: 0; flex: 1; }
+  .rec-tile { display: block; width: 7px; height: 7px; border-radius: 1px; }
+  .rec-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; flex: 1; }
 
-  .rec-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+  .rec-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; align-items: center; }
   .confirm-msg {
-    font-family: var(--mono); font-size: 0.72rem; color: var(--ink-2);
-    margin-right: 0.25rem;
+    font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2);
+    margin-right: 0.2rem;
   }
   .action-btn {
-    font-family: var(--mono); font-size: 0.7rem;
-    padding: 0.3rem 0.6rem; border: 1px solid var(--ink);
+    font-family: var(--mono); font-size: 0.68rem;
+    padding: 0.25rem 0.5rem; border: 1px solid var(--ink);
     background: transparent; color: var(--ink); border-radius: 3px; cursor: pointer;
     transition: background 0.12s, color 0.12s, border-color 0.12s;
   }
@@ -306,7 +325,7 @@
 
   .primary-btn {
     background: var(--ink); color: var(--bg); border: 1px solid var(--ink);
-    padding: 0.5rem 1rem; border-radius: 3px;
+    padding: 0.45rem 0.9rem; border-radius: 3px;
     font-family: var(--mono); font-size: 0.78rem;
     text-decoration: none; display: inline-block;
   }
@@ -314,10 +333,17 @@
 
   .rec-error { font-family: var(--mono); font-size: 0.75rem; color: #b03030; margin: 0; padding: 0.4rem 0.6rem; border: 1px solid currentColor; border-radius: 3px; background: color-mix(in srgb, #b03030 8%, transparent); }
 
-  .viewer { padding: 0.85rem 1rem; background: var(--bg-2); border: 1px solid var(--ink); border-radius: 6px; }
-  .viewer-title { font-family: var(--mono); font-size: 0.85rem; margin: 0 0 0.6rem; }
-  .viewer-grid { display: grid; grid-template-columns: 140px 1fr; gap: 0.35rem 0.75rem; margin: 0; font-family: var(--mono); font-size: 0.78rem; }
-  .viewer-grid dt { color: var(--ink-2); text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.05em; align-self: center; }
+  .viewer { padding: 0.7rem 0.85rem; background: var(--bg-2); border: 1px solid var(--ink); border-radius: 6px; }
+  .viewer-title { font-family: var(--mono); font-size: 0.82rem; margin: 0 0 0.5rem; }
+  .viewer-grid { display: grid; grid-template-columns: 120px 1fr; gap: 0.3rem 0.6rem; margin: 0; font-family: var(--mono); font-size: 0.75rem; }
+  .viewer-grid dt { color: var(--ink-2); text-transform: uppercase; font-size: 0.6rem; letter-spacing: 0.05em; align-self: center; }
   .viewer-grid dd { margin: 0; color: var(--ink); }
+  .viewer-empty {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 0.4rem; padding: 2rem 1rem; color: var(--ink-2);
+    border: 1px dashed var(--ink); border-radius: 6px; background: var(--bg-2);
+    font-size: 0.8rem;
+  }
+  .empty-icon { font-size: 1.6rem; opacity: 0.4; }
   .mono { font-family: var(--mono); word-break: break-all; }
 </style>

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "recon": {
+      "command": [
+        "/home/bravo1goingdark/.local/bin/recon",
+        "--repo",
+        "/home/bravo1goingdark/RustroverProjects/ucfp",
+        "serve"
+      ],
+      "type": "local"
+    }
+  }
+}

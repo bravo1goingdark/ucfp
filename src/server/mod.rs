@@ -289,6 +289,10 @@ where
     public.merge(protected)
 }
 
+/// Override for bytes consumed during a request. Handlers can put this into response extensions.
+#[derive(Clone, Copy, Debug)]
+pub struct BytesConsumed(pub u64);
+
 /// Tower middleware that performs auth + rate-limit pre-check and
 /// fires-and-forgets a usage event after the handler runs. Errors at
 /// either pre-check short-circuit with the matching status code; the
@@ -344,8 +348,35 @@ where
     // downstream extractors) can read it without re-resolving the token.
     req.extensions_mut().insert(ctx.clone());
 
+    let (op, modality) = {
+        let path = req
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map(|m| m.as_str())
+            .unwrap_or_else(|| req.uri().path());
+        let method = req.method();
+
+        if path == "/v1/records" && method == axum::http::Method::POST {
+            (UsageOp::Upsert, None)
+        } else if path.starts_with("/v1/records/") && method == axum::http::Method::GET {
+            (UsageOp::Describe, None)
+        } else if path.starts_with("/v1/records/") && method == axum::http::Method::DELETE {
+            (UsageOp::Delete, None)
+        } else if path == "/v1/query" && method == axum::http::Method::POST {
+            (UsageOp::Query, None)
+        } else if path.starts_with("/v1/ingest/text/") {
+            (UsageOp::Ingest, Some(crate::core::Modality::Text))
+        } else if path.starts_with("/v1/ingest/image/") {
+            (UsageOp::Ingest, Some(crate::core::Modality::Image))
+        } else if path.starts_with("/v1/ingest/audio/") {
+            (UsageOp::Ingest, Some(crate::core::Modality::Audio))
+        } else {
+            (UsageOp::Ingest, None)
+        }
+    };
+
     let started = Instant::now();
-    let bytes_in = req
+    let initial_bytes_in = req
         .headers()
         .get(axum::http::header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
@@ -356,11 +387,17 @@ where
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let status = resp.status().as_u16();
 
+    let bytes_in = resp
+        .extensions()
+        .get::<BytesConsumed>()
+        .map(|b| b.0)
+        .unwrap_or(initial_bytes_in);
+
     let event = UsageEvent {
         tenant_id: ctx.tenant_id,
         key_id: ctx.key_id.clone(),
-        op: UsageOp::Ingest, // routing-aware classification lands in R4
-        modality: None,
+        op,
+        modality,
         algorithm: None,
         bytes_in,
         units: 1,

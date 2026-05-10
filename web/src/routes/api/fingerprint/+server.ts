@@ -112,7 +112,7 @@ export const POST: RequestHandler = async (event) => {
   const env = platform?.env;
   if (!env || !env.UCFP_API_URL || !env.UCFP_API_TOKEN) {
     return json(
-      { proxied: false, reason: 'UCFP_API_URL or UCFP_API_TOKEN not configured.' },
+      { error: 'not_configured', message: 'UCFP_API_URL or UCFP_API_TOKEN not configured.' },
       { status: 503 }
     );
   }
@@ -129,7 +129,7 @@ export const POST: RequestHandler = async (event) => {
       const headers: Record<string, string> = {};
       if (auth.retryAfter) headers['retry-after'] = String(auth.retryAfter);
       return json(
-        { proxied: false, reason: auth.message, retryAfter: auth.retryAfter },
+        { error: auth.status === 429 ? 'rate_limited' : 'unauthorized', message: auth.message },
         { status: auth.status, headers }
       );
     }
@@ -150,14 +150,14 @@ export const POST: RequestHandler = async (event) => {
       const token = request.headers.get('x-turnstile-token');
       const result = await verifyTurnstile(env.TURNSTILE_SECRET, token, clientIp);
       if (!result.success) {
-        return json({ proxied: false, reason: 'turnstile-failed' }, { status: 403 });
+        return json({ error: 'forbidden', message: 'turnstile verification failed' }, { status: 403 });
       }
     }
     if (env.RATE_LIMIT) {
       const rl = await checkDemoLimit(env.RATE_LIMIT, clientIp);
       if (!rl.ok) {
         return json(
-          { proxied: false, reason: 'rate-limited', retryAfter: rl.retryAfter },
+          { error: 'rate_limited', message: 'demo rate limit exceeded' },
           { status: 429, headers: { 'retry-after': String(rl.retryAfter) } }
         );
       }
@@ -176,7 +176,7 @@ export const POST: RequestHandler = async (event) => {
   const recordId = ulidU64();
   const algorithmParam = sp.get('algorithm') ?? undefined;
   const modelId = sp.get('model_id') ?? undefined;
-  const apiKey  = sp.get('api_key')  ?? undefined;
+  const apiKey  = request.headers.get('x-provider-key') ?? sp.get('api_key') ?? undefined;
 
   // Forward every per-algorithm tunable upstream understands. Missing
   // params fall through to upstream defaults (see src/server/dto.rs).
@@ -238,7 +238,7 @@ export const POST: RequestHandler = async (event) => {
         contentType: preprocessKind === 'pdf' ? 'application/pdf' : parsed.contentType
       });
     } catch (e) {
-      error(502, `upstream unreachable: ${(e as Error).message}`);
+      return json({ error: 'upstream_unreachable', message: `upstream unreachable: ${(e as Error).message}` }, { status: 502 });
     }
     if (userId) {
       platform?.context?.waitUntil?.(
@@ -269,7 +269,7 @@ export const POST: RequestHandler = async (event) => {
         modelId
       });
     } catch (e) {
-      error(502, `upstream unreachable: ${(e as Error).message}`);
+      return json({ error: 'upstream_unreachable', message: `upstream unreachable: ${(e as Error).message}` }, { status: 502 });
     }
     if (userId) {
       platform?.context?.waitUntil?.(
@@ -322,7 +322,7 @@ export const POST: RequestHandler = async (event) => {
       params: algoParams
     });
   } catch (e) {
-    error(502, `upstream unreachable: ${(e as Error).message}`);
+    return json({ error: 'upstream_unreachable', message: `upstream unreachable: ${(e as Error).message}` }, { status: 502 });
   }
 
   // ── usage (background) ───────────────────────────────────────────────

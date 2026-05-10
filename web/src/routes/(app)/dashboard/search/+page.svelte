@@ -125,10 +125,10 @@
     }
     let url = `/api/fingerprint?algorithm=${encodeURIComponent(algorithm)}&return_embedding=1`;
     if (modelId.trim()) url += `&model_id=${encodeURIComponent(modelId.trim())}`;
-    if (apiKey.trim())  url += `&api_key=${encodeURIComponent(apiKey.trim())}`;
 
     let body: BodyInit;
     let headers: Record<string,string> = {};
+    if (apiKey.trim()) headers['x-provider-key'] = apiKey.trim();
     if (modality === 'text') {
       body = text;
       headers['content-type'] = 'text/plain; charset=utf-8';
@@ -212,196 +212,219 @@
     </p>
   </div>
 
-  {#if sourceLabel}
-    <p class="srch-handoff">
-      Vector handoff from playground: <strong>{sourceLabel}</strong>
-    </p>
-  {/if}
-
-  <!-- ── controls row ────────────────────────────────────────────────── -->
-  <div class="srch-row">
-    <label class="ctrl">
-      <span>Modality</span>
-      <select bind:value={modality} onchange={() => onModalityChange(modality)}>
-        <option value="text">Text</option>
-        <option value="image">Image</option>
-        <option value="audio">Audio</option>
-      </select>
-    </label>
-    <label class="ctrl">
-      <span>Algorithm</span>
-      <select bind:value={algorithm}>
-        {#each SEMANTIC_ALGS[modality] as a}
-          <option value={a}>{a}</option>
-        {/each}
-      </select>
-    </label>
-    <label class="ctrl">
-      <span>k (top-k)</span>
-      <input type="number" min="1" max="100" bind:value={k} />
-    </label>
-  </div>
-
-  <!-- ── source mode ─────────────────────────────────────────────────── -->
-  <div class="srch-mode" role="tablist">
-    <button role="tab" class="mode-tab" aria-selected={mode === 'compute'}
-      class:active={mode === 'compute'} onclick={() => { mode = 'compute'; }}>
-      Compute now
-    </button>
-    <button role="tab" class="mode-tab" aria-selected={mode === 'paste'}
-      class:active={mode === 'paste'} onclick={() => { mode = 'paste'; }}>
-      Paste vector
-    </button>
-  </div>
-
-  {#if mode === 'compute'}
-    <div class="srch-pane">
-      {#if modality === 'text'}
-        <textarea class="srch-textarea" bind:value={text} rows={4}
-          placeholder="Text to fingerprint and search…"></textarea>
-      {:else}
-        <input type="file" accept={modality === 'image' ? 'image/*' : 'audio/*'}
-          onchange={pickFile} class="srch-file" />
-        {#if file}<p class="srch-hint mono">{file.name} — {(file.size/1024).toFixed(1)} KB</p>{/if}
+  <div class="srch-layout">
+    <!-- Left: controls -->
+    <div class="srch-controls">
+      {#if sourceLabel}
+        <p class="srch-handoff">
+          Vector handoff from playground: <strong>{sourceLabel}</strong>
+        </p>
       {/if}
 
-      {#if NEEDS_MODEL.has(algorithm)}
+      <!-- ── controls row ────────────────────────────────────────────────── -->
+      <div class="srch-row">
         <label class="ctrl">
-          <span>Model path / ID</span>
-          <input type="text" bind:value={modelId}
-            placeholder={algorithm === 'neural' ? '/models/audio.onnx' :
-                        algorithm === 'semantic' ? '/models/clip.onnx' :
-                        'sentence-transformers/all-MiniLM-L6-v2'} />
+          <span>Modality</span>
+          <select bind:value={modality} onchange={() => onModalityChange(modality)}>
+            <option value="text">Text</option>
+            <option value="image">Image</option>
+            <option value="audio">Audio</option>
+          </select>
         </label>
-      {/if}
-      {#if NEEDS_API_KEY.has(algorithm)}
         <label class="ctrl">
-          <span>API key</span>
-          <input type="password" bind:value={apiKey} placeholder="sk-…" />
+          <span>Algorithm</span>
+          <select bind:value={algorithm}>
+            {#each SEMANTIC_ALGS[modality] as a}
+              <option value={a}>{a}</option>
+            {/each}
+          </select>
         </label>
-      {/if}
-    </div>
-  {:else}
-    <div class="srch-pane">
-      <label class="ctrl">
-        <span>Vector (JSON array or comma-separated floats)</span>
-        <textarea class="srch-textarea" bind:value={vectorText} rows={4}
-          placeholder="[0.12, -0.34, 0.56, …] or 0.12, -0.34, 0.56, …"></textarea>
-      </label>
-    </div>
-  {/if}
-
-  {#if error}
-    <p class="srch-error" role="alert">{error}</p>
-  {/if}
-
-  <button class="run-btn" onclick={runSearch} disabled={busy} aria-busy={busy}>
-    {busy ? 'Searching…' : 'Run search'}
-  </button>
-
-  <!-- ── hits ────────────────────────────────────────────────────────── -->
-  {#if lastVecLen !== null}
-    <p class="srch-hint mono">Query vector length: {lastVecLen}</p>
-  {/if}
-  {#if hits.length > 0}
-    {@const scores = hits.map((h) => h.score)}
-    {@const top    = scores[0]}
-    {@const tail   = scores[scores.length - 1]}
-    {@const span   = Math.max(1e-6, top - tail)}
-    {@const median = scores[Math.floor(scores.length / 2)]}
-
-    <!-- Score-distribution strip — one notch per hit, x = rank, height = score. -->
-    <div class="dist">
-      <div class="dist-meta mono">
-        <span><strong>top</strong> {top.toFixed(4)}</span>
-        <span><strong>median</strong> {median.toFixed(4)}</span>
-        <span><strong>tail</strong> {tail.toFixed(4)}</span>
-        <span><strong>spread</strong> {span.toFixed(4)}</span>
-        <span class="dist-count">{hits.length} {hits.length === 1 ? 'hit' : 'hits'}</span>
+        <label class="ctrl">
+          <span>k (top-k)</span>
+          <input type="number" min="1" max="100" bind:value={k} />
+        </label>
       </div>
-      <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="dist-svg" role="img"
-           aria-label="Score distribution across {hits.length} hits">
-        <line x1="0" y1="14" x2="100" y2="14" stroke="var(--ink)" stroke-width="0.15" opacity="0.3" />
-        {#each scores as s, i}
-          {@const x = (i / Math.max(1, hits.length - 1)) * 100}
-          {@const norm = (s - tail) / span}
-          {@const h = Math.max(1, norm * 24)}
-          <rect x={Math.min(99, x - 0.4)} y={26 - h} width="0.8" height={h}
-                fill="var(--accent-ink, oklch(0.55 0.18 240))" />
-        {/each}
-      </svg>
+
+      <!-- ── source mode ─────────────────────────────────────────────────── -->
+      <div class="srch-mode" role="tablist">
+        <button role="tab" class="mode-tab" aria-selected={mode === 'compute'}
+          class:active={mode === 'compute'} onclick={() => { mode = 'compute'; }}>
+          Compute now
+        </button>
+        <button role="tab" class="mode-tab" aria-selected={mode === 'paste'}
+          class:active={mode === 'paste'} onclick={() => { mode = 'paste'; }}>
+          Paste vector
+        </button>
+      </div>
+
+      {#if mode === 'compute'}
+        <div class="srch-pane">
+          {#if modality === 'text'}
+            <textarea class="srch-textarea" bind:value={text} rows={4}
+              placeholder="Text to fingerprint and search…"></textarea>
+          {:else}
+            <input type="file" accept={modality === 'image' ? 'image/*' : 'audio/*'}
+              onchange={pickFile} class="srch-file" />
+            {#if file}<p class="srch-hint mono">{file.name} — {(file.size/1024).toFixed(1)} KB</p>{/if}
+          {/if}
+
+          {#if NEEDS_MODEL.has(algorithm)}
+            <label class="ctrl">
+              <span>Model path / ID</span>
+              <input type="text" bind:value={modelId}
+                placeholder={algorithm === 'neural' ? '/models/audio.onnx' :
+                            algorithm === 'semantic' ? '/models/clip.onnx' :
+                            'sentence-transformers/all-MiniLM-L6-v2'} />
+            </label>
+          {/if}
+          {#if NEEDS_API_KEY.has(algorithm)}
+            <label class="ctrl">
+              <span>API key</span>
+              <input type="password" bind:value={apiKey} placeholder="sk-…" />
+            </label>
+          {/if}
+        </div>
+      {:else}
+        <div class="srch-pane">
+          <label class="ctrl">
+            <span>Vector (JSON array or comma-separated floats)</span>
+            <textarea class="srch-textarea" bind:value={vectorText} rows={4}
+              placeholder="[0.12, -0.34, 0.56, …] or 0.12, -0.34, 0.56, …"></textarea>
+          </label>
+        </div>
+      {/if}
+
+      {#if error}
+        <p class="srch-error" role="alert">{error}</p>
+      {/if}
+
+      <button class="run-btn" onclick={runSearch} disabled={busy} aria-busy={busy}>
+        {busy ? 'Searching…' : 'Run search'}
+      </button>
     </div>
 
-    <ol class="hits">
-      {#each hits as h, i}
-        {@const norm = (h.score - tail) / span}
-        {@const known = historyById.get(String(h.record_id))}
-        <li class="hit" class:known>
-          <span class="hit-rank mono">#{i+1}</span>
-          {#if known}
-            <div class="hit-thumb" aria-hidden="true">
-              {#each hexTiles(known.fingerprintHex, 16) as t}
-                <span class="hit-tile" style="background:{t}"></span>
-              {/each}
-            </div>
-          {:else}
-            <span class="hit-thumb-placeholder" aria-hidden="true">⬡</span>
-          {/if}
-          <div class="hit-meta">
-            {#if known}
-              <a class="hit-label" href={`/dashboard/records?lookup=${h.record_id}`}>{known.label || '(no label)'}</a>
-              <span class="hit-id-sub mono">
-                <span class="hit-mod {known.modality}">{known.modality}</span>
-                {known.algorithm} · id {String(h.record_id).slice(-10)}
-              </span>
-            {:else}
-              <a class="hit-label mono" href={`/dashboard/records?lookup=${h.record_id}`}>{h.record_id}</a>
-              <span class="hit-id-sub mono">unsaved · {h.source}</span>
-            {/if}
+    <!-- Right: results -->
+    <div class="srch-results">
+      {#if lastVecLen !== null}
+        <p class="srch-hint mono">Query vector length: {lastVecLen}</p>
+      {/if}
+      {#if hits.length > 0}
+        {@const scores = hits.map((h) => h.score)}
+        {@const top    = scores[0]}
+        {@const tail   = scores[scores.length - 1]}
+        {@const span   = Math.max(1e-6, top - tail)}
+        {@const median = scores[Math.floor(scores.length / 2)]}
+
+        <div class="dist">
+          <div class="dist-meta mono">
+            <span><strong>top</strong> {top.toFixed(4)}</span>
+            <span><strong>median</strong> {median.toFixed(4)}</span>
+            <span><strong>tail</strong> {tail.toFixed(4)}</span>
+            <span><strong>spread</strong> {span.toFixed(4)}</span>
+            <span class="dist-count">{hits.length} {hits.length === 1 ? 'hit' : 'hits'}</span>
           </div>
-          <span class="hit-source mono">{h.source}</span>
-          <span class="hit-score mono">{h.score.toFixed(4)}</span>
-          <div class="hit-bar"><div class="hit-bar-fill"
-            style="width:{Math.max(2, norm * 100)}%;
-                   background:oklch(0.55 0.18 {Math.round(120 + norm * 120)})"></div></div>
-          {#if h.source === 'fused' && (h.vector_score != null || h.bm25_score != null)}
-            <div class="hit-rrf">
-              <RrfBreakdown
-                vectorScore={h.vector_score ?? null}
-                bm25Score={h.bm25_score ?? null}
-                vectorRank={h.vector_rank ?? null}
-                bm25Rank={h.bm25_rank ?? null}
-                fusedScore={h.score}
-                pageMax={top}
-              />
-            </div>
-          {/if}
-          {#if h.term_hits && h.term_hits.length > 0}
-            <div class="hit-terms">
-              <TermHitChips hits={h.term_hits} max={8} />
-            </div>
-          {/if}
-        </li>
-      {/each}
-    </ol>
-  {:else if !busy && !error && lastVecLen !== null}
-    <div class="srch-empty">
-      <span class="empty-icon">⬡</span>
-      <p>No matches above similarity threshold.</p>
+          <svg viewBox="0 0 100 28" preserveAspectRatio="none" class="dist-svg" role="img"
+               aria-label="Score distribution across {hits.length} hits">
+            <line x1="0" y1="14" x2="100" y2="14" stroke="var(--ink)" stroke-width="0.15" opacity="0.3" />
+            {#each scores as s, i}
+              {@const x = (i / Math.max(1, hits.length - 1)) * 100}
+              {@const norm = (s - tail) / span}
+              {@const h = Math.max(1, norm * 24)}
+              <rect x={Math.min(99, x - 0.4)} y={26 - h} width="0.8" height={h}
+                    fill="var(--accent-ink, oklch(0.55 0.18 240))" />
+            {/each}
+          </svg>
+        </div>
+
+        <ol class="hits">
+          {#each hits as h, i}
+            {@const norm = (h.score - tail) / span}
+            {@const known = historyById.get(String(h.record_id))}
+            <li class="hit" class:known>
+              <span class="hit-rank mono">#{i+1}</span>
+              {#if known}
+                <div class="hit-thumb" aria-hidden="true">
+                  {#each hexTiles(known.fingerprintHex, 16) as t}
+                    <span class="hit-tile" style="background:{t}"></span>
+                  {/each}
+                </div>
+              {:else}
+                <span class="hit-thumb-placeholder" aria-hidden="true">⬡</span>
+              {/if}
+              <div class="hit-meta">
+                {#if known}
+                  <a class="hit-label" href={`/dashboard/records?lookup=${h.record_id}`}>{known.label || '(no label)'}</a>
+                  <span class="hit-id-sub mono">
+                    <span class="hit-mod {known.modality}">{known.modality}</span>
+                    {known.algorithm} · id {String(h.record_id).slice(-10)}
+                  </span>
+                {:else}
+                  <a class="hit-label mono" href={`/dashboard/records?lookup=${h.record_id}`}>{h.record_id}</a>
+                  <span class="hit-id-sub mono">unsaved · {h.source}</span>
+                {/if}
+              </div>
+              <span class="hit-source mono">{h.source}</span>
+              <span class="hit-score mono">{h.score.toFixed(4)}</span>
+              <div class="hit-bar"><div class="hit-bar-fill"
+                style="width:{Math.max(2, norm * 100)}%;
+                       background:oklch(0.55 0.18 {Math.round(120 + norm * 120)})"></div></div>
+              {#if h.source === 'fused' && (h.vector_score != null || h.bm25_score != null)}
+                <div class="hit-rrf">
+                  <RrfBreakdown
+                    vectorScore={h.vector_score ?? null}
+                    bm25Score={h.bm25_score ?? null}
+                    vectorRank={h.vector_rank ?? null}
+                    bm25Rank={h.bm25_rank ?? null}
+                    fusedScore={h.score}
+                    pageMax={top}
+                  />
+                </div>
+              {/if}
+              {#if h.term_hits && h.term_hits.length > 0}
+                <div class="hit-terms">
+                  <TermHitChips hits={h.term_hits} max={8} />
+                </div>
+              {/if}
+            </li>
+          {/each}
+        </ol>
+      {:else if !busy && !error && lastVecLen !== null}
+        <div class="srch-empty">
+          <span class="empty-icon">⬡</span>
+          <p>No matches above similarity threshold.</p>
+        </div>
+      {:else if !busy && !error && lastVecLen === null}
+        <div class="srch-empty">
+          <span class="empty-icon">↙</span>
+          <p>Configure your query and hit Run search.</p>
+        </div>
+      {/if}
     </div>
-  {/if}
+  </div>
 </div>
 
 <style>
-  .srch-wrap { display: flex; flex-direction: column; gap: 1rem; max-width: 900px; }
-  .srch-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.25rem; }
+  .srch-wrap { display: flex; flex-direction: column; gap: 0.75rem; }
+  .srch-title { font-size: 1.25rem; font-weight: 700; margin: 0 0 0.15rem; }
   .srch-sub   { margin: 0; color: var(--ink-2); font-size: 0.85rem; }
+
+  .srch-layout {
+    display: grid;
+    grid-template-columns: minmax(280px, 0.8fr) minmax(300px, 1.2fr);
+    gap: 1.25rem;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .srch-layout { grid-template-columns: 1fr; }
+  }
+
+  .srch-controls { display: flex; flex-direction: column; gap: 0.6rem; }
+  .srch-results { display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+
   .srch-handoff { margin: 0; padding: 0.4rem 0.6rem; background: color-mix(in oklch, var(--accent-ink) 12%, var(--bg)); border-left: 3px solid var(--accent-ink); font-family: var(--mono); font-size: 0.78rem; color: var(--ink); }
 
-  .srch-row { display: flex; gap: 0.6rem; flex-wrap: wrap; }
-  /* See records/+page.svelte for rationale — flex-basis instead of
-     min-width so the control shrinks below 160 px on phones. */
-  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 160px; min-width: 0; }
+  .srch-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .ctrl { display: flex; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-2); flex: 1 1 120px; min-width: 0; }
   .ctrl input, .ctrl select, .ctrl textarea {
     font-family: var(--mono); font-size: 0.78rem;
     padding: 5px 8px; border: 1px solid var(--ink);
@@ -411,25 +434,25 @@
   .srch-mode { display: flex; gap: 0.4rem; }
   .mode-tab {
     font-family: var(--mono); font-size: 0.75rem;
-    padding: 0.35rem 0.8rem; border: 1px solid var(--ink);
+    padding: 0.3rem 0.7rem; border: 1px solid var(--ink);
     background: transparent; color: var(--ink-2);
     border-radius: 3px; cursor: pointer;
   }
   .mode-tab.active { background: var(--ink); color: var(--bg); }
 
   .srch-pane {
-    display: flex; flex-direction: column; gap: 0.6rem;
-    padding: 0.85rem; background: var(--bg-2);
+    display: flex; flex-direction: column; gap: 0.5rem;
+    padding: 0.65rem; background: var(--bg-2);
     border: 1px solid var(--ink); border-radius: 6px;
   }
-  .srch-textarea { font-family: var(--mono); font-size: 0.78rem; resize: vertical; min-height: 90px; }
+  .srch-textarea { font-family: var(--mono); font-size: 0.78rem; resize: vertical; min-height: 80px; }
   .srch-file { font-family: var(--mono); font-size: 0.78rem; }
 
   .srch-error { font-family: var(--mono); font-size: 0.75rem; color: #b03030; margin: 0; padding: 0.4rem 0.6rem; border: 1px solid currentColor; border-radius: 3px; background: color-mix(in srgb, #b03030 8%, transparent); }
 
   .run-btn {
     font-family: var(--mono); font-size: 0.82rem;
-    padding: 0.55rem 1.2rem; border: 1px solid var(--ink);
+    padding: 0.5rem 1rem; border: 1px solid var(--ink);
     background: var(--ink); color: var(--bg); border-radius: 3px;
     cursor: pointer; align-self: flex-start;
   }
@@ -445,30 +468,28 @@
   }
   .empty-icon { font-size: 1.6rem; opacity: 0.4; }
 
-  /* Score-distribution strip across all hits — gives a "shape" of the
-     ranking before the user reads any individual row. */
   .dist {
     display: flex; flex-direction: column; gap: 0.3rem;
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.6rem;
     background: var(--bg-2); border: 1px solid var(--ink); border-radius: 6px;
   }
   .dist-meta {
-    display: flex; gap: 0.85rem; flex-wrap: wrap;
+    display: flex; gap: 0.7rem; flex-wrap: wrap;
     font-size: 0.65rem; color: var(--ink-2);
   }
   .dist-meta strong { font-weight: 400; text-transform: uppercase; letter-spacing: 0.06em; margin-right: 4px; }
   .dist-count { margin-left: auto; }
   .dist-svg {
-    width: 100%; height: 32px; display: block;
+    width: 100%; height: 28px; display: block;
     background: var(--bg); border: 1px solid var(--ink); border-radius: 3px;
   }
 
-  .hits { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+  .hits { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.25rem; }
   .hit {
     display: grid;
-    grid-template-columns: 32px 38px 1fr 70px 80px;
-    gap: 0.6rem; align-items: center;
-    padding: 0.45rem 0.75rem;
+    grid-template-columns: 28px 34px 1fr 60px 72px;
+    gap: 0.5rem; align-items: center;
+    padding: 0.4rem 0.6rem;
     background: var(--bg-2); border: 1px solid var(--ink); border-radius: 4px;
   }
   .hit.known { border-left-width: 3px; border-left-color: var(--accent-ink, oklch(0.55 0.18 240)); }
@@ -480,14 +501,14 @@
   .hit-tile { width: 4px; height: 4px; border-radius: 1px; display: block; }
   .hit-thumb-placeholder {
     display: flex; align-items: center; justify-content: center;
-    width: 38px; height: 38px;
+    width: 34px; height: 34px;
     background: var(--bg); border: 1px dashed var(--ink); border-radius: 3px;
-    color: var(--ink-2); font-size: 1.1rem; opacity: 0.4;
+    color: var(--ink-2); font-size: 1rem; opacity: 0.4;
   }
   .hit-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .hit-label { color: var(--ink); text-decoration: none; font-size: 0.85rem; word-break: break-all; }
+  .hit-label { color: var(--ink); text-decoration: none; font-size: 0.82rem; word-break: break-all; }
   .hit-label:hover { text-decoration: underline; }
-  .hit-id-sub { font-size: 0.62rem; color: var(--ink-2); display: flex; gap: 0.4rem; align-items: center; }
+  .hit-id-sub { font-size: 0.6rem; color: var(--ink-2); display: flex; gap: 0.4rem; align-items: center; }
   .hit-mod { padding: 1px 5px; border-radius: 2px; background: var(--ink); color: var(--bg); font-size: 0.55rem; text-transform: uppercase; letter-spacing: 0.05em; }
   .hit-mod.text  { background: oklch(0.55 0.15 240); }
   .hit-mod.image { background: oklch(0.55 0.15 290); }
@@ -499,12 +520,6 @@
     height: 3px; background: var(--bg); border-radius: 2px; overflow: hidden;
   }
   .hit-bar-fill { height: 100%; transition: width 0.25s ease; }
-  .hit-rrf {
-    grid-column: 1 / -1;
-    margin-top: 0.35rem;
-  }
-  .hit-terms {
-    grid-column: 1 / -1;
-    margin-top: 0.25rem;
-  }
+  .hit-rrf { grid-column: 1 / -1; margin-top: 0.25rem; }
+  .hit-terms { grid-column: 1 / -1; margin-top: 0.2rem; }
 </style>

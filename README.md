@@ -40,7 +40,7 @@ curl -X POST http://localhost:8080/v1/ingest/text/0/1 \
 curl -X POST http://localhost:8080/v1/query \
   -H "Authorization: Bearer dev-secret" \
   -H "Content-Type: application/json" \
-  -d '{"tenant_id":0,"modality":"text","k":5,"query":[...]}'
+  -d '{"tenant_id":0,"modality":"text","k":5,"vector":[...]}'
 ```
 
 ## Server configuration

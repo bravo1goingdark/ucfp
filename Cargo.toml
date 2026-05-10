@@ -96,6 +96,7 @@ full = [
 ]
 
 [dependencies]
+memmap2 = "0.9"
 # ── Core, always on ─────────────────────────────────────────────────────
 bytemuck    = { version = "1.25", features = ["derive"] }
 bytes       = "1.10"

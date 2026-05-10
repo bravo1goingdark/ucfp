@@ -1200,18 +1200,18 @@ section.final-cta {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  max-width: 1320px;
+  max-width: 1600px;
   margin: 0 auto;
-  padding: clamp(14px, 2vw, 20px) clamp(14px, 3vw, 32px) clamp(40px, 6vw, 60px);
+  padding: clamp(10px, 1.5vw, 16px) clamp(12px, 2vw, 24px) clamp(24px, 4vw, 40px);
 }
 .dash-top {
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  gap: 24px;
-  padding-bottom: 18px;
+  gap: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 .dash-top .brand {
   display: inline-flex;
@@ -1265,10 +1265,10 @@ section.final-cta {
 .dash-body {
   display: grid;
   grid-template-columns: 220px 1fr;
-  gap: 32px;
+  gap: 20px;
   align-items: start;
 }
-.dash-main { min-width: 0; display: flex; flex-direction: column; gap: 48px; }
+.dash-main { min-width: 0; display: flex; flex-direction: column; gap: 24px; }
 
 /* ---- sidebar ---- */
 .sidebar { position: sticky; top: 24px; }
@@ -1314,8 +1314,8 @@ section.final-cta {
 .breadcrumb .sep { color: var(--line-strong); }
 
 /* ---- section + cards ---- */
-.dash-section { display: flex; flex-direction: column; gap: 18px; }
-.dash-section-head { display: flex; flex-direction: column; gap: 4px; }
+.dash-section { display: flex; flex-direction: column; gap: 12px; }
+.dash-section-head { display: flex; flex-direction: column; gap: 3px; }
 .dash-section-head.split {
   flex-direction: row;
   justify-content: space-between;
@@ -1344,12 +1344,12 @@ section.final-cta {
 .dash-card {
   border-right: 1px solid var(--line-strong);
   border-bottom: 1px solid var(--line-strong);
-  padding: 18px 20px 20px;
+  padding: 14px 16px 16px;
   background: rgba(255, 255, 255, 0.25);
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 150px;
+  gap: 8px;
+  min-height: 120px;
 }
 [data-theme="ink"] .dash-card { background: rgba(236, 231, 220, 0.03); }
 .dash-card .card-label {
@@ -1401,13 +1401,13 @@ table.data thead th {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line-strong);
   white-space: nowrap;
 }
 table.data thead th.num { text-align: right; }
 table.data tbody td {
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--line);
   color: var(--ink-2);
   vertical-align: middle;
@@ -1485,7 +1485,7 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--line);
 }
 .modal-head h2 {
@@ -1505,8 +1505,8 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
   padding: 0 4px;
 }
 .modal-head .close:hover { color: var(--ink); }
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 16px; }
-.modal-body label { display: flex; flex-direction: column; gap: 6px; }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.modal-body label { display: flex; flex-direction: column; gap: 4px; }
 .modal-body label > span {
   font-family: var(--mono);
   font-size: 11px;
@@ -1650,7 +1650,7 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
 .donut-legend .val { font-variant-numeric: tabular-nums; color: var(--muted); }
 
 /* ---- usage page extras ---- */
-.usage-toolbar { display: flex; gap: 6px; flex-wrap: wrap; }
+.usage-toolbar { display: flex; gap: 5px; flex-wrap: wrap; }
 .usage-toolbar .toggle {
   font-family: var(--mono);
   font-size: 10px;
@@ -1659,7 +1659,7 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--line-strong);
-  padding: 5px 10px;
+  padding: 4px 8px;
   cursor: pointer;
 }
 .usage-toolbar .toggle.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
@@ -1667,21 +1667,21 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
 .chart-frame {
   border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.25);
-  padding: 14px 18px;
+  padding: 10px 14px;
 }
 [data-theme="ink"] .chart-frame { background: rgba(236, 231, 220, 0.03); }
 
 .usage-filters {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px;
   align-items: end;
-  padding: 14px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.2);
 }
 [data-theme="ink"] .usage-filters { background: rgba(236, 231, 220, 0.02); }
-.usage-filters label { display: flex; flex-direction: column; gap: 4px; }
+.usage-filters label { display: flex; flex-direction: column; gap: 3px; }
 .usage-filters label > span {
   font-family: var(--mono);
   font-size: 10px;
@@ -1692,17 +1692,17 @@ table.data tbody tr:hover td { background: rgba(20, 20, 20, 0.04); color: var(--
 .usage-filters select {
   background: var(--bg);
   border: 1px solid var(--line-strong);
-  padding: 6px 10px;
+  padding: 5px 8px;
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink);
-  min-width: 120px;
+  min-width: 100px;
 }
 
 .pager {
   display: flex;
   justify-content: space-between;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 /* ---- responsive dashboard ---- */

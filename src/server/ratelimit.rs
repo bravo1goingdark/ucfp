@@ -91,6 +91,7 @@ pub struct InMemoryTokenBucket {
     rps: f64,
     burst: f64,
     buckets: RwLock<HashMap<u32, std::sync::Mutex<Bucket>>>,
+    last_eviction: std::sync::Mutex<Instant>,
 }
 
 impl InMemoryTokenBucket {
@@ -106,6 +107,7 @@ impl InMemoryTokenBucket {
             rps: f64::from(rps),
             burst: f64::from(burst),
             buckets: RwLock::new(HashMap::new()),
+            last_eviction: std::sync::Mutex::new(Instant::now()),
         }
     }
 
@@ -142,6 +144,22 @@ impl TenantRateLimiter for InMemoryTokenBucket {
         // Slow path: insert a fresh bucket. Re-check under write lock to
         // avoid double-insert on races.
         let mut g = self.buckets.write().map_err(poisoned)?;
+
+        // Evict buckets untouched for > 1 hour, checking at most once every 5 minutes.
+        #[allow(clippy::collapsible_if)]
+        if let Ok(mut last) = self.last_eviction.try_lock() {
+            if now.saturating_duration_since(*last).as_secs() > 300 {
+                *last = now;
+                g.retain(|_, slot| {
+                    if let Ok(b) = slot.try_lock() {
+                        now.saturating_duration_since(b.last_refill).as_secs() < 3600
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+
         let slot = g.entry(ctx.tenant_id).or_insert_with(|| {
             std::sync::Mutex::new(Bucket {
                 tokens: self.burst,
